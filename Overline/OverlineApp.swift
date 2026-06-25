@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct OverlineApp: App {
+    @State private var library = ReadingLibrary.shared
+    @State private var intentRouter = AppIntentRouter.shared
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(library)
+                .environment(intentRouter)
         }
     }
 }
