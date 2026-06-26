@@ -26,6 +26,15 @@ enum StickyTone: String, Codable, CaseIterable {
         case .mint: Color(red: 0.08, green: 0.24, blue: 0.15)
         }
     }
+
+    var accessibilityName: String {
+        switch self {
+        case .yellow: "노랑"
+        case .rose: "핑크"
+        case .blue: "파랑"
+        case .mint: "녹색"
+        }
+    }
 }
 
 enum CoverTheme: String, Codable, CaseIterable {
@@ -122,6 +131,7 @@ enum HighlightSource: String, Codable {
 enum BookMetadataSource: String, Codable, CaseIterable {
     case manual
     case kakao
+    case aladin
     case google
 }
 
@@ -670,7 +680,7 @@ enum MVPReadinessItem: String, Codable, CaseIterable, Identifiable {
         case .speechMemo:
             "음성 메모"
         case .kakaoSearch:
-            "Kakao 도서 API"
+            "도서 API"
         case .llmInsight:
             "LLM 인사이트"
         }
@@ -1568,6 +1578,7 @@ final class ReadingLibrary {
         explicitPageReference: String = "",
         tagsText: String = "",
         bookID: ReadingBook.ID? = nil,
+        stickyTone: StickyTone? = nil,
         snapshotData: Data? = nil
     ) -> Highlight {
         let metadata = CapturedHighlightMetadata(
@@ -1584,7 +1595,7 @@ final class ReadingLibrary {
             pageReference: metadata.pageReference,
             language: language,
             tags: metadata.tags,
-            stickyTone: StickyTone.allCases[recentHighlights.count % StickyTone.allCases.count],
+            stickyTone: stickyTone ?? StickyTone.allCases[recentHighlights.count % StickyTone.allCases.count],
             source: .capture
         )
 
@@ -1602,7 +1613,8 @@ final class ReadingLibrary {
         _ thought: String,
         pageReference: String = "",
         tagsText: String = "",
-        bookID: ReadingBook.ID? = nil
+        bookID: ReadingBook.ID? = nil,
+        stickyTone: StickyTone = .mint
     ) -> Highlight {
         let detectedLanguage = CaptureLanguage.detect(from: thought)
         let metadata = CapturedHighlightMetadata(
@@ -1618,7 +1630,7 @@ final class ReadingLibrary {
             pageReference: metadata.pageReference,
             language: detectedLanguage,
             tags: CapturedHighlightMetadata.deduplicated(["#아이디어"] + metadata.tags),
-            stickyTone: .mint,
+            stickyTone: stickyTone,
             source: .shortcut
         )
         append(highlight, to: bookID ?? selectedBookID)
@@ -1980,7 +1992,11 @@ enum SampleData {
 
 extension Date {
     var overlineShortDate: String {
-        formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "M월d HH:mm"
+        return formatter.string(from: self)
     }
 }
 

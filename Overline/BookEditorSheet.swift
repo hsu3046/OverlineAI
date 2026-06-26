@@ -28,110 +28,66 @@ struct BookEditorSheet: View {
     @State private var coverURLString = ""
     @State private var metadataSource: BookMetadataSource = .manual
     @State private var searchQuery = ""
-    @State private var kakaoRESTAPIKey = BookMetadataAPIKeyStore.kakaoRESTAPIKey()
     @State private var searchResults: [BookMetadataCandidate] = []
     @State private var isSearching = false
-    @State private var isTestingKakaoKey = false
-    @State private var kakaoKeyTestResult: KakaoKeyTestResult?
     @State private var searchErrorMessage: String?
-    @State private var searchInfoMessage: String?
     @State private var isISBNScannerPresented = false
     @State private var showsDeleteConfirmation = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("도서 찾기") {
-                    Button {
-                        isISBNScannerPresented = true
-                    } label: {
-                        Label("ISBN 스캔", systemImage: "barcode.viewfinder")
-                    }
-                    .accessibilityLabel("ISBN 바코드 스캔")
+                if isAddingBook {
+                    Section("도서 찾기") {
+                        Button {
+                            isISBNScannerPresented = true
+                        } label: {
+                            Label("ISBN 스캔", systemImage: "barcode.viewfinder")
+                        }
+                        .accessibilityLabel("ISBN 바코드 스캔")
 
-                    HStack(spacing: 10) {
-                        TextField("제목, 저자, ISBN", text: $searchQuery)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .submitLabel(.search)
-                            .onSubmit {
+                        HStack(spacing: 10) {
+                            TextField("제목, 저자, ISBN", text: $searchQuery)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.search)
+                                .onSubmit {
+                                    Task {
+                                        await searchBooks()
+                                    }
+                                }
+
+                            Button {
                                 Task {
                                     await searchBooks()
                                 }
+                            } label: {
+                                if isSearching {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "magnifyingglass")
+                                        .font(.body.weight(.semibold))
+                                }
                             }
+                            .disabled(searchQuery.trimmed.isEmpty || isSearching)
+                            .accessibilityLabel("도서 검색")
+                        }
 
-                        Button {
-                            Task {
-                                await searchBooks()
+                        if let searchErrorMessage {
+                            Text(searchErrorMessage)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+
+                        ForEach(searchResults) { result in
+                            Button {
+                                apply(result)
+                            } label: {
+                                BookSearchResultRow(result: result)
                             }
-                        } label: {
-                            if isSearching {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.body.weight(.semibold))
-                            }
+                            .buttonStyle(.plain)
                         }
-                        .disabled(searchQuery.trimmed.isEmpty || isSearching)
-                        .accessibilityLabel("도서 검색")
-                    }
-
-                    SecureField("Kakao REST API 키", text: $kakaoRESTAPIKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .privacySensitive()
-
-                    Button {
-                        Task {
-                            await testKakaoKey()
-                        }
-                    } label: {
-                        HStack {
-                            Label("Kakao 연결 확인", systemImage: "network")
-                            Spacer()
-                            if isTestingKakaoKey {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(kakaoRESTAPIKey.trimmed.isEmpty || isTestingKakaoKey)
-
-                    if kakaoRESTAPIKey.trimmed.isEmpty {
-                        Text("Kakao 키가 없으면 Google Books만 fallback으로 검색합니다.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let kakaoKeyTestResult {
-                        Label(
-                            kakaoKeyTestResult.message,
-                            systemImage: kakaoKeyTestResult.isSuccess ? "checkmark.circle.fill" : "exclamationmark.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(kakaoKeyTestResult.isSuccess ? Color.overlineAccent : Color.overlineCoral)
-                    }
-
-                    if let searchErrorMessage {
-                        Text(searchErrorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    if let searchInfoMessage {
-                        Text(searchInfoMessage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ForEach(searchResults) { result in
-                        Button {
-                            apply(result)
-                        } label: {
-                            BookSearchResultRow(result: result)
-                        }
-                        .buttonStyle(.plain)
                     }
                 }
 
@@ -188,10 +144,6 @@ struct BookEditorSheet: View {
             .onAppear {
                 loadBook()
             }
-            .onChange(of: kakaoRESTAPIKey) { _, key in
-                BookMetadataAPIKeyStore.setKakaoRESTAPIKey(key)
-                kakaoKeyTestResult = nil
-            }
             .fullScreenCover(isPresented: $isISBNScannerPresented) {
                 ISBNScannerSheet { isbn, didScanBarcode in
                     applyScannedISBN(isbn, didScanBarcode: didScanBarcode)
@@ -207,6 +159,13 @@ struct BookEditorSheet: View {
         case .edit:
             "책 편집"
         }
+    }
+
+    private var isAddingBook: Bool {
+        if case .add = mode {
+            return true
+        }
+        return false
     }
 
     private func loadBook() {
@@ -257,16 +216,12 @@ struct BookEditorSheet: View {
 
         isSearching = true
         searchErrorMessage = nil
-        searchInfoMessage = nil
         defer {
             isSearching = false
         }
 
         do {
-            let result = try await BookMetadataSearchClient().search(
-                query: searchQuery,
-                kakaoRESTAPIKey: kakaoRESTAPIKey
-            )
+            let result = try await BookMetadataSearchClient().search(query: searchQuery)
             let results = result.candidates
 
             guard !Task.isCancelled else { return }
@@ -277,15 +232,15 @@ struct BookEditorSheet: View {
 
             if results.isEmpty {
                 searchErrorMessage = "검색 결과가 없습니다."
-                searchInfoMessage = result.infoMessage
             } else {
-                searchInfoMessage = result.infoMessage
+                if let sourceTitle = results.first?.sourceTitle {
+                    MVPReadinessStore.markVerified(.kakaoSearch, detail: "\(sourceTitle) 도서 검색 성공")
+                }
             }
         } catch is CancellationError {
             return
         } catch {
             searchResults = []
-            searchInfoMessage = nil
             searchErrorMessage = error.localizedDescription
         }
     }
@@ -298,30 +253,6 @@ struct BookEditorSheet: View {
         isbn = result.isbn
         coverURLString = result.coverURLString
         metadataSource = result.source
-    }
-
-    @MainActor
-    private func testKakaoKey() async {
-        guard !isTestingKakaoKey else { return }
-
-        isTestingKakaoKey = true
-        kakaoKeyTestResult = nil
-
-        do {
-            try await BookMetadataSearchClient().testKakaoRESTAPIKey(kakaoRESTAPIKey)
-            kakaoKeyTestResult = KakaoKeyTestResult(
-                isSuccess: true,
-                message: "Kakao 도서 API 연결 확인됨"
-            )
-            MVPReadinessStore.markVerified(.kakaoSearch, detail: "REST API 연결 테스트 성공")
-        } catch {
-            kakaoKeyTestResult = KakaoKeyTestResult(
-                isSuccess: false,
-                message: error.localizedDescription
-            )
-        }
-
-        isTestingKakaoKey = false
     }
 
     private func applyScannedISBN(_ scannedISBN: String, didScanBarcode: Bool) {
@@ -349,17 +280,12 @@ struct BookEditorSheet: View {
     }
 }
 
-private struct KakaoKeyTestResult {
-    let isSuccess: Bool
-    let message: String
-}
-
 private struct BookSearchResultRow: View {
     let result: BookMetadataCandidate
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: result.source == .kakao ? "k.circle" : "g.circle")
+            Image(systemName: sourceSystemImage)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.overlineAccent)
                 .frame(width: 28)
@@ -388,6 +314,19 @@ private struct BookSearchResultRow: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+
+    private var sourceSystemImage: String {
+        switch result.source {
+        case .manual:
+            "book.closed"
+        case .kakao:
+            "k.circle"
+        case .aladin:
+            "a.circle"
+        case .google:
+            "g.circle"
+        }
     }
 }
 

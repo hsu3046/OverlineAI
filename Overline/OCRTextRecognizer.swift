@@ -46,19 +46,13 @@ struct OCRTextRecognizer {
 
             try handler.perform([request])
 
+            // Preserve Vision's reading order. Geometry-only sorting can scramble rotated or skewed book pages.
             let recognizedLines = (request.results ?? [])
                 .compactMap { observation -> OCRLine? in
                     guard let text = observation.topCandidates(1).first?.string.trimmed, !text.isEmpty else {
                         return nil
                     }
                     return OCRLine(text: text, box: observation.boundingBox)
-                }
-                .sorted { lhs, rhs in
-                    let yDelta = abs(lhs.box.midY - rhs.box.midY)
-                    if yDelta > 0.025 {
-                        return lhs.box.midY > rhs.box.midY
-                    }
-                    return lhs.box.minX < rhs.box.minX
                 }
 
             let lines = recognizedLines.map(\.text)

@@ -17,6 +17,7 @@ struct OverlineApp: App {
             ContentView()
                 .environment(library)
                 .environment(intentRouter)
+                .preferredColorScheme(.light)
         }
     }
 }

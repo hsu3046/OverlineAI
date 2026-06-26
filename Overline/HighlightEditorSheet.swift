@@ -20,7 +20,7 @@ struct HighlightEditorSheet: View {
         NavigationStack {
             Form {
                 if snapshotURL != nil {
-                    Section("원문 스냅샷") {
+                    Section {
                         HighlightReviewSnapshotPreview(snapshotURL: snapshotURL)
                             .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                     }
@@ -28,31 +28,28 @@ struct HighlightEditorSheet: View {
 
                 Section {
                     TextField("글조각", text: $text, axis: .vertical)
-                        .lineLimit(4...8)
+                        .lineLimit(1...8)
                     TextField("메모", text: $memo, axis: .vertical)
-                        .lineLimit(3...6)
+                        .lineLimit(1...6)
                 }
 
                 if !library.books.isEmpty {
-                    Section("책") {
-                        Picker("책", selection: selectedBookBinding) {
+                    Section("책 이름") {
+                        Picker("책 이름", selection: selectedBookBinding) {
                             ForEach(library.books) { book in
                                 Text(book.title)
                                     .tag(book.id)
                             }
                         }
+                        .labelsHidden()
                         .pickerStyle(.inline)
                     }
                 }
 
                 Section {
-                    TextField("위치", text: $pageReference)
                     TextField("태그", text: $tagsText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Toggle(isOn: $isReviewed) {
-                        Label("검수 완료", systemImage: "checkmark.seal")
-                    }
                 }
 
                 Section {

@@ -610,7 +610,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "key",
             title: "API 키 보관",
-            body: "OpenRouter, Anthropic, OpenAI, Gemini, Kakao 키는 iOS Keychain에 이 기기 전용으로 저장됩니다."
+            body: "OpenRouter, Anthropic, OpenAI, Gemini 키는 iOS Keychain에 이 기기 전용으로 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
@@ -625,7 +625,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "book.closed",
             title: "표지 이미지",
-            body: "도서 표지는 Kakao 또는 Google Books API가 제공한 URL만 참조하며, 앱 안에 표지 이미지를 복사 저장하지 않습니다."
+            body: "도서 표지는 Kakao 또는 Aladin API가 제공한 URL만 참조하며, 앱 안에 표지 이미지를 복사 저장하지 않습니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "square.and.arrow.up",

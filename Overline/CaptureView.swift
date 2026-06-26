@@ -22,6 +22,9 @@ struct CaptureView: View {
     @State private var isRecognizingText = false
     @State private var presentedSheet: CaptureSheet?
     @State private var captureScreenOpenedAt = Date()
+    @State private var delayedCameraStartTask: Task<Void, Never>?
+    @State private var isHighlighterGestureActive = false
+    @State private var selectedTone: StickyTone = .yellow
 
     var body: some View {
         ScrollView {
@@ -37,9 +40,13 @@ struct CaptureView: View {
                     selectedPhotoItem: $selectedPhotoItem,
                     cameraScanner: cameraScanner,
                     isRecognizingText: isRecognizingText,
+                    selectedTone: selectedTone,
                     onCommit: commitSelection,
                     onMiss: showCaptureGuidance,
-                    openSettings: openAppSettings
+                    openSettings: openAppSettings,
+                    onHighlighterGestureActiveChanged: { isActive in
+                        isHighlighterGestureActive = isActive
+                    }
                 )
 
                 if let captureMessage {
@@ -49,7 +56,8 @@ struct CaptureView: View {
 
                 CaptureMetadataBar(
                     pageReference: $pageReferenceText,
-                    tagsText: $tagsText
+                    tagsText: $tagsText,
+                    selectedTone: $selectedTone
                 )
 
                 MemoComposerCard(
@@ -78,11 +86,17 @@ struct CaptureView: View {
         .onAppear {
             captureScreenOpenedAt = .now
             captureMetricsLogger.info("capture_screen_opened")
-            cameraScanner.start()
+            scheduleCameraStart()
         }
         .onDisappear {
-            cameraScanner.stop()
+            delayedCameraStartTask?.cancel()
+            delayedCameraStartTask = nil
+            isHighlighterGestureActive = false
             speechRecorder.cancel()
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                cameraScanner.stop(clearRecognitionResults: false)
+            }
         }
         .onChange(of: speechRecorder.transcript) { _, transcript in
             guard speechRecorder.isRecording else { return }
@@ -128,7 +142,32 @@ struct CaptureView: View {
         UIApplication.shared.open(settingsURL)
     }
 
+    private func scheduleCameraStart() {
+        delayedCameraStartTask?.cancel()
+        delayedCameraStartTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled else { return }
+
+            while isHighlighterGestureActive {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
+            cameraScanner.start()
+            delayedCameraStartTask = nil
+        }
+    }
+
     private func commitSelection() {
+        guard !isRecognizingText else { return }
+
+        Task { @MainActor in
+            await commitSelectionAsync()
+        }
+    }
+
+    @MainActor
+    private func commitSelectionAsync() async {
         let liveText = cameraScanner.text(for: selectedCameraLineIDs)
         let isLiveCapture = !liveText.isEmpty
         let selectedLineCount = isLiveCapture ? selectedCameraLineIDs.count : selectedLineIDs.count
@@ -151,6 +190,7 @@ struct CaptureView: View {
         let source = isLiveCapture ? "camera" : "mock"
         let hasMemo = !memo.trimmed.isEmpty
         let pathStepCount = capturePathStepCount(for: source)
+        let detectedLanguage = CaptureLanguage.detect(from: text)
         if isLiveCapture {
             MVPReadinessStore.markVerified(
                 .capturePath,
@@ -184,14 +224,35 @@ struct CaptureView: View {
             )
         }
 
+        let refinedText: String
+        if isLiveCapture {
+            refinedText = text
+        } else {
+            isRecognizingText = true
+            captureMessage = .processing
+            refinedText = await refinedOCRText(
+                for: OCRTextRefinementRequest(
+                    selectedText: text,
+                    pageText: text,
+                    selectedLines: [],
+                    pageLines: [],
+                    language: detectedLanguage,
+                    selectedLineCount: selectedLineCount,
+                    allowsBoundaryTrimming: false
+                )
+            )
+            isRecognizingText = false
+        }
+
         withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
             lastSaved = library.addCapturedHighlight(
-                text: text,
+                text: refinedText,
                 memo: memo,
-                language: CaptureLanguage.detect(from: text),
-                pageReference: liveText.isEmpty ? "p. 42" : (inferredPageReference ?? "Camera"),
+                language: CaptureLanguage.detect(from: refinedText),
+                pageReference: liveText.isEmpty ? "p. 42" : (inferredPageReference ?? ""),
                 explicitPageReference: pageReferenceText,
                 tagsText: tagsText,
+                stickyTone: selectedTone,
                 snapshotData: snapshotData
             )
             selectedLineIDs.removeAll()
@@ -224,7 +285,8 @@ struct CaptureView: View {
             lastSaved = library.addQuickThought(
                 memo,
                 pageReference: pageReferenceText,
-                tagsText: tagsText
+                tagsText: tagsText,
+                stickyTone: selectedTone
             )
             clearComposerInputs()
         }
@@ -252,15 +314,28 @@ struct CaptureView: View {
 
             let recognitionResult = try await OCRTextRecognizer().recognizeTextResult(in: image)
             let text = recognitionResult.text
+            let detectedLanguage = CaptureLanguage.detect(from: text)
+            let refinedText = await refinedOCRText(
+                for: OCRTextRefinementRequest(
+                    selectedText: text,
+                    pageText: text,
+                    selectedLines: [],
+                    pageLines: [],
+                    language: detectedLanguage,
+                    selectedLineCount: recognitionResult.lineCount,
+                    allowsBoundaryTrimming: false
+                )
+            )
             let hasMemo = !memo.trimmed.isEmpty
             let durationMilliseconds = captureElapsedMilliseconds()
             let highlight = library.addCapturedHighlight(
-                text: text,
+                text: refinedText,
                 memo: memo,
-                language: CaptureLanguage.detect(from: text),
+                language: CaptureLanguage.detect(from: refinedText),
                 pageReference: recognitionResult.inferredPageReference ?? "OCR",
                 explicitPageReference: pageReferenceText,
                 tagsText: tagsText,
+                stickyTone: selectedTone,
                 snapshotData: image.overlineSnapshotJPEGData()
             )
 
@@ -291,6 +366,13 @@ struct CaptureView: View {
                 captureMessage = .error(error.localizedDescription)
             }
         }
+    }
+
+    private func refinedOCRText(for request: OCRTextRefinementRequest) async -> String {
+        await Task.detached(priority: .utility) {
+            await OCRTextRefiner().refinedText(for: request)
+        }
+        .value
     }
 
     private func clearComposerInputs() {
@@ -411,25 +493,11 @@ private enum CaptureSheet: Identifiable {
 private struct CaptureBookSelector: View {
     let library: ReadingLibrary
     let openAddBook: () -> Void
+    @State private var isSelectionPresented = false
 
     var body: some View {
-        Menu {
-            ForEach(library.books) { book in
-                Button {
-                    library.selectBook(book.id)
-                } label: {
-                    Label(
-                        book.title,
-                        systemImage: library.selectedBookID == book.id ? "checkmark.circle.fill" : "book.closed"
-                    )
-                }
-            }
-
-            Divider()
-
-            Button(action: openAddBook) {
-                Label("책 추가", systemImage: "plus")
-            }
+        Button {
+            isSelectionPresented.toggle()
         } label: {
             HStack(spacing: 9) {
                 Image(systemName: "book.closed")
@@ -454,17 +522,154 @@ private struct CaptureBookSelector: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.58))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.white.opacity(0.38), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.54), lineWidth: 1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .captureBookSelectionSurface(cornerRadius: 30)
+            .contentShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("저장할 책 선택")
+        .popover(isPresented: $isSelectionPresented, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+            CaptureBookSelectionPanel(
+                library: library,
+                selectBook: { bookID in
+                    library.selectBook(bookID)
+                    isSelectionPresented = false
+                },
+                addBook: {
+                    isSelectionPresented = false
+                    openAddBook()
+                }
+            )
+            .frame(width: min(UIScreen.main.bounds.width - 32, 360))
+            .capturePopoverPresentation()
+        }
+    }
+}
+
+private struct CaptureBookSelectionPanel: View {
+    let library: ReadingLibrary
+    let selectBook: (ReadingBook.ID) -> Void
+    let addBook: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(library.books) { book in
+                        Button {
+                            selectBook(book.id)
+                        } label: {
+                            CaptureBookSelectionRow(
+                                title: book.title,
+                                subtitle: book.author,
+                                isSelected: library.selectedBookID == book.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxHeight: 300)
+
+            if !library.books.isEmpty {
+                Divider()
+                    .padding(.horizontal, 18)
+            }
+
+            Button(action: addBook) {
+                HStack(spacing: 14) {
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.medium))
+                        .frame(width: 28)
+                        .foregroundStyle(Color.overlineAccent)
+
+                    Text("책 추가")
+                        .font(.headline.weight(.medium))
+                        .foregroundStyle(Color.overlineInk)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 10)
+        .captureBookSelectionSurface(cornerRadius: 30)
+    }
+}
+
+private struct CaptureBookSelectionRow: View {
+    let title: String
+    let subtitle: String
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "book.closed")
+                .font(.title3.weight(.semibold))
+                .frame(width: 28)
+                .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.62))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.weight(.medium))
+                    .foregroundStyle(Color.overlineInk)
+                    .lineLimit(1)
+
+                Text(subtitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.68))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func captureBookSelectionSurface(cornerRadius: CGFloat) -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .background {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.09))
+                }
+                .glassEffect(
+                    .regular.tint(Color.white.opacity(0.14)),
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.54), lineWidth: 1)
+                }
+        } else {
+            self
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.54), lineWidth: 1)
+                }
+        }
+    }
+
+    @ViewBuilder
+    func capturePopoverPresentation() -> some View {
+        if #available(iOS 16.4, *) {
+            self
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground(.clear)
+        } else {
+            self
+        }
     }
 }
 
@@ -474,16 +679,24 @@ private struct CaptureStage: View {
     @Binding var selectedPhotoItem: PhotosPickerItem?
     let cameraScanner: CameraTextScanner
     let isRecognizingText: Bool
+    let selectedTone: StickyTone
     let onCommit: () -> Void
     let onMiss: () -> Void
     let openSettings: () -> Void
+    let onHighlighterGestureActiveChanged: (Bool) -> Void
     @State private var previousDragLocation: CGPoint?
     @State private var pendingCameraDragRects: [CGRect] = []
     @State private var activeHighlighterPoints: [CGPoint] = []
-    @State private var activeHighlighterPagePoints: [CGPoint] = []
     @State private var pendingCameraCommit = false
     @State private var pendingCameraCommitTask: Task<Void, Never>?
     @State private var pendingCameraMissTask: Task<Void, Never>?
+    @State private var delayedCameraRecognitionTask: Task<Void, Never>?
+    @State private var activeCameraStrokeID = 0
+    @State private var pendingCameraStrokeID: Int?
+    @State private var recognitionStartedStrokeID: Int?
+    @State private var pendingCameraSelectionMode: CameraGestureSelectionMode?
+    @State private var cameraRecognitionAttemptCount = 0
+    @State private var cameraFeedbackPhase: CameraCaptureFeedbackPhase = .idle
 
     var body: some View {
         GeometryReader { proxy in
@@ -495,16 +708,20 @@ private struct CaptureStage: View {
                     CameraPreview(session: cameraScanner.session)
                         .overlay(Color.black.opacity(0.12))
 
-                    CameraPageBoundaryOverlay(page: cameraScanner.detectedPage)
-
-                    ConfirmedCameraHighlightOverlay(
-                        lines: cameraScanner.selectedLineSnapshots(for: selectedCameraLineIDs)
-                    )
+                    if let frozenFrameImage = cameraScanner.frozenFrameImage {
+                        Image(uiImage: frozenFrameImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                            .overlay(Color.black.opacity(0.12))
+                            .transition(.opacity.animation(.easeOut(duration: 0.10)))
+                            .allowsHitTesting(false)
+                    }
 
                     LiveHighlighterStrokeOverlay(
                         points: activeHighlighterPoints,
-                        pagePoints: activeHighlighterPagePoints,
-                        page: cameraScanner.detectedPage
+                        tone: selectedTone
                     )
                 } else {
                     PaperPage()
@@ -517,7 +734,8 @@ private struct CaptureStage: View {
                             CapturedLine(
                                 text: line.text,
                                 weight: line.weight,
-                                isSelected: selectedLineIDs.contains(line.id)
+                                isSelected: selectedLineIDs.contains(line.id),
+                                tone: selectedTone
                             )
                         }
                     }
@@ -562,14 +780,10 @@ private struct CaptureStage: View {
                     .padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                if !cameraScanner.canUseLiveCamera || cameraScanner.detectedPage == nil {
-                    FocusBracket()
-                        .stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [8, 7]))
-                        .padding(.horizontal, CaptureStageMetrics.focusHorizontalPadding)
-                        .padding(.top, CaptureStageMetrics.focusTopPadding)
-                        .padding(.bottom, CaptureStageMetrics.focusBottomPadding)
-                        .allowsHitTesting(false)
-                }
+                CameraCaptureFeedbackPill(phase: cameraFeedbackPhase)
+                    .padding(.bottom, 22)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .allowsHitTesting(false)
             }
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay {
@@ -579,17 +793,25 @@ private struct CaptureStage: View {
             .shadow(color: .black.opacity(0.22), radius: 18, y: 10)
             .accessibilityLabel("Overline capture preview")
             .onChange(of: cameraScanner.recognitionUpdateCount) { _, _ in
+                guard recognitionStartedStrokeID == pendingCameraStrokeID else { return }
                 resolvePendingCameraSelection(in: proxy.size)
             }
             .onChange(of: cameraScanner.isAnalyzingText) { _, isAnalyzing in
                 if !isAnalyzing {
                     if pendingCameraCommitTask == nil {
-                        let shouldShowMiss = pendingCameraCommit && selectedCameraLineIDs.isEmpty && !activeHighlighterPoints.isEmpty
+                        let shouldShowMiss = pendingCameraCommit &&
+                            recognitionStartedStrokeID == pendingCameraStrokeID &&
+                            selectedCameraLineIDs.isEmpty &&
+                            !activeHighlighterPoints.isEmpty
                         cancelPendingCameraMiss()
                         pendingCameraDragRects.removeAll()
                         activeHighlighterPoints.removeAll()
-                        activeHighlighterPagePoints.removeAll()
+                        cameraScanner.clearFrozenFrame()
                         pendingCameraCommit = false
+                        pendingCameraStrokeID = nil
+                        recognitionStartedStrokeID = nil
+                        pendingCameraSelectionMode = nil
+                        setCameraFeedbackPhase(.idle)
                         if shouldShowMiss {
                             onMiss()
                         }
@@ -601,10 +823,15 @@ private struct CaptureStage: View {
         .onDisappear {
             cancelPendingCameraCommit()
             cancelPendingCameraMiss()
+            cancelDelayedCameraRecognition()
             pendingCameraDragRects.removeAll()
             activeHighlighterPoints.removeAll()
-            activeHighlighterPagePoints.removeAll()
+            cameraScanner.clearFrozenFrame()
             pendingCameraCommit = false
+            pendingCameraStrokeID = nil
+            recognitionStartedStrokeID = nil
+            pendingCameraSelectionMode = nil
+            setCameraFeedbackPhase(.idle)
         }
     }
 
@@ -629,13 +856,27 @@ private struct CaptureStage: View {
     private func finishLineSelection(in size: CGSize) {
         if cameraScanner.canUseLiveCamera {
             guard !activeHighlighterPoints.isEmpty else { return }
+            let strokeID = activeCameraStrokeID
+            let selectionMode = cameraGestureSelectionMode(in: size)
+            let rawPointCount = activeHighlighterPoints.count
+            let rawBounds = boundingRect(for: activeHighlighterPoints)
+            activeHighlighterPoints = correctedHighlighterPoints(
+                activeHighlighterPoints,
+                mode: selectionMode
+            )
+            let correctedBounds = boundingRect(for: activeHighlighterPoints)
+            let recognitionProfile = cameraRecognitionProfile()
+            captureMetricsLogger.info(
+                "camera_ar_gesture_finished stroke_id=\(strokeID, privacy: .public) mode=\(selectionMode.rawValue, privacy: .public) stage=\(debugSizeDescription(size), privacy: .public) raw_points=\(rawPointCount, privacy: .public) corrected_points=\(activeHighlighterPoints.count, privacy: .public) raw_bounds=\(debugRectDescription(rawBounds), privacy: .public) corrected_bounds=\(debugRectDescription(correctedBounds), privacy: .public)"
+            )
+            onHighlighterGestureActiveChanged(false)
             pendingCameraCommit = true
-            resolvePendingCameraSelection(in: size)
-            if !selectedCameraLineIDs.isEmpty {
-                commitPendingCameraSelection()
-            } else {
-                schedulePendingCameraMiss()
-            }
+            setCameraFeedbackPhase(.holding)
+            pendingCameraStrokeID = strokeID
+            pendingCameraSelectionMode = selectionMode
+            recognitionStartedStrokeID = nil
+            startDelayedCameraRecognition(for: strokeID, profile: recognitionProfile)
+            schedulePendingCameraMiss(in: size, strokeID: strokeID, profile: recognitionProfile)
             return
         }
 
@@ -664,22 +905,50 @@ private struct CaptureStage: View {
         guard !activeHighlighterPoints.isEmpty || !pendingCameraDragRects.isEmpty else { return }
         guard pendingCameraCommit else { return }
 
-        let matches = cameraScanner.lines.compactMap { line -> CameraStrokeLineMatch? in
-            guard isLineInDetectedPage(line) else { return nil }
-            guard let score = cameraStrokeScore(for: line, in: size) else { return nil }
-            return CameraStrokeLineMatch(id: line.id, score: score)
+        let selectionMode = pendingCameraSelectionMode ?? cameraGestureSelectionMode(in: size)
+        let pageLines = cameraScanner.lines
+        let selectedIDs: Set<CameraRecognizedTextLine.ID>
+        let candidateCount: Int
+        let debugCandidateSummary: String
+
+        switch selectionMode {
+        case .region:
+            let regionLines = pageLines.filter { line in
+                cameraRegionSelectionContains(line: line, in: size)
+            }
+            selectedIDs = Set(regionLines.map(\.id))
+            candidateCount = regionLines.count
+            debugCandidateSummary = debugLineGeometrySummary(regionLines, in: size)
+        case .line:
+            let matches = strokeLineMatches(from: pageLines, in: size)
+            let selectedMatches = selectedLineMatches(from: matches)
+            selectedIDs = Set(selectedMatches.map(\.id))
+            candidateCount = matches.count
+            debugCandidateSummary = debugScoreSummary(matches, lines: pageLines, in: size)
         }
 
-        let selectedMatches = selectedMatches(from: matches)
-        let selectedIDs = Set(selectedMatches.map(\.id))
+        let selectedLines = pageLines.filter { selectedIDs.contains($0.id) }
+        captureMetricsLogger.info(
+            "camera_ar_resolve stroke_id=\(pendingCameraStrokeID ?? -1, privacy: .public) mode=\(selectionMode.rawValue, privacy: .public) update_count=\(cameraScanner.recognitionUpdateCount, privacy: .public) ocr_line_count=\(pageLines.count, privacy: .public) candidate_count=\(candidateCount, privacy: .public) selected_count=\(selectedIDs.count, privacy: .public) gesture_bounds=\(debugRectDescription(boundingRect(for: activeHighlighterPoints)), privacy: .public) ocr=\(debugLineGeometrySummary(pageLines, in: size), privacy: .public) candidates=\(debugCandidateSummary, privacy: .public) selected=\(debugLineGeometrySummary(selectedLines, in: size), privacy: .public)"
+        )
+
         if !selectedIDs.isEmpty {
             cameraScanner.cacheSelectedLines(for: selectedIDs)
             selectedCameraLineIDs = selectedIDs
         }
 
         if pendingCameraCommit, !selectedCameraLineIDs.isEmpty {
-            captureMetricsLogger.info("camera_ar_match line_count=\(selectedCameraLineIDs.count, privacy: .public) candidate_count=\(matches.count, privacy: .public) update_count=\(cameraScanner.recognitionUpdateCount, privacy: .public) multiline=\(isMultiLineCameraGestureLikely(), privacy: .public)")
+            captureMetricsLogger.info(
+                "camera_ar_match line_count=\(selectedCameraLineIDs.count, privacy: .public) candidate_count=\(candidateCount, privacy: .public) update_count=\(cameraScanner.recognitionUpdateCount, privacy: .public) mode=\(selectionMode.rawValue, privacy: .public)"
+            )
             commitPendingCameraSelection()
+        }
+    }
+
+    private func strokeLineMatches(from lines: [CameraRecognizedTextLine], in size: CGSize) -> [CameraStrokeLineMatch] {
+        lines.compactMap { line -> CameraStrokeLineMatch? in
+            guard let score = cameraStrokeScore(for: line, in: size) else { return nil }
+            return CameraStrokeLineMatch(id: line.id, score: score)
         }
     }
 
@@ -687,19 +956,25 @@ private struct CaptureStage: View {
         guard pendingCameraCommitTask == nil else { return }
 
         cancelPendingCameraMiss()
+        cancelDelayedCameraRecognition()
         pendingCameraCommit = false
         pendingCameraDragRects.removeAll()
+        pendingCameraStrokeID = nil
+        recognitionStartedStrokeID = nil
+        pendingCameraSelectionMode = nil
+        setCameraFeedbackPhase(.saving)
         cameraScanner.stopSwipeRecognition(clearResults: false)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
 
         pendingCameraCommitTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 240_000_000)
+            try? await Task.sleep(nanoseconds: 180_000_000)
             guard !Task.isCancelled else { return }
 
             activeHighlighterPoints.removeAll()
-            activeHighlighterPagePoints.removeAll()
             pendingCameraCommitTask = nil
+            setCameraFeedbackPhase(.idle)
             onCommit()
+            cameraScanner.clearFrozenFrame()
         }
     }
 
@@ -708,37 +983,82 @@ private struct CaptureStage: View {
         pendingCameraCommitTask = nil
     }
 
-    private func schedulePendingCameraMiss() {
+    private func startDelayedCameraRecognition(for strokeID: Int, profile: CameraRecognitionProfile) {
+        cancelDelayedCameraRecognition()
+        delayedCameraRecognitionTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: profile.startDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            guard pendingCameraCommit, pendingCameraStrokeID == strokeID else { return }
+            recognitionStartedStrokeID = strokeID
+            cameraRecognitionAttemptCount += 1
+            cameraScanner.start()
+            setCameraFeedbackPhase(.reading)
+            captureMetricsLogger.info(
+                "camera_ar_recognition_started stroke_id=\(strokeID, privacy: .public) warmup=\(profile.isWarmup, privacy: .public) frozen=\((cameraScanner.frozenFrameImage != nil), privacy: .public) delay_ms=\(profile.startDelayMilliseconds, privacy: .public) duration_ms=\(profile.durationMilliseconds, privacy: .public) max_frames=\(profile.maxFrames, privacy: .public) min_frame_gap_ms=\(profile.minimumFrameIntervalMilliseconds, privacy: .public)"
+            )
+            if cameraScanner.frozenFrameImage != nil {
+                cameraScanner.beginFrozenFrameRecognition()
+            } else {
+                cameraScanner.beginSwipeRecognition(
+                    duration: profile.duration,
+                    maxFrames: profile.maxFrames,
+                    minimumFrameInterval: profile.minimumFrameInterval
+                )
+            }
+        }
+    }
+
+    private func cancelDelayedCameraRecognition() {
+        delayedCameraRecognitionTask?.cancel()
+        delayedCameraRecognitionTask = nil
+    }
+
+    private func schedulePendingCameraMiss(
+        in size: CGSize,
+        strokeID: Int,
+        profile: CameraRecognitionProfile
+    ) {
         guard pendingCameraMissTask == nil else { return }
 
-        let updateCountAtGestureEnd = cameraScanner.recognitionUpdateCount
         pendingCameraMissTask = Task { @MainActor in
-            let deadline = Date().addingTimeInterval(2.4)
+            let deadline = Date().addingTimeInterval(profile.timeout)
 
             while Date() < deadline {
                 try? await Task.sleep(nanoseconds: 150_000_000)
                 guard !Task.isCancelled else { return }
-                guard pendingCameraCommit, selectedCameraLineIDs.isEmpty else {
+                guard pendingCameraCommit, pendingCameraStrokeID == strokeID else {
                     pendingCameraMissTask = nil
                     return
                 }
 
-                if cameraScanner.recognitionUpdateCount > updateCountAtGestureEnd {
-                    break
+                if recognitionStartedStrokeID == strokeID, cameraScanner.recognitionUpdateCount > 0 {
+                    resolvePendingCameraSelection(in: size)
+                    guard pendingCameraCommit, selectedCameraLineIDs.isEmpty else {
+                        pendingCameraMissTask = nil
+                        return
+                    }
+                    try? await Task.sleep(nanoseconds: 80_000_000)
                 }
             }
 
             guard !Task.isCancelled else { return }
-            guard pendingCameraCommit, selectedCameraLineIDs.isEmpty else {
+            guard pendingCameraCommit, pendingCameraStrokeID == strokeID, selectedCameraLineIDs.isEmpty else {
                 pendingCameraMissTask = nil
                 return
             }
-            captureMetricsLogger.info("camera_ar_miss update_count=\(cameraScanner.recognitionUpdateCount, privacy: .public) line_count=\(cameraScanner.lines.count, privacy: .public)")
+
+            captureMetricsLogger.info(
+                "camera_ar_miss stroke_id=\(strokeID, privacy: .public) mode=\((pendingCameraSelectionMode ?? .line).rawValue, privacy: .public) warmup=\(profile.isWarmup, privacy: .public) update_count=\(cameraScanner.recognitionUpdateCount, privacy: .public) line_count=\(cameraScanner.lines.count, privacy: .public) gesture_bounds=\(debugRectDescription(boundingRect(for: activeHighlighterPoints)), privacy: .public) ocr=\(debugLineGeometrySummary(cameraScanner.lines, in: size), privacy: .public)"
+            )
             pendingCameraCommit = false
             pendingCameraDragRects.removeAll()
             activeHighlighterPoints.removeAll()
-            activeHighlighterPagePoints.removeAll()
+            cameraScanner.clearFrozenFrame()
             pendingCameraMissTask = nil
+            pendingCameraStrokeID = nil
+            recognitionStartedStrokeID = nil
+            pendingCameraSelectionMode = nil
+            setCameraFeedbackPhase(.idle)
             cameraScanner.stopSwipeRecognition()
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             onMiss()
@@ -753,16 +1073,33 @@ private struct CaptureStage: View {
     private func beginCameraStroke(at point: CGPoint, in size: CGSize) {
         cancelPendingCameraCommit()
         cancelPendingCameraMiss()
+        cancelDelayedCameraRecognition()
+        cameraScanner.stopSwipeRecognition()
+        cameraScanner.start()
+        cameraScanner.freezeNextFrame()
+        activeCameraStrokeID += 1
+        onHighlighterGestureActiveChanged(true)
         pendingCameraCommit = false
+        pendingCameraStrokeID = nil
+        recognitionStartedStrokeID = nil
+        pendingCameraSelectionMode = nil
+        setCameraFeedbackPhase(.drawing)
         pendingCameraDragRects.removeAll()
         selectedCameraLineIDs.removeAll()
         activeHighlighterPoints = [point]
-        if let pagePoint = pageProjection(in: size)?.normalizedPoint(for: point) {
-            activeHighlighterPagePoints = [pagePoint]
-        } else {
-            activeHighlighterPagePoints.removeAll()
+    }
+
+    private func setCameraFeedbackPhase(_ phase: CameraCaptureFeedbackPhase) {
+        guard cameraFeedbackPhase != phase else { return }
+
+        withAnimation(.smooth(duration: 0.22, extraBounce: 0.03)) {
+            cameraFeedbackPhase = phase
         }
-        cameraScanner.beginSwipeRecognition(duration: 4.5)
+    }
+
+    private func cameraRecognitionProfile() -> CameraRecognitionProfile {
+        let isWarmup = cameraRecognitionAttemptCount < 2
+        return isWarmup ? .warmup : .normal
     }
 
     private func appendHighlighterPoint(_ point: CGPoint, previousLocation: CGPoint?, in size: CGSize) {
@@ -775,39 +1112,13 @@ private struct CaptureStage: View {
         }
 
         activeHighlighterPoints.append(point)
-        appendPageAnchoredHighlighterPoint(point, in: size)
-        if activeHighlighterPoints.count > 80 {
-            activeHighlighterPoints.removeFirst(activeHighlighterPoints.count - 80)
+        if activeHighlighterPoints.count > 220 {
+            activeHighlighterPoints.removeFirst(activeHighlighterPoints.count - 220)
         }
-        if activeHighlighterPagePoints.count > 80 {
-            activeHighlighterPagePoints.removeFirst(activeHighlighterPagePoints.count - 80)
-        }
-    }
-
-    private func appendPageAnchoredHighlighterPoint(_ point: CGPoint, in size: CGSize) {
-        guard let pagePoint = pageProjection(in: size)?.normalizedPoint(for: point) else {
-            return
-        }
-
-        guard activeHighlighterPagePoints.last.map({ distance(from: $0, to: pagePoint) > 0.008 }) ?? true else {
-            return
-        }
-
-        activeHighlighterPagePoints.append(pagePoint)
     }
 
     private func distance(from firstPoint: CGPoint, to secondPoint: CGPoint) -> CGFloat {
         hypot(firstPoint.x - secondPoint.x, firstPoint.y - secondPoint.y)
-    }
-
-    private func isLineInDetectedPage(_ line: CameraRecognizedTextLine) -> Bool {
-        guard let page = cameraScanner.detectedPage else { return true }
-
-        let overlap = line.boundingBox.intersection(page.boundingBox)
-        guard !overlap.isNull else { return false }
-
-        let lineArea = max(line.boundingBox.width * line.boundingBox.height, 0.0001)
-        return (overlap.width * overlap.height) / lineArea >= 0.42
     }
 
     private func cameraStrokeScore(for line: CameraRecognizedTextLine, in size: CGSize) -> CGFloat? {
@@ -856,7 +1167,7 @@ private struct CaptureStage: View {
     private func directionalCameraStrokeScore(for line: CameraRecognizedTextLine, in size: CGSize, axis: CameraStrokeAxis) -> CGFloat? {
         let samplePoints = line.displaySamplePoints(in: size)
         let lineProjection = projectionRange(for: samplePoints, axis: axis)
-        let perpendicularAllowance = max(line.displayThickness(in: size) * 1.08, 14)
+        let perpendicularAllowance = max(line.displayThickness(in: size) * 1.42, 18)
         let minimumLineWidth = max(lineProjection.upperBound - lineProjection.lowerBound, 1)
         let overlap = max(
             min(axis.projectionRange.upperBound, lineProjection.upperBound) -
@@ -881,19 +1192,19 @@ private struct CaptureStage: View {
 
         let pointRatio = min(CGFloat(nearbyPoints.count) / max(CGFloat(activeHighlighterPoints.count), 1), 1)
         let closeness = 1 - min(nearestDistance / perpendicularAllowance, 1)
-        let pageDirectionScore = cameraScanner.detectedPage
-            .map { pageStrokeDirectionScore(for: $0, in: size, axis: axis) } ?? 0.72
+        let pageDirectionScore: CGFloat = 0.72
         let score = overlapRatio * 0.50 + closeness * 0.30 + pointRatio * 0.12 + pageDirectionScore * 0.08
 
         guard score >= 0.30 else { return nil }
         return score
     }
 
-    private func selectedMatches(from matches: [CameraStrokeLineMatch]) -> [CameraStrokeLineMatch] {
+    private func selectedMatches(from matches: [CameraStrokeLineMatch], allowsMultiple: Bool) -> [CameraStrokeLineMatch] {
         let sortedMatches = matches.sorted { $0.score > $1.score }
         guard let bestMatch = sortedMatches.first else { return [] }
+        guard bestMatch.score >= 0.40 else { return [] }
 
-        guard isMultiLineCameraGestureLikely() else {
+        guard allowsMultiple, isMultiLineCameraGestureLikely() else {
             return [bestMatch]
         }
 
@@ -901,6 +1212,213 @@ private struct CaptureStage: View {
         return sortedMatches
             .prefix(3)
             .filter { $0.score >= cutoff }
+    }
+
+    private func selectedLineMatches(from matches: [CameraStrokeLineMatch]) -> [CameraStrokeLineMatch] {
+        let sortedMatches = matches.sorted { $0.score > $1.score }
+        guard let bestMatch = sortedMatches.first, bestMatch.score >= 0.40 else { return [] }
+
+        let cutoff = max(0.38, bestMatch.score * 0.74)
+        return Array(sortedMatches.filter { $0.score >= cutoff }.prefix(8))
+    }
+
+    private func cameraGestureSelectionMode(in size: CGSize) -> CameraGestureSelectionMode {
+        let points = selectionGesturePoints(in: size)
+        guard points.count >= 8 else { return .line }
+
+        let bounds = boundingRect(for: points)
+        let minimumDimension = min(bounds.width, bounds.height)
+        let maximumDimension = max(bounds.width, bounds.height)
+        guard bounds.width >= 64, bounds.height >= 38, minimumDimension / max(maximumDimension, 1) >= 0.18 else {
+            return .line
+        }
+
+        let length = pathLength(for: points)
+        let closureDistance = points.first.flatMap { firstPoint in
+            points.last.map { distance(from: firstPoint, to: $0) }
+        } ?? .greatestFiniteMagnitude
+        let closedLoop = closureDistance <= max(minimumDimension * 0.78, 42)
+        let hasLoopLength = length >= maximumDimension * 2.05
+        let boxedArea = gestureTouchesRegionEdges(points, in: bounds) && length >= maximumDimension * 2.2
+
+        return (hasLoopLength && (closedLoop || boxedArea)) ? .region : .line
+    }
+
+    private func cameraRegionSelectionContains(line: CameraRecognizedTextLine, in size: CGSize) -> Bool {
+        let points = selectionGesturePoints(in: size)
+        guard points.count >= 3 else { return false }
+
+        let bounds = boundingRect(for: points).insetBy(dx: -10, dy: -10)
+        let lineRect = line.displayRect(in: size)
+        guard bounds.intersects(lineRect) else { return false }
+
+        let center = CGPoint(x: lineRect.midX, y: lineRect.midY)
+        let samplePoints = line.displaySamplePoints(in: size) + [center]
+        let insidePolygon = samplePoints.contains { point in
+            bounds.contains(point) && pointInPolygon(point, polygon: points)
+        }
+
+        if insidePolygon {
+            return true
+        }
+
+        return bounds.contains(center) && gestureTouchesRegionEdges(points, in: bounds.insetBy(dx: 10, dy: 10))
+    }
+
+    private func selectionGesturePoints(in size: CGSize) -> [CGPoint] {
+        activeHighlighterPoints
+    }
+
+    private func correctedHighlighterPoints(
+        _ points: [CGPoint],
+        mode: CameraGestureSelectionMode
+    ) -> [CGPoint] {
+        guard points.count >= 2 else { return points }
+
+        switch mode {
+        case .line:
+            return correctedLinePoints(from: points)
+        case .region:
+            return correctedRegionPoints(from: points)
+        }
+    }
+
+    private func correctedLinePoints(from points: [CGPoint]) -> [CGPoint] {
+        guard points.count > 2 else { return points }
+
+        let centroid = points.reduce(CGPoint.zero) { partial, point in
+            CGPoint(x: partial.x + point.x, y: partial.y + point.y)
+        }
+        .divided(by: CGFloat(points.count))
+
+        let covariance = points.reduce((xx: CGFloat.zero, yy: CGFloat.zero, xy: CGFloat.zero)) { partial, point in
+            let dx = point.x - centroid.x
+            let dy = point.y - centroid.y
+            return (
+                xx: partial.xx + dx * dx,
+                yy: partial.yy + dy * dy,
+                xy: partial.xy + dx * dy
+            )
+        }
+
+        let angle = 0.5 * atan2(2 * covariance.xy, covariance.xx - covariance.yy)
+        let direction = CGPoint(x: cos(angle), y: sin(angle))
+        let projections = points.map { point in
+            (point.x - centroid.x) * direction.x + (point.y - centroid.y) * direction.y
+        }
+        let minProjection = projections.min() ?? 0
+        let maxProjection = projections.max() ?? 0
+        let extensionLength: CGFloat = 8
+
+        let start = CGPoint(
+            x: centroid.x + direction.x * (minProjection - extensionLength),
+            y: centroid.y + direction.y * (minProjection - extensionLength)
+        )
+        let end = CGPoint(
+            x: centroid.x + direction.x * (maxProjection + extensionLength),
+            y: centroid.y + direction.y * (maxProjection + extensionLength)
+        )
+
+        return [start, end]
+    }
+
+    private func correctedRegionPoints(from points: [CGPoint]) -> [CGPoint] {
+        let bounds = boundingRect(for: points).insetBy(dx: -6, dy: -6)
+        guard bounds.width > 0, bounds.height > 0 else { return points }
+
+        if shouldCorrectRegionAsOval(points, bounds: bounds) {
+            return ellipsePoints(in: bounds)
+        }
+
+        return rectanglePoints(in: bounds)
+    }
+
+    private func shouldCorrectRegionAsOval(_ points: [CGPoint], bounds: CGRect) -> Bool {
+        guard points.count >= 12, bounds.width > 0, bounds.height > 0 else { return false }
+
+        let aspectRatio = max(bounds.width, bounds.height) / max(min(bounds.width, bounds.height), 1)
+        guard aspectRatio <= 1.85 else { return false }
+
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let halfWidth = max(bounds.width / 2, 1)
+        let halfHeight = max(bounds.height / 2, 1)
+        let cornerLikeCount = points.filter { point in
+            let normalizedX = abs((point.x - center.x) / halfWidth)
+            let normalizedY = abs((point.y - center.y) / halfHeight)
+            return normalizedX > 0.72 && normalizedY > 0.72
+        }
+        .count
+        let cornerRatio = CGFloat(cornerLikeCount) / CGFloat(points.count)
+
+        return cornerRatio < 0.18
+    }
+
+    private func rectanglePoints(in bounds: CGRect) -> [CGPoint] {
+        [
+            CGPoint(x: bounds.minX, y: bounds.minY),
+            CGPoint(x: bounds.maxX, y: bounds.minY),
+            CGPoint(x: bounds.maxX, y: bounds.maxY),
+            CGPoint(x: bounds.minX, y: bounds.maxY),
+            CGPoint(x: bounds.minX, y: bounds.minY)
+        ]
+    }
+
+    private func ellipsePoints(in bounds: CGRect) -> [CGPoint] {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let radiusX = bounds.width / 2
+        let radiusY = bounds.height / 2
+        let segmentCount = 40
+
+        return (0...segmentCount).map { index in
+            let angle = CGFloat(index) / CGFloat(segmentCount) * .pi * 2
+            return CGPoint(
+                x: center.x + cos(angle) * radiusX,
+                y: center.y + sin(angle) * radiusY
+            )
+        }
+    }
+
+    private func pathLength(for points: [CGPoint]) -> CGFloat {
+        zip(points, points.dropFirst()).reduce(CGFloat.zero) { partial, pair in
+            partial + distance(from: pair.0, to: pair.1)
+        }
+    }
+
+    private func gestureTouchesRegionEdges(_ points: [CGPoint], in bounds: CGRect) -> Bool {
+        let edgeBand = max(min(bounds.width, bounds.height) * 0.22, 14)
+        let touchesLeft = points.contains { abs($0.x - bounds.minX) <= edgeBand }
+        let touchesRight = points.contains { abs($0.x - bounds.maxX) <= edgeBand }
+        let touchesTop = points.contains { abs($0.y - bounds.minY) <= edgeBand }
+        let touchesBottom = points.contains { abs($0.y - bounds.maxY) <= edgeBand }
+
+        return touchesLeft && touchesRight && touchesTop && touchesBottom
+    }
+
+    private func pointInPolygon(_ point: CGPoint, polygon: [CGPoint]) -> Bool {
+        guard polygon.count >= 3 else { return false }
+
+        var isInside = false
+        var previousIndex = polygon.count - 1
+
+        for currentIndex in polygon.indices {
+            let currentPoint = polygon[currentIndex]
+            let previousPoint = polygon[previousIndex]
+            let crossesY = (currentPoint.y > point.y) != (previousPoint.y > point.y)
+
+            if crossesY {
+                let denominator = previousPoint.y - currentPoint.y
+                if abs(denominator) > 0.001 {
+                    let intersectX = (previousPoint.x - currentPoint.x) * (point.y - currentPoint.y) / denominator + currentPoint.x
+                    if point.x < intersectX {
+                        isInside.toggle()
+                    }
+                }
+            }
+
+            previousIndex = currentIndex
+        }
+
+        return isInside
     }
 
     private func isMultiLineCameraGestureLikely() -> Bool {
@@ -965,34 +1483,6 @@ private struct CaptureStage: View {
         return minProjection...maxProjection
     }
 
-    private func pageStrokeDirectionScore(for page: CameraDetectedPage, in size: CGSize, axis: CameraStrokeAxis) -> CGFloat {
-        let corners = page.displayCorners(in: size)
-        guard corners.count == 4 else { return 0.72 }
-
-        let topVector = CGVector(
-            dx: corners[1].x - corners[0].x,
-            dy: corners[1].y - corners[0].y
-        )
-        let bottomVector = CGVector(
-            dx: corners[2].x - corners[3].x,
-            dy: corners[2].y - corners[3].y
-        )
-        let pageVector = CGVector(
-            dx: topVector.dx + bottomVector.dx,
-            dy: topVector.dy + bottomVector.dy
-        )
-        let length = hypot(pageVector.dx, pageVector.dy)
-        guard length > 0.001 else { return 0.72 }
-
-        let normalizedPageVector = CGVector(dx: pageVector.dx / length, dy: pageVector.dy / length)
-        return abs(normalizedPageVector.dx * axis.direction.dx + normalizedPageVector.dy * axis.direction.dy)
-    }
-
-    private func pageProjection(in size: CGSize) -> CameraPageProjection? {
-        guard let page = cameraScanner.detectedPage else { return nil }
-        return CameraPageProjection(page: page, in: size)
-    }
-
     private func dragRect(from previousLocation: CGPoint?, to location: CGPoint) -> CGRect {
         guard let previousLocation else {
             return CGRect(origin: location, size: .zero).insetBy(dx: -6, dy: -6)
@@ -1010,6 +1500,72 @@ private struct CaptureStage: View {
             height: max(maxY - minY, 1)
         )
         .insetBy(dx: -8, dy: -10)
+    }
+
+    private func debugSizeDescription(_ size: CGSize) -> String {
+        String(format: "%.0fx%.0f", Double(size.width), Double(size.height))
+    }
+
+    private func debugRectDescription(_ rect: CGRect) -> String {
+        guard !rect.isNull, !rect.isInfinite else { return "-" }
+
+        return String(
+            format: "x%.1f,y%.1f,w%.1f,h%.1f",
+            Double(rect.minX),
+            Double(rect.minY),
+            Double(rect.width),
+            Double(rect.height)
+        )
+    }
+
+    private func debugLineGeometrySummary(
+        _ lines: [CameraRecognizedTextLine],
+        in size: CGSize,
+        limit: Int = 4
+    ) -> String {
+        guard !lines.isEmpty else { return "-" }
+
+        return lines
+            .prefix(limit)
+            .map { line in
+                let confidence = Int((line.confidence * 100).rounded())
+                return "#\(line.readingIndex)@\(debugRectDescription(line.displayRect(in: size))):c\(confidence)"
+            }
+            .joined(separator: ";")
+    }
+
+    private func debugScoreSummary(
+        _ matches: [CameraStrokeLineMatch],
+        lines: [CameraRecognizedTextLine],
+        in size: CGSize,
+        limit: Int = 5
+    ) -> String {
+        guard !matches.isEmpty else { return "-" }
+
+        let linesByID = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0) })
+        return matches
+            .sorted { $0.score > $1.score }
+            .prefix(limit)
+            .map { match in
+                guard let line = linesByID[match.id] else {
+                    return String(format: "?:s%.2f", Double(match.score))
+                }
+
+                return String(
+                    format: "#%d:s%.2f@%@",
+                    line.readingIndex,
+                    Double(match.score),
+                    debugRectDescription(line.displayRect(in: size))
+                )
+            }
+            .joined(separator: ";")
+    }
+}
+
+private extension CGPoint {
+    func divided(by value: CGFloat) -> CGPoint {
+        guard value != 0 else { return self }
+        return CGPoint(x: x / value, y: y / value)
     }
 }
 
@@ -1057,6 +1613,7 @@ private struct CapturedLine: View {
     let text: String
     let weight: Font.Weight
     let isSelected: Bool
+    let tone: StickyTone
 
     var body: some View {
         Text(text)
@@ -1069,7 +1626,7 @@ private struct CapturedLine: View {
             .background(alignment: .bottom) {
                 if isSelected {
                     Capsule()
-                        .fill(Color.overlineHighlight.opacity(0.66))
+                        .fill(tone.paper.opacity(0.42))
                         .frame(height: 12)
                         .offset(y: -3)
                         .transition(.scale.combined(with: .opacity))
@@ -1079,48 +1636,29 @@ private struct CapturedLine: View {
     }
 }
 
-private struct CameraPageBoundaryOverlay: View {
-    let page: CameraDetectedPage?
-
-    var body: some View {
-        GeometryReader { proxy in
-            if let page {
-                page.displayPath(in: proxy.size)
-                    .stroke(
-                        Color.white.opacity(0.66),
-                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round, dash: [12, 9])
-                    )
-                    .shadow(color: Color.black.opacity(0.22), radius: 2, y: 1)
-                    .padding(1)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.18), value: page)
-        .allowsHitTesting(false)
-    }
-}
-
 private struct ConfirmedCameraHighlightOverlay: View {
     let lines: [CameraRecognizedTextLine]
+    let tone: StickyTone
 
     var body: some View {
         GeometryReader { proxy in
             Canvas { context, size in
                 guard !lines.isEmpty else { return }
 
-                var highlightContext = context
-                highlightContext.blendMode = .plusLighter
+                var glowContext = context
+                glowContext.addFilter(.blur(radius: 3.2))
+
+                let highlightContext = context
 
                 for line in lines {
                     let path = confirmedHighlightPath(for: line, in: size)
+                    glowContext.fill(
+                        path,
+                        with: .color(tone.paper.opacity(0.08))
+                    )
                     highlightContext.fill(
                         path,
-                        with: .color(Color.overlineHighlight.opacity(0.34))
-                    )
-                    highlightContext.stroke(
-                        path,
-                        with: .color(.white.opacity(0.10)),
-                        lineWidth: 1.2
+                        with: .color(tone.paper.opacity(0.20))
                     )
                 }
             }
@@ -1132,93 +1670,106 @@ private struct ConfirmedCameraHighlightOverlay: View {
 
     private func confirmedHighlightPath(for line: CameraRecognizedTextLine, in size: CGSize) -> Path {
         if let corners = line.quadrilateral?.displayCorners(in: size), corners.count == 4 {
-            return inflatedQuadrilateralPath(corners, amount: max(line.displayThickness(in: size) * 0.22, 3))
+            return centeredHighlightBand(corners, thickness: line.displayThickness(in: size))
         }
 
-        let rect = line.displayRect(in: size).insetBy(dx: -6, dy: -max(line.displayRect(in: size).height * 0.16, 3))
-        return Path(roundedRect: rect, cornerRadius: max(rect.height * 0.48, 4))
+        let lineRect = line.displayRect(in: size)
+        let bandHeight = min(max(lineRect.height * 0.56, 9), 18)
+        let rect = CGRect(
+            x: lineRect.minX - 6,
+            y: lineRect.midY - bandHeight / 2,
+            width: lineRect.width + 12,
+            height: bandHeight
+        )
+        return Path(roundedRect: rect, cornerRadius: max(bandHeight * 0.48, 4))
     }
 
-    private func inflatedQuadrilateralPath(_ corners: [CGPoint], amount: CGFloat) -> Path {
-        let center = corners.reduce(CGPoint.zero) { partial, point in
-            CGPoint(x: partial.x + point.x / CGFloat(corners.count), y: partial.y + point.y / CGFloat(corners.count))
-        }
-        let inflatedCorners = corners.map { point in
-            let dx = point.x - center.x
-            let dy = point.y - center.y
-            let length = max(hypot(dx, dy), 0.001)
-            return CGPoint(
-                x: point.x + dx / length * amount,
-                y: point.y + dy / length * amount
-            )
-        }
+    private func centeredHighlightBand(_ corners: [CGPoint], thickness: CGFloat) -> Path {
+        let leftMidpoint = midpoint(corners[0], corners[3])
+        let rightMidpoint = midpoint(corners[1], corners[2])
+        let dx = rightMidpoint.x - leftMidpoint.x
+        let dy = rightMidpoint.y - leftMidpoint.y
+        let length = max(hypot(dx, dy), 0.001)
+        let direction = CGPoint(x: dx / length, y: dy / length)
+        let normal = CGPoint(x: -direction.y, y: direction.x)
+        let halfHeight = min(max(thickness * 0.34, 4.5), 9)
+        let extensionLength = min(max(thickness * 0.18, 3), 7)
+        let start = CGPoint(
+            x: leftMidpoint.x - direction.x * extensionLength,
+            y: leftMidpoint.y - direction.y * extensionLength
+        )
+        let end = CGPoint(
+            x: rightMidpoint.x + direction.x * extensionLength,
+            y: rightMidpoint.y + direction.y * extensionLength
+        )
+        let bandCorners = [
+            CGPoint(x: start.x + normal.x * halfHeight, y: start.y + normal.y * halfHeight),
+            CGPoint(x: end.x + normal.x * halfHeight, y: end.y + normal.y * halfHeight),
+            CGPoint(x: end.x - normal.x * halfHeight, y: end.y - normal.y * halfHeight),
+            CGPoint(x: start.x - normal.x * halfHeight, y: start.y - normal.y * halfHeight)
+        ]
 
         return Path { path in
-            guard let firstPoint = inflatedCorners.first else { return }
+            guard let firstPoint = bandCorners.first else { return }
             path.move(to: firstPoint)
-            inflatedCorners.dropFirst().forEach { path.addLine(to: $0) }
+            bandCorners.dropFirst().forEach { path.addLine(to: $0) }
             path.closeSubpath()
         }
+    }
+
+    private func midpoint(_ firstPoint: CGPoint, _ secondPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (firstPoint.x + secondPoint.x) / 2,
+            y: (firstPoint.y + secondPoint.y) / 2
+        )
     }
 }
 
 private struct LiveHighlighterStrokeOverlay: View {
     let points: [CGPoint]
-    let pagePoints: [CGPoint]
-    let page: CameraDetectedPage?
+    let tone: StickyTone
 
     var body: some View {
-        Canvas { context, size in
-            let renderPoints = resolvedRenderPoints(in: size)
-            guard renderPoints.count > 1 else { return }
+        GeometryReader { _ in
+            let renderPoints = points
 
-            if let page {
-                context.clip(to: page.displayPath(in: size))
+            if renderPoints.count > 1 {
+                let simplifiedPoints = simplifiedStrokePoints(renderPoints)
+                let width = highlighterWidth(for: renderPoints)
+                let path = smoothPath(simplifiedPoints)
+                let mainRibbonPath = ribbonPath(for: simplifiedPoints, width: width)
+                let glowRibbonPath = ribbonPath(for: simplifiedPoints, width: width * 1.12)
+
+                ZStack {
+                    glowRibbonPath
+                        .fill(tone.paper.opacity(0.08))
+
+                    mainRibbonPath
+                        .fill(tone.paper.opacity(0.24))
+
+                    path
+                        .stroke(
+                            tone.paper.opacity(0.06),
+                            style: StrokeStyle(lineWidth: max(width * 0.48, 6), lineCap: .butt, lineJoin: .round)
+                        )
+
+                    path
+                        .offsetBy(dx: 0, dy: -width * 0.12)
+                        .stroke(
+                            Color.white.opacity(0.025),
+                            style: StrokeStyle(lineWidth: max(width * 0.12, 1.6), lineCap: .round, lineJoin: .round)
+                        )
+                }
             }
-
-            let simplifiedPoints = simplifiedStrokePoints(renderPoints)
-            let width = highlighterWidth(for: renderPoints)
-            let path = smoothPath(simplifiedPoints)
-            let ribbonPath = ribbonPath(for: simplifiedPoints, width: width)
-            var baseContext = context
-            baseContext.blendMode = .plusLighter
-            baseContext.fill(
-                ribbonPath,
-                with: .color(Color.overlineHighlight.opacity(0.42))
-            )
-            baseContext.stroke(
-                path,
-                with: .color(Color.overlineHighlight.opacity(0.22)),
-                style: StrokeStyle(lineWidth: max(width * 0.62, 8), lineCap: .butt, lineJoin: .round)
-            )
-            baseContext.stroke(
-                path.offsetBy(dx: 0, dy: -width * 0.14),
-                with: .color(.white.opacity(0.12)),
-                style: StrokeStyle(lineWidth: max(width * 0.16, 2), lineCap: .round, lineJoin: .round)
-            )
         }
         .allowsHitTesting(false)
-        .animation(.linear(duration: 0.04), value: points.count + pagePoints.count)
-    }
-
-    private func resolvedRenderPoints(in size: CGSize) -> [CGPoint] {
-        guard
-            let page,
-            !pagePoints.isEmpty,
-            let projection = CameraPageProjection(page: page, in: size)
-        else {
-            return points
+        .transaction { transaction in
+            transaction.animation = nil
         }
-
-        return pagePoints.map { projection.displayPoint(for: $0) }
     }
 
     private func highlighterWidth(for points: [CGPoint]) -> CGFloat {
-        let length = zip(points, points.dropFirst())
-            .reduce(CGFloat.zero) { partial, pair in
-                partial + hypot(pair.0.x - pair.1.x, pair.0.y - pair.1.y)
-            }
-        return min(max(length * 0.025, 13), 22)
+        17
     }
 
     private func smoothPath(_ points: [CGPoint]) -> Path {
@@ -1305,6 +1856,171 @@ private struct CameraStrokeLineMatch {
     let score: CGFloat
 }
 
+private enum CameraCaptureFeedbackPhase: Equatable {
+    case idle
+    case drawing
+    case holding
+    case reading
+    case saving
+
+    var isVisible: Bool {
+        switch self {
+        case .holding, .reading, .saving:
+            return true
+        case .idle, .drawing:
+            return false
+        }
+    }
+
+    var text: String {
+        switch self {
+        case .idle, .drawing:
+            return ""
+        case .holding:
+            return "잠시 그대로 있어 주세요"
+        case .reading:
+            return "글조각 읽는 중"
+        case .saving:
+            return "저장하는 중"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .idle, .drawing:
+            return "sparkles"
+        case .holding:
+            return "hand.raised"
+        case .reading:
+            return "text.viewfinder"
+        case .saving:
+            return "checkmark.circle"
+        }
+    }
+
+    var showsProgress: Bool {
+        switch self {
+        case .reading, .saving:
+            return true
+        case .idle, .drawing, .holding:
+            return false
+        }
+    }
+}
+
+private struct CameraCaptureFeedbackPill: View {
+    let phase: CameraCaptureFeedbackPhase
+
+    var body: some View {
+        if phase.isVisible {
+            HStack(spacing: 8) {
+                if phase.showsProgress {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white.opacity(0.78))
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: phase.systemImage)
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 16, height: 16)
+                }
+
+                Text(phase.text)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Color.white.opacity(0.88))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .cameraCaptureFeedbackSurface()
+            .transition(
+                .move(edge: .bottom)
+                    .combined(with: .opacity)
+                    .combined(with: .scale(scale: 0.96))
+            )
+            .accessibilityLabel(phase.text)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func cameraCaptureFeedbackSurface() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(Color.black.opacity(0.16))
+                }
+                .glassEffect(
+                    .regular.tint(Color.white.opacity(0.10)),
+                    in: .rect(cornerRadius: 24)
+                )
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 10, y: 5)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.24), radius: 10, y: 5)
+        }
+    }
+}
+
+private enum CameraGestureSelectionMode: String {
+    case line
+    case region
+}
+
+private struct CameraRecognitionProfile {
+    let isWarmup: Bool
+    let startDelay: TimeInterval
+    let duration: TimeInterval
+    let timeout: TimeInterval
+    let maxFrames: Int
+    let minimumFrameInterval: TimeInterval
+
+    var startDelayNanoseconds: UInt64 {
+        UInt64(startDelay * 1_000_000_000)
+    }
+
+    var startDelayMilliseconds: Int {
+        Int((startDelay * 1000).rounded())
+    }
+
+    var durationMilliseconds: Int {
+        Int((duration * 1000).rounded())
+    }
+
+    var minimumFrameIntervalMilliseconds: Int {
+        Int((minimumFrameInterval * 1000).rounded())
+    }
+
+    static let warmup = CameraRecognitionProfile(
+        isWarmup: true,
+        startDelay: 0.34,
+        duration: 4.0,
+        timeout: 4.35,
+        maxFrames: 8,
+        minimumFrameInterval: 0.30
+    )
+
+    static let normal = CameraRecognitionProfile(
+        isWarmup: false,
+        startDelay: 0.16,
+        duration: 2.6,
+        timeout: 2.95,
+        maxFrames: 5,
+        minimumFrameInterval: 0.24
+    )
+}
+
 private struct CameraStrokeAxis {
     let origin: CGPoint
     let direction: CGVector
@@ -1318,65 +2034,6 @@ private struct CameraStrokeAxis {
         let dx = point.x - origin.x
         let dy = point.y - origin.y
         return dx * (-direction.dy) + dy * direction.dx
-    }
-}
-
-private struct CameraPageProjection {
-    private let topLeft: CGPoint
-    private let topRight: CGPoint
-    private let bottomRight: CGPoint
-    private let bottomLeft: CGPoint
-    private let xAxis: CGVector
-    private let yAxis: CGVector
-    private let determinant: CGFloat
-
-    init?(page: CameraDetectedPage, in size: CGSize) {
-        let corners = page.displayCorners(in: size)
-        guard corners.count == 4 else { return nil }
-
-        let xAxis = CGVector(
-            dx: ((corners[1].x - corners[0].x) + (corners[2].x - corners[3].x)) / 2,
-            dy: ((corners[1].y - corners[0].y) + (corners[2].y - corners[3].y)) / 2
-        )
-        let yAxis = CGVector(
-            dx: ((corners[3].x - corners[0].x) + (corners[2].x - corners[1].x)) / 2,
-            dy: ((corners[3].y - corners[0].y) + (corners[2].y - corners[1].y)) / 2
-        )
-        let determinant = xAxis.dx * yAxis.dy - xAxis.dy * yAxis.dx
-        guard abs(determinant) > 0.001 else { return nil }
-
-        self.topLeft = corners[0]
-        self.topRight = corners[1]
-        self.bottomRight = corners[2]
-        self.bottomLeft = corners[3]
-        self.xAxis = xAxis
-        self.yAxis = yAxis
-        self.determinant = determinant
-    }
-
-    func normalizedPoint(for point: CGPoint) -> CGPoint {
-        let dx = point.x - topLeft.x
-        let dy = point.y - topLeft.y
-        let u = (dx * yAxis.dy - dy * yAxis.dx) / determinant
-        let v = (xAxis.dx * dy - xAxis.dy * dx) / determinant
-
-        return CGPoint(
-            x: min(max(u, -0.08), 1.08),
-            y: min(max(v, -0.08), 1.08)
-        )
-    }
-
-    func displayPoint(for normalizedPoint: CGPoint) -> CGPoint {
-        let top = lerp(topLeft, topRight, normalizedPoint.x)
-        let bottom = lerp(bottomLeft, bottomRight, normalizedPoint.x)
-        return lerp(top, bottom, normalizedPoint.y)
-    }
-
-    private func lerp(_ firstPoint: CGPoint, _ secondPoint: CGPoint, _ progress: CGFloat) -> CGPoint {
-        CGPoint(
-            x: firstPoint.x + (secondPoint.x - firstPoint.x) * progress,
-            y: firstPoint.y + (secondPoint.y - firstPoint.y) * progress
-        )
     }
 }
 
@@ -1402,7 +2059,7 @@ private enum CaptureMessage: Equatable {
     var text: String {
         switch self {
         case .processing:
-            return "OCR 처리 중"
+            return "글조각 정리 중"
         case .saved(let lineCount, let confidence, let durationMilliseconds):
             var parts = ["글조각 저장됨"]
             if lineCount > 0 {
@@ -1510,29 +2167,27 @@ private struct CameraHUD: View {
     }
 
     private var torchSystemImage: String {
-        if isTorchOn {
-            return "light.max.fill"
-        }
-        return isLowLight ? "light.min" : "light.max"
+        isTorchOn ? "bolt.fill" : "bolt.slash.fill"
     }
 
     private var torchTint: Color {
         if isTorchOn {
-            return .white
+            return Color.overlineHighlight
         }
-        return isLowLight ? Color.overlineHighlight : .white
+        return .white.opacity(isLowLight ? 0.92 : 0.72)
     }
 
     private var torchAccessibilityValue: String {
         guard let frameBrightness else {
-            return canToggleTorch ? "밝기 측정 전" : "사용할 수 없음"
+            return canToggleTorch ? (isTorchOn ? "켜짐" : "꺼짐") : "사용할 수 없음"
         }
 
         let brightnessPercent = Int((frameBrightness * 100).rounded())
+        let torchState = isTorchOn ? "켜짐" : "꺼짐"
         if isLowLight {
-            return "어두움, 밝기 \(brightnessPercent)%"
+            return "\(torchState), 어두움, 밝기 \(brightnessPercent)%"
         }
-        return "밝기 \(brightnessPercent)%"
+        return "\(torchState), 밝기 \(brightnessPercent)%"
     }
 }
 
@@ -1550,31 +2205,6 @@ private struct HUDIconButton: View {
             .frame(width: 36, height: 36)
             .contentShape(Rectangle())
             .shadow(color: .black.opacity(isActive ? 0.30 : 0.18), radius: 2, y: 1)
-    }
-}
-
-private struct FocusBracket: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let length: CGFloat = 30
-
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY + length))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.minX + length, y: rect.minY))
-
-        path.move(to: CGPoint(x: rect.maxX - length, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + length))
-
-        path.move(to: CGPoint(x: rect.maxX, y: rect.maxY - length))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX - length, y: rect.maxY))
-
-        path.move(to: CGPoint(x: rect.minX + length, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - length))
-
-        return path
     }
 }
 
@@ -1635,6 +2265,8 @@ private struct MemoComposerCard: View {
                 .disabled(memo.trimmed.isEmpty)
                 .accessibilityLabel("Save memo")
             }
+            .padding(.top, MemoNoteMetrics.actionButtonTopInset)
+            .padding(.trailing, MemoNoteMetrics.actionButtonTrailingInset)
             .frame(maxWidth: .infinity, alignment: .topTrailing)
 
             if let voiceErrorMessage {
@@ -1709,16 +2341,17 @@ private struct MemoComposerCard: View {
 private struct CaptureMetadataBar: View {
     @Binding var pageReference: String
     @Binding var tagsText: String
+    @Binding var selectedTone: StickyTone
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             MetadataField(
                 systemImage: "text.book.closed",
                 placeholder: "p. 42",
                 text: $pageReference,
-                minWidth: 82
+                minWidth: 58
             )
-            .frame(width: 106)
+            .frame(width: 74)
 
             MetadataField(
                 systemImage: "tag",
@@ -1727,8 +2360,10 @@ private struct CaptureMetadataBar: View {
                 minWidth: 0
             )
             .frame(maxWidth: .infinity)
+
+            HighlightTonePicker(selectedTone: $selectedTone)
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 2)
     }
 }
 
@@ -1755,6 +2390,41 @@ private struct MetadataField: View {
         }
         .frame(minWidth: minWidth, minHeight: 28)
         .padding(.horizontal, 4)
+    }
+}
+
+private struct HighlightTonePicker: View {
+    @Binding var selectedTone: StickyTone
+
+    private let tones: [StickyTone] = [.yellow, .rose, .blue, .mint]
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(tones, id: \.self) { tone in
+                Button {
+                    withAnimation(.smooth(duration: 0.18, extraBounce: 0.04)) {
+                        selectedTone = tone
+                    }
+                } label: {
+                    Circle()
+                        .fill(tone.paper)
+                        .frame(width: selectedTone == tone ? 15 : 12, height: selectedTone == tone ? 15 : 12)
+                        .overlay {
+                            if selectedTone == tone {
+                                Circle()
+                                    .stroke(Color.overlineInk.opacity(0.42), lineWidth: 1.4)
+                                    .frame(width: 20, height: 20)
+                            }
+                        }
+                        .frame(width: 24, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(tone.accessibilityName) 형광펜")
+                .accessibilityAddTraits(selectedTone == tone ? [.isSelected] : [])
+            }
+        }
+        .fixedSize()
     }
 }
 
@@ -1790,6 +2460,8 @@ private enum MemoNoteMetrics {
     static let editorLeadingInset: CGFloat = 13
     static let ruleHorizontalInset: CGFloat = 23
     static let actionButtonSpace: CGFloat = 80
+    static let actionButtonTopInset: CGFloat = 10
+    static let actionButtonTrailingInset: CGFloat = 12
     static let minimumLineCount = 6
     static let maximumLineCount = 10
     static let charactersPerLine = 22.0

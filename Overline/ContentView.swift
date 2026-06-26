@@ -12,31 +12,23 @@ struct ContentView: View {
     @Environment(AppIntentRouter.self) private var intentRouter
     @State private var selectedTab: AppTab = .capture
     @State private var isBottomMenuCompact = false
+    @State private var isForwardTabTransition = true
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                CaptureView()
-            }
-            .tag(AppTab.capture)
-
-            NavigationStack {
-                LibraryView()
-            }
-            .tag(AppTab.library)
-
-            NavigationStack {
-                InsightsView()
-            }
-            .tag(AppTab.insights)
+        ZStack {
+            selectedTabContent
+                .id(selectedTab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(selectedTabTransition)
         }
-        .toolbar(.hidden, for: .tabBar)
+        .animation(OverlineMotion.tab, value: selectedTab)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack {
                 Spacer(minLength: 0)
                 OverlineBottomMenu(
-                    selectedTab: $selectedTab,
-                    isCompact: isBottomMenuCompact
+                    selectedTab: selectedTab,
+                    isCompact: isBottomMenuCompact,
+                    selectTab: selectTab
                 )
                 Spacer(minLength: 0)
             }
@@ -47,12 +39,12 @@ struct ContentView: View {
         .background(Color.overlineCanvas.ignoresSafeArea())
         .environment(\.setBottomMenuCompact, setBottomMenuCompact)
         .onAppear {
-            AppUsageMetricsStore.recordOpen()
+            recordAppOpen()
             apply(intentRouter.request)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            AppUsageMetricsStore.recordOpen()
+            recordAppOpen()
         }
         .onChange(of: selectedTab) { _, _ in
             setBottomMenuCompact(false)
@@ -62,38 +54,92 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var selectedTabContent: some View {
+        switch selectedTab {
+        case .capture:
+            NavigationStack {
+                CaptureView()
+            }
+        case .library:
+            NavigationStack {
+                LibraryView()
+            }
+        case .insights:
+            NavigationStack {
+                InsightsView()
+            }
+        }
+    }
+
     private func apply(_ request: AppIntentRequest?) {
         guard let request else { return }
-        selectedTab = request.tab
+        selectTab(request.tab)
     }
 
     private func setBottomMenuCompact(_ isCompact: Bool) {
         guard isBottomMenuCompact != isCompact else { return }
-        isBottomMenuCompact = isCompact
+        withAnimation(OverlineMotion.menu) {
+            isBottomMenuCompact = isCompact
+        }
+    }
+
+    private func selectTab(_ tab: AppTab) {
+        guard selectedTab != tab else { return }
+
+        isForwardTabTransition = tab.order > selectedTab.order
+        withAnimation(OverlineMotion.tab) {
+            selectedTab = tab
+            isBottomMenuCompact = false
+        }
+    }
+
+    private func recordAppOpen() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            AppUsageMetricsStore.recordOpen()
+        }
+    }
+
+    private var selectedTabTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: isForwardTabTransition ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: isForwardTabTransition ? .leading : .trailing).combined(with: .opacity)
+        )
     }
 }
 
+private enum OverlineMotion {
+    static let tab = Animation.smooth(duration: 0.28, extraBounce: 0.03)
+    static let menu = Animation.smooth(duration: 0.24, extraBounce: 0.02)
+}
+
 private struct OverlineBottomMenu: View {
-    @Binding var selectedTab: AppTab
+    let selectedTab: AppTab
     let isCompact: Bool
+    let selectTab: (AppTab) -> Void
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: isCompact ? 8 : 12) {
+        Group {
+            if #available(iOS 26.0, *) {
+                GlassEffectContainer(spacing: isCompact ? 8 : 12) {
+                    menuItems
+                        .menuShellPadding(isCompact: isCompact)
+                        .glassEffect(
+                            .regular.tint(Color.white.opacity(0.18)),
+                            in: Capsule(style: .continuous)
+                        )
+                        .menuShellOverlay()
+                }
+            } else {
                 menuItems
                     .menuShellPadding(isCompact: isCompact)
-                    .glassEffect(
-                        .regular.tint(Color.white.opacity(0.18)),
-                        in: Capsule(style: .continuous)
-                    )
+                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
                     .menuShellOverlay()
             }
-        } else {
-            menuItems
-                .menuShellPadding(isCompact: isCompact)
-                .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                .menuShellOverlay()
         }
+        .animation(OverlineMotion.menu, value: isCompact)
+        .animation(OverlineMotion.tab, value: selectedTab)
     }
 
     private var menuItems: some View {
@@ -101,8 +147,9 @@ private struct OverlineBottomMenu: View {
             ForEach(AppTab.allCases) { tab in
                 OverlineBottomMenuItem(
                     tab: tab,
-                    selectedTab: $selectedTab,
-                    isCompact: isCompact
+                    selectedTab: selectedTab,
+                    isCompact: isCompact,
+                    selectTab: selectTab
                 )
             }
         }
@@ -111,8 +158,9 @@ private struct OverlineBottomMenu: View {
 
 private struct OverlineBottomMenuItem: View {
     let tab: AppTab
-    @Binding var selectedTab: AppTab
+    let selectedTab: AppTab
     let isCompact: Bool
+    let selectTab: (AppTab) -> Void
 
     private var isSelected: Bool {
         selectedTab == tab
@@ -121,7 +169,7 @@ private struct OverlineBottomMenuItem: View {
     var body: some View {
         Button {
             guard selectedTab != tab else { return }
-            selectedTab = tab
+            selectTab(tab)
         } label: {
             tabLabel
                 .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineInk)
@@ -135,27 +183,29 @@ private struct OverlineBottomMenuItem: View {
                 }
         }
         .buttonStyle(.plain)
+        .animation(OverlineMotion.menu, value: isCompact)
+        .animation(OverlineMotion.tab, value: isSelected)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
-    @ViewBuilder
     private var tabLabel: some View {
-        if isCompact {
+        VStack(spacing: isCompact ? 0 : 5) {
             Image(systemName: tab.systemImage)
-                .font(.system(size: 21, weight: .semibold))
-                .frame(height: 24)
-        } else {
-            VStack(spacing: 5) {
-                Image(systemName: tab.systemImage)
-                    .font(.system(size: 24, weight: .semibold))
-                    .frame(height: 26)
-                Text(tab.title)
-                    .font(.caption.weight(.bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
+                .font(.system(size: isCompact ? 21 : 24, weight: .semibold))
+                .frame(height: isCompact ? 24 : 26)
+
+            Text(tab.title)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .opacity(isCompact ? 0 : 1)
+                .scaleEffect(isCompact ? 0.92 : 1)
+                .frame(height: isCompact ? 0 : 16)
+                .clipped()
         }
+        .frame(height: isCompact ? 24 : 47)
+        .clipped()
     }
 }
 
@@ -240,6 +290,10 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .library: "books.vertical"
         case .insights: "sparkles"
         }
+    }
+
+    var order: Int {
+        Self.allCases.firstIndex(of: self) ?? 0
     }
 
     @ViewBuilder
