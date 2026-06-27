@@ -21,6 +21,8 @@ Overline의 인사이트 기능은 API 키 방식 외에 사용자가 본인의 
 - `Overline/LLMSettings.swift`
 - `Overline/LLMInsightClient.swift`
 - `Overline/InsightsView.swift`
+- `Overline/CaptureView.swift`
+- `Overline/Models.swift`
 
 저장 구조:
 
@@ -36,6 +38,24 @@ Overline의 인사이트 기능은 API 키 방식 외에 사용자가 본인의 
 | Claude | 지원 | 지원 | Claude Code OAuth 경로 |
 | OpenRouter | 지원 | 미지원 | OpenRouter는 구독 모델이 아님 |
 | Gemini | 지원 | 미지원 | 아직 구독 OAuth 미구현 |
+
+## 자동 태그와 LLM
+
+인사이트 생성 외에, Overline은 캡처 저장 직후 자동 태그 보강에도 LLM 설정을 사용할 수 있다.
+
+자동 태그 보강은 사용자가 설정한 provider가 있을 때만 실행한다. 우선순위는 Anthropic, OpenAI, Gemini 순서다.
+
+| Provider | 자동 태그 모델 |
+| --- | --- |
+| Anthropic | `claude-haiku-4-5-20251001` |
+| OpenAI | `gpt-5.4-mini` |
+| Gemini | `gemini-3.1-flash-lite` |
+
+OpenRouter는 자동 태그 보강용 경량 모델 경로에서 제외한다.
+
+자동 태그 요청에는 책 제목, 저자, 책 소개, 선택된 글조각 텍스트, 메모, 기존 태그만 보낸다. 페이지 번호와 생성 날짜는 태그 생성 근거로 보내지 않는다.
+
+자세한 동작 방식은 [AUTOMATIC_TAGGING.md](AUTOMATIC_TAGGING.md)를 따른다.
 
 ## OpenAI / Codex
 
@@ -289,7 +309,7 @@ OpenAI는 OIDC metadata가 공개되어 있어 iOS OAuth 구현 경로가 비교
 Overline은 AI 구독을 제공하지 않습니다.
 사용자는 본인의 OpenAI 또는 Claude 계정을 직접 연결합니다.
 연결 토큰은 이 iPhone의 Keychain에만 저장됩니다.
-선택한 글조각과 메모는 사용자가 인사이트 생성을 누를 때만 선택한 AI 제공자로 전송됩니다.
+인사이트 생성 또는 자동 태그 보강이 실행될 때 선택한 글조각과 책 정보가 선택한 AI 제공자로 전송될 수 있습니다.
 ```
 
 ## 다시 하지 말 것
@@ -299,4 +319,3 @@ Overline은 AI 구독을 제공하지 않습니다.
 - token을 `Secrets.xcconfig`, `Info.plist`, Swift 상수에 넣지 않는다.
 - 구독 token을 일반 OpenAI Platform API key처럼 취급하지 않는다.
 - OpenRouter를 `구독` 인증 옵션에 넣지 않는다.
-

@@ -1522,6 +1522,73 @@ final class ReadingLibrary {
         }?.id
     }
 
+    func suggestedTagsForSelectedBook() -> [String] {
+        suggestedTags(for: selectedBookID)
+    }
+
+    func suggestedTags(for bookID: ReadingBook.ID?, recurringLimit: Int = 4) -> [String] {
+        guard
+            let bookID,
+            let book = books.first(where: { $0.id == bookID })
+        else {
+            return []
+        }
+
+        let baseTags = CapturedHighlightMetadata.deduplicated(book.tags)
+        let baseTagSet = Set(baseTags)
+        var usage: [String: (count: Int, latest: Date)] = [:]
+
+        for highlight in book.highlights {
+            for tag in CapturedHighlightMetadata.deduplicated(highlight.tags) {
+                let normalizedTag = CapturedHighlightMetadata.normalizedTags(from: tag).first ?? tag.trimmed
+                guard !normalizedTag.isEmpty, !baseTagSet.contains(normalizedTag) else { continue }
+
+                let current = usage[normalizedTag] ?? (count: 0, latest: .distantPast)
+                let latest = current.latest > highlight.createdAt ? current.latest : highlight.createdAt
+                usage[normalizedTag] = (count: current.count + 1, latest: latest)
+            }
+        }
+
+        let recurringTags = usage
+            .filter { $0.value.count >= 2 }
+            .sorted { lhs, rhs in
+                if lhs.value.count != rhs.value.count {
+                    return lhs.value.count > rhs.value.count
+                }
+                return lhs.value.latest > rhs.value.latest
+            }
+            .prefix(recurringLimit)
+            .map(\.key)
+
+        return CapturedHighlightMetadata.deduplicated(baseTags + recurringTags)
+    }
+
+    func appendTags(_ tags: [String], to highlightID: Highlight.ID, limit: Int = 6) {
+        guard
+            let bookIndex = books.firstIndex(where: { book in
+                book.highlights.contains { $0.id == highlightID }
+            }),
+            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
+        else {
+            return
+        }
+
+        let existingTags = CapturedHighlightMetadata.deduplicated(books[bookIndex].highlights[highlightIndex].tags)
+        guard existingTags.count < limit else { return }
+
+        let normalizedTags = CapturedHighlightMetadata.deduplicated(
+            CapturedHighlightMetadata.normalizedTags(from: tags.joined(separator: " "))
+        )
+        let additions = Array(normalizedTags
+            .filter { !existingTags.contains($0) }
+            .prefix(max(limit - existingTags.count, 0)))
+
+        guard !additions.isEmpty else { return }
+
+        books[bookIndex].highlights[highlightIndex].tags = existingTags + additions
+        persist()
+    }
+
     func selectBook(_ bookID: ReadingBook.ID) {
         guard books.contains(where: { $0.id == bookID }) else { return }
         selectedBookID = bookID
@@ -1817,14 +1884,7 @@ final class ReadingLibrary {
     }
 
     private func defaultTags(for bookID: ReadingBook.ID?) -> [String] {
-        guard
-            let bookID,
-            let book = books.first(where: { $0.id == bookID })
-        else {
-            return []
-        }
-
-        return book.tags
+        suggestedTags(for: bookID)
     }
 
     private func persist() {

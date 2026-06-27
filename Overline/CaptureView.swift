@@ -14,6 +14,7 @@ struct CaptureView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var cameraScanner = CameraTextScanner()
     @State private var speechRecorder = SpeechMemoRecorder()
+    @State private var llmSettings = LLMSettingsStore()
     @State private var memo = ""
     @State private var pageReferenceText = ""
     @State private var tagsText = ""
@@ -310,6 +311,7 @@ struct CaptureView: View {
             isRecognizingText = false
         }
 
+        var savedHighlightID: Highlight.ID?
         withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
             let highlight = library.addCapturedHighlight(
                 text: refinedText,
@@ -322,6 +324,7 @@ struct CaptureView: View {
             )
             lastSaved = highlight
             amendTargetHighlightID = highlight.id
+            savedHighlightID = highlight.id
             prefillPageReferenceIfNeeded(from: highlight.pageReference)
             selectedLineIDs.removeAll()
             selectedCameraLineIDs.removeAll()
@@ -330,6 +333,9 @@ struct CaptureView: View {
                 confidence: averageConfidence,
                 durationMilliseconds: durationMilliseconds
             )
+        }
+        if let savedHighlightID {
+            scheduleAutomaticTagGeneration(for: savedHighlightID)
         }
         memoFocusRequest += 1
         cameraScanner.stopSwipeRecognition()
@@ -372,19 +378,25 @@ struct CaptureView: View {
     private func saveQuickThought() {
         guard !memo.trimmed.isEmpty else { return }
 
+        var savedHighlightID: Highlight.ID?
         withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
-            lastSaved = library.addQuickThought(
+            let highlight = library.addQuickThought(
                 memo,
                 pageReference: pageReferenceText,
                 tagsText: tagsText,
                 stickyTone: selectedTone
             )
+            lastSaved = highlight
+            savedHighlightID = highlight.id
             clearComposerInputs()
             captureMessage = .saved(
                 lineCount: 1,
                 confidence: nil,
                 durationMilliseconds: nil
             )
+        }
+        if let savedHighlightID {
+            scheduleAutomaticTagGeneration(for: savedHighlightID)
         }
     }
 
@@ -501,6 +513,7 @@ struct CaptureView: View {
             )
             let durationMilliseconds = captureElapsedMilliseconds()
 
+            var savedHighlightID: Highlight.ID?
             withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
                 let highlight = library.addCapturedHighlight(
                     text: refinedText,
@@ -513,6 +526,7 @@ struct CaptureView: View {
                 )
                 lastSaved = highlight
                 amendTargetHighlightID = highlight.id
+                savedHighlightID = highlight.id
                 prefillPageReferenceIfNeeded(from: highlight.pageReference)
                 selectedLineIDs.removeAll()
                 selectedCameraLineIDs.removeAll()
@@ -521,6 +535,9 @@ struct CaptureView: View {
                     confidence: nil,
                     durationMilliseconds: durationMilliseconds
                 )
+            }
+            if let savedHighlightID {
+                scheduleAutomaticTagGeneration(for: savedHighlightID)
             }
             memoFocusRequest += 1
             logCaptureSaved(
@@ -559,7 +576,56 @@ struct CaptureView: View {
     }
 
     private func defaultTagsTextForSelectedBook() -> String {
-        library.selectedBook?.tags.joined(separator: " ") ?? ""
+        library.suggestedTagsForSelectedBook().joined(separator: " ")
+    }
+
+    private func scheduleAutomaticTagGeneration(for highlightID: Highlight.ID) {
+        guard
+            let configuration = llmSettings.lightweightTagConfiguration,
+            let highlight = library.highlight(with: highlightID),
+            let bookID = library.bookID(containing: highlightID),
+            let book = library.book(with: bookID)
+        else {
+            return
+        }
+
+        let request = LLMTagRequest(
+            provider: configuration.provider,
+            modelID: configuration.modelID,
+            credential: configuration.credential,
+            bookTitle: book.title,
+            bookAuthor: book.author,
+            bookSummary: book.summary,
+            text: highlight.text,
+            memo: highlight.memo,
+            existingTags: highlight.tags
+        )
+
+        captureMetricsLogger.info(
+            "auto_tags_requested provider=\(configuration.provider.rawValue, privacy: .public) model=\(configuration.modelID, privacy: .public)"
+        )
+
+        Task { @MainActor in
+            do {
+                let generatedTags = try await LLMInsightClient().generateTags(request)
+                guard !generatedTags.isEmpty else {
+                    captureMetricsLogger.info("auto_tags_empty provider=\(configuration.provider.rawValue, privacy: .public)")
+                    return
+                }
+
+                library.appendTags(generatedTags, to: highlightID)
+                if lastSaved?.id == highlightID, let updatedHighlight = library.highlight(with: highlightID) {
+                    lastSaved = updatedHighlight
+                }
+                captureMetricsLogger.info(
+                    "auto_tags_applied provider=\(configuration.provider.rawValue, privacy: .public) count=\(generatedTags.count, privacy: .public)"
+                )
+            } catch {
+                captureMetricsLogger.error(
+                    "auto_tags_failed provider=\(configuration.provider.rawValue, privacy: .public) error=\(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+        }
     }
 
     private func prefillPageReferenceIfNeeded(from pageReference: String) {

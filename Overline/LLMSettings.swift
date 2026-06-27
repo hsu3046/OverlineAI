@@ -64,6 +64,19 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         modelOptions.first?.id ?? ""
     }
 
+    var lightweightTagModelID: String? {
+        switch self {
+        case .anthropic:
+            return "claude-haiku-4-5-20251001"
+        case .openai:
+            return "gpt-5.4-mini"
+        case .gemini:
+            return "gemini-3.1-flash-lite"
+        case .openrouter:
+            return nil
+        }
+    }
+
     var modelOptions: [LLMModelOption] {
         switch self {
         case .openrouter:
@@ -153,6 +166,12 @@ enum LLMAuthCredential {
     }
 }
 
+struct LLMTagProviderConfiguration {
+    let provider: LLMProvider
+    let modelID: String
+    let credential: LLMAuthCredential
+}
+
 @MainActor
 @Observable
 final class LLMSettingsStore {
@@ -233,6 +252,19 @@ final class LLMSettingsStore {
 
     var selectedModelTitle: String {
         provider.modelOptions.first { $0.id == selectedModelID }?.title ?? selectedModelID
+    }
+
+    var lightweightTagConfiguration: LLMTagProviderConfiguration? {
+        for provider in [LLMProvider.anthropic, .openai, .gemini] {
+            guard let modelID = provider.lightweightTagModelID, isReady(for: provider) else { continue }
+            return LLMTagProviderConfiguration(
+                provider: provider,
+                modelID: modelID,
+                credential: credential(for: provider)
+            )
+        }
+
+        return nil
     }
 
     func setSelectedModelID(_ modelID: String) {

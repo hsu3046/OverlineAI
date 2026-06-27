@@ -18,6 +18,18 @@ struct LLMInsightRequest {
     let sources: [LLMInsightSource]
 }
 
+struct LLMTagRequest {
+    let provider: LLMProvider
+    let modelID: String
+    let credential: LLMAuthCredential
+    let bookTitle: String
+    let bookAuthor: String
+    let bookSummary: String
+    let text: String
+    let memo: String
+    let existingTags: [String]
+}
+
 private struct LLMGenerationProfile {
     let maxOutputTokens: Int
     let temperature: Double
@@ -99,6 +111,30 @@ struct LLMInsightClient {
         case .gemini:
             return try await generateGeminiInsight(request)
         }
+    }
+
+    func generateTags(_ request: LLMTagRequest) async throws -> [String] {
+        let response = try await generateInsight(
+            LLMInsightRequest(
+                provider: request.provider,
+                modelID: request.modelID,
+                credential: request.credential,
+                category: "태그",
+                instruction: "선택한 글조각에 붙일 검색 태그를 JSON으로만 반환하세요.",
+                userPrompt: tagPrompt(for: request),
+                sources: [
+                    LLMInsightSource(
+                        bookTitle: request.bookTitle,
+                        bookAuthor: request.bookAuthor,
+                        bookSummary: request.bookSummary,
+                        text: request.text,
+                        memo: request.memo
+                    )
+                ]
+            )
+        )
+
+        return Self.normalizedTags(fromTagResponse: response)
     }
 
     private func generateOpenAIResponsesInsight(_ request: LLMInsightRequest) async throws -> String {
@@ -324,12 +360,14 @@ struct LLMInsightClient {
             base = (2200, 0.35, "medium", "medium")
         case "확장":
             base = (2600, 0.4, "medium", "medium")
+        case "태그":
+            base = (180, 0.15, "low", "low")
         default:
             base = (1800, 0.35, "low", "low")
         }
 
-        let sourceBoost = min(max(request.sources.count - 4, 0) * 80, 600)
-        let modelBoost = request.modelID.localizedCaseInsensitiveContains("thinking") ? 400 : 0
+        let sourceBoost = request.category == "태그" ? 0 : min(max(request.sources.count - 4, 0) * 80, 600)
+        let modelBoost = request.category == "태그" ? 0 : (request.modelID.localizedCaseInsensitiveContains("thinking") ? 400 : 0)
         let maxOutputTokens = min(base.maxOutputTokens + sourceBoost + modelBoost, 3600)
 
         return LLMGenerationProfile(
@@ -524,6 +562,20 @@ struct LLMInsightClient {
         """
     }
 
+    private func tagPrompt(for request: LLMTagRequest) -> String {
+        let existingTags = request.existingTags.isEmpty ? "없음" : request.existingTags.joined(separator: ", ")
+
+        return """
+        이미 있는 태그:
+        \(existingTags)
+
+        작업:
+        - 글조각을 나중에 다시 찾기 쉬운 태그 2-4개로 정리하세요.
+        - 기존 태그가 적합하면 재사용해도 됩니다.
+        - 책 전체 주제가 아니라, 선택된 글조각의 핵심 주제와 개념을 우선하세요.
+        """
+    }
+
     private func modeSystemPrompt(for request: LLMInsightRequest) -> String {
         switch request.category {
         case "질문":
@@ -567,6 +619,18 @@ struct LLMInsightClient {
             - 글조각이 같은 내용을 반복하면 반복을 줄이고 한 번의 선명한 문장으로 합치세요.
             - 답변은 2-3문장, 가능하면 한 문단으로 작성하세요.
             """
+        case "태그":
+            """
+            현재 모드: 태그
+            목적: 캡처된 글조각을 검색과 분류에 유용한 짧은 태그로 정리하는 것입니다.
+            작성 규칙:
+            - 반드시 JSON만 반환하세요. 형식: {"tags":["태그1","태그2"]}
+            - 태그는 2-4개만 작성하세요.
+            - # 기호, 설명 문장, 마크다운, 머리말을 넣지 마세요.
+            - 태그는 짧은 한국어 명사형을 우선하세요.
+            - "책", "글", "글조각", "문장", "인용", "메모", "독서", "한국어"처럼 너무 일반적인 태그는 쓰지 마세요.
+            - 책 정보는 배경으로만 참고하고, 선택된 글조각의 핵심 주제와 개념을 우선하세요.
+            """
         default:
             """
             현재 모드: \(request.category)
@@ -596,6 +660,58 @@ struct LLMInsightClient {
         }
 
         return bookContexts.isEmpty ? "책 정보 없음" : bookContexts.joined(separator: "\n")
+    }
+
+    private static func normalizedTags(fromTagResponse response: String) -> [String] {
+        let cleanedResponse = response
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmed
+
+        if
+            let data = cleanedResponse.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data)
+        {
+            if let dictionary = object as? [String: Any], let tags = dictionary["tags"] as? [String] {
+                return normalizedTagList(tags)
+            }
+
+            if let tags = object as? [String] {
+                return normalizedTagList(tags)
+            }
+        }
+
+        let fallbackTags = cleanedResponse
+            .components(separatedBy: CharacterSet(charactersIn: ",\n[]\"'`"))
+        return normalizedTagList(fallbackTags)
+    }
+
+    private static func normalizedTagList(_ values: [String]) -> [String] {
+        let genericTags: Set<String> = [
+            "책", "글", "글조각", "문장", "인용", "메모", "독서", "한국어", "영어", "일본어",
+            "내용", "생각", "요약", "핵심", "아이디어"
+        ]
+        var seenTags = Set<String>()
+        var tags: [String] = []
+
+        for value in values {
+            let normalized = value
+                .replacingOccurrences(of: "#", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}」』\"'`"))
+                .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+
+            guard normalized.count >= 2, normalized.count <= 20 else { continue }
+            guard !genericTags.contains(normalized) else { continue }
+
+            let tag = "#\(normalized)"
+            guard seenTags.insert(tag).inserted else { continue }
+
+            tags.append(tag)
+            if tags.count == 4 { break }
+        }
+
+        return tags
     }
 
     private func errorMessage(from data: Data) -> String {
