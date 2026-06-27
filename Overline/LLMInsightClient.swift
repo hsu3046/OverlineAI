@@ -2,25 +2,32 @@ import Foundation
 
 struct LLMInsightSource {
     let bookTitle: String
+    let bookAuthor: String
+    let bookSummary: String
     let text: String
     let memo: String
-    let pageReference: String
-    let tags: [String]
-    let createdAt: Date
 }
 
 struct LLMInsightRequest {
     let provider: LLMProvider
     let modelID: String
-    let apiKey: String
+    let credential: LLMAuthCredential
     let category: String
     let instruction: String
     let userPrompt: String
     let sources: [LLMInsightSource]
 }
 
+private struct LLMGenerationProfile {
+    let maxOutputTokens: Int
+    let temperature: Double
+    let openAIReasoningEffort: String
+    let openAITextVerbosity: String
+}
+
 enum LLMInsightError: LocalizedError {
-    case missingAPIKey(String)
+    case missingCredential(provider: String, mode: LLMAuthMode)
+    case unsupportedSubscription(String)
     case invalidURL
     case invalidResponse
     case timedOut
@@ -30,8 +37,15 @@ enum LLMInsightError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey(let provider):
-            "\(provider) API 키를 먼저 입력해 주세요."
+        case .missingCredential(let provider, let mode):
+            switch mode {
+            case .apiKey:
+                "\(provider) API 키를 먼저 입력해 주세요."
+            case .subscription:
+                "\(provider) 구독 토큰을 먼저 연결해 주세요."
+            }
+        case .unsupportedSubscription(let provider):
+            "\(provider)은 아직 구독 연동을 지원하지 않습니다."
         case .invalidURL:
             "요청 주소를 만들 수 없습니다."
         case .invalidResponse:
@@ -62,10 +76,6 @@ struct LLMInsightClient {
     }
 
     func generateInsight(_ request: LLMInsightRequest) async throws -> String {
-        guard !request.apiKey.trimmed.isEmpty else {
-            throw LLMInsightError.missingAPIKey(request.provider.title)
-        }
-
         switch request.provider {
         case .openrouter:
             return try await generateOpenAICompatibleInsight(
@@ -78,7 +88,12 @@ struct LLMInsightClient {
                 usesMaxCompletionTokens: false
             )
         case .openai:
-            return try await generateOpenAIResponsesInsight(request)
+            switch request.credential {
+            case .apiKey:
+                return try await generateOpenAIResponsesInsight(request)
+            case .subscription:
+                return try await generateOpenAICodexSubscriptionInsight(request)
+            }
         case .anthropic:
             return try await generateAnthropicInsight(request)
         case .gemini:
@@ -90,23 +105,24 @@ struct LLMInsightClient {
         guard let endpoint = URL(string: "https://api.openai.com/v1/responses") else {
             throw LLMInsightError.invalidURL
         }
+        let profile = generationProfile(for: request)
 
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(request.apiKey.trimmed)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("Bearer \(try apiKey(from: request))", forHTTPHeaderField: "Authorization")
 
         let payload: [String: Any] = [
             "model": request.modelID,
             "instructions": systemPrompt(for: request),
             "input": userPrompt(for: request),
-            "max_output_tokens": 700,
+            "max_output_tokens": profile.maxOutputTokens,
             "reasoning": [
-                "effort": "low"
+                "effort": profile.openAIReasoningEffort
             ],
             "text": [
-                "verbosity": "low"
+                "verbosity": profile.openAITextVerbosity
             ]
         ]
 
@@ -126,12 +142,14 @@ struct LLMInsightClient {
         usesMaxCompletionTokens: Bool
     ) async throws -> String {
         guard let endpoint else { throw LLMInsightError.invalidURL }
+        let apiKey = try apiKey(from: request)
+        let profile = generationProfile(for: request)
 
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(request.apiKey.trimmed)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         extraHeaders.forEach { key, value in
             urlRequest.setValue(value, forHTTPHeaderField: key)
         }
@@ -142,13 +160,13 @@ struct LLMInsightClient {
                 ["role": "system", "content": systemPrompt(for: request)],
                 ["role": "user", "content": userPrompt(for: request)]
             ],
-            "temperature": 0.35
+            "temperature": profile.temperature
         ]
 
         if usesMaxCompletionTokens {
-            payload["max_completion_tokens"] = 700
+            payload["max_completion_tokens"] = profile.maxOutputTokens
         } else {
-            payload["max_tokens"] = 700
+            payload["max_tokens"] = profile.maxOutputTokens
         }
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -161,22 +179,73 @@ struct LLMInsightClient {
         return content
     }
 
+    private func generateOpenAICodexSubscriptionInsight(_ request: LLMInsightRequest) async throws -> String {
+        let token = try subscriptionToken(from: request)
+        guard let endpoint = URL(string: "https://chatgpt.com/backend-api/codex/responses") else {
+            throw LLMInsightError.invalidURL
+        }
+
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = timeoutInterval
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        urlRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        urlRequest.setValue("Bearer \(token.accessToken.trimmed)", forHTTPHeaderField: "Authorization")
+        urlRequest.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
+        urlRequest.setValue("responses=experimental", forHTTPHeaderField: "openai-beta")
+        urlRequest.setValue(UUID().uuidString, forHTTPHeaderField: "session_id")
+
+        if !token.accountID.trimmed.isEmpty {
+            urlRequest.setValue(token.accountID.trimmed, forHTTPHeaderField: "chatgpt-account-id")
+        }
+
+        let payload: [String: Any] = [
+            "model": request.modelID,
+            "instructions": systemPrompt(for: request),
+            "input": [
+                [
+                    "role": "user",
+                    "content": userPrompt(for: request)
+                ]
+            ],
+            "stream": true,
+            "store": false
+        ]
+
+        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let data = try await responseData(for: urlRequest)
+        let content = try openAICodexStreamText(from: data)
+        guard !content.trimmed.isEmpty else { throw LLMInsightError.emptyResponse }
+        return content.trimmed
+    }
+
     private func generateAnthropicInsight(_ request: LLMInsightRequest) async throws -> String {
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw LLMInsightError.invalidURL
         }
+        let profile = generationProfile(for: request)
+        let isSubscription = request.credential.mode == .subscription
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue(request.apiKey.trimmed, forHTTPHeaderField: "x-api-key")
         urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+
+        if isSubscription {
+            let token = try subscriptionToken(from: request)
+            urlRequest.setValue("Bearer \(token.accessToken.trimmed)", forHTTPHeaderField: "Authorization")
+            urlRequest.setValue("claude-code-20250219,oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        } else {
+            urlRequest.setValue(try apiKey(from: request), forHTTPHeaderField: "x-api-key")
+        }
 
         let payload: [String: Any] = [
             "model": request.modelID,
-            "max_tokens": 700,
-            "system": systemPrompt(for: request),
+            "max_tokens": profile.maxOutputTokens,
+            "system": anthropicSystemPayload(for: request, isSubscription: isSubscription),
             "messages": [
                 [
                     "role": "user",
@@ -199,12 +268,14 @@ struct LLMInsightClient {
     }
 
     private func generateGeminiInsight(_ request: LLMInsightRequest) async throws -> String {
+        let apiKey = try apiKey(from: request)
         guard
             let escapedModel = request.modelID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escapedModel):generateContent?key=\(request.apiKey.trimmed)")
+            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escapedModel):generateContent?key=\(apiKey)")
         else {
             throw LLMInsightError.invalidURL
         }
+        let profile = generationProfile(for: request)
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -222,8 +293,8 @@ struct LLMInsightClient {
                 ]
             ],
             "generationConfig": [
-                "temperature": 0.35,
-                "maxOutputTokens": 700
+                "temperature": profile.temperature,
+                "maxOutputTokens": profile.maxOutputTokens
             ]
         ]
 
@@ -239,6 +310,142 @@ struct LLMInsightClient {
 
         guard !content.isEmpty else { throw LLMInsightError.emptyResponse }
         return content
+    }
+
+    private func generationProfile(for request: LLMInsightRequest) -> LLMGenerationProfile {
+        let base: (maxOutputTokens: Int, temperature: Double, effort: String, verbosity: String)
+
+        switch request.category {
+        case "질문":
+            base = (1200, 0.35, "low", "low")
+        case "요약":
+            base = (1600, 0.25, "low", "low")
+        case "연결":
+            base = (2200, 0.35, "medium", "medium")
+        case "확장":
+            base = (2600, 0.4, "medium", "medium")
+        default:
+            base = (1800, 0.35, "low", "low")
+        }
+
+        let sourceBoost = min(max(request.sources.count - 4, 0) * 80, 600)
+        let modelBoost = request.modelID.localizedCaseInsensitiveContains("thinking") ? 400 : 0
+        let maxOutputTokens = min(base.maxOutputTokens + sourceBoost + modelBoost, 3600)
+
+        return LLMGenerationProfile(
+            maxOutputTokens: maxOutputTokens,
+            temperature: base.temperature,
+            openAIReasoningEffort: base.effort,
+            openAITextVerbosity: base.verbosity
+        )
+    }
+
+    private func apiKey(from request: LLMInsightRequest) throws -> String {
+        guard case .apiKey(let apiKey) = request.credential else {
+            throw LLMInsightError.unsupportedSubscription(request.provider.title)
+        }
+
+        let trimmedAPIKey = apiKey.trimmed
+        guard !trimmedAPIKey.isEmpty else {
+            throw LLMInsightError.missingCredential(provider: request.provider.title, mode: .apiKey)
+        }
+
+        return trimmedAPIKey
+    }
+
+    private func subscriptionToken(from request: LLMInsightRequest) throws -> LLMSubscriptionToken {
+        guard request.provider.supportsSubscriptionAuth else {
+            throw LLMInsightError.unsupportedSubscription(request.provider.title)
+        }
+
+        guard case .subscription(let token) = request.credential else {
+            throw LLMInsightError.missingCredential(provider: request.provider.title, mode: .subscription)
+        }
+
+        guard token.hasAccessToken else {
+            throw LLMInsightError.missingCredential(provider: request.provider.title, mode: .subscription)
+        }
+
+        return token
+    }
+
+    private func anthropicSystemPayload(for request: LLMInsightRequest, isSubscription: Bool) -> Any {
+        let prompt = systemPrompt(for: request)
+        guard isSubscription else { return prompt }
+
+        return [
+            [
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude."
+            ],
+            [
+                "type": "text",
+                "text": prompt
+            ]
+        ]
+    }
+
+    private func openAICodexStreamText(from data: Data) throws -> String {
+        guard let rawText = String(data: data, encoding: .utf8) else {
+            throw LLMInsightError.invalidResponse
+        }
+
+        var output = ""
+        var completed = false
+
+        for rawLine in rawText.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("data:") else { continue }
+
+            let jsonText = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard jsonText != "[DONE]", let data = jsonText.data(using: .utf8) else {
+                continue
+            }
+
+            guard
+                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let type = object["type"] as? String
+            else {
+                continue
+            }
+
+            switch type {
+            case "response.output_text.delta":
+                output += object["delta"] as? String ?? ""
+            case "response.completed":
+                completed = true
+                if output.trimmed.isEmpty, let response = object["response"] as? [String: Any] {
+                    output = openAIResponsesText(from: response)
+                }
+            default:
+                continue
+            }
+        }
+
+        guard completed || !output.trimmed.isEmpty else {
+            throw LLMInsightError.invalidResponse
+        }
+
+        return output
+    }
+
+    private func openAIResponsesText(from response: [String: Any]) -> String {
+        if let outputText = response["output_text"] as? String, !outputText.trimmed.isEmpty {
+            return outputText
+        }
+
+        guard let outputItems = response["output"] as? [[String: Any]] else {
+            return ""
+        }
+
+        return outputItems
+            .compactMap { item -> String? in
+                guard let contentItems = item["content"] as? [[String: Any]] else { return nil }
+                return contentItems
+                    .compactMap { $0["text"] as? String }
+                    .joined(separator: "\n")
+            }
+            .joined(separator: "\n")
     }
 
     private func responseData(for request: URLRequest) async throws -> Data {
@@ -275,48 +482,120 @@ struct LLMInsightClient {
 
     private func systemPrompt(for request: LLMInsightRequest) -> String {
         """
-        당신은 독자가 캡처한 책 속 글조각을 바탕으로 짧고 깊은 인사이트를 만드는 한국어 독서 파트너입니다.
-        원문을 길게 반복하지 말고, 선택된 글조각 사이의 의미를 연결하세요.
-        여러 책에서 온 글조각이면 교차 책 패턴을 우선 찾고, 한 책의 글조각이면 반복되는 테마를 우선 찾으세요.
-        요약 요청에서는 날짜 흐름을 보고 최근 읽기 흐름을 한 문단으로 정리하세요.
-        답변은 2-4문장으로 간결하게 작성하세요.
-        카테고리: \(request.category)
-        작업 지시: \(request.instruction)
+        당신은 Overline의 한국어 독서 인사이트 엔진입니다.
+        입력은 사용자가 책을 읽다가 직접 선택한 글조각과 그 글조각이 속한 책의 배경 정보입니다.
+
+        공통 원칙:
+        - 선택한 글조각을 1차 근거로 삼으세요. 책 정보는 해석을 돕는 배경 맥락으로만 사용하세요.
+        - 입력에 없는 사건, 주장, 수치, 저자의 의도를 새로 만들지 마세요.
+        - 원문을 길게 베끼지 말고, 선택된 글조각들이 함께 드러내는 의미를 정리하세요.
+        - OCR 때문에 문장이 중간에서 시작하거나 끝날 수 있습니다. 답변은 자연스럽고 완성된 한국어 문장으로 재구성하세요.
+        - 답변은 사용자가 바로 저장해도 어색하지 않은 최종 문장이어야 합니다.
+        - 별도의 머리말, 사과, 설명, "요약하면" 같은 상투어 없이 본문만 작성하세요.
+
+        \(modeSystemPrompt(for: request))
         """
     }
 
     private func userPrompt(for request: LLMInsightRequest) -> String {
-        let bookCount = Set(request.sources.map(\.bookTitle)).count
-        let sortedDates = request.sources.map(\.createdAt).sorted()
-        let dateRange: String
-        if let firstDate = sortedDates.first, let lastDate = sortedDates.last {
-            dateRange = firstDate.overlineShortDate == lastDate.overlineShortDate
-                ? firstDate.overlineShortDate
-                : "\(firstDate.overlineShortDate) - \(lastDate.overlineShortDate)"
-        } else {
-            dateRange = "-"
-        }
+        let bookContext = bookContextText(for: request.sources)
 
         let sourceText = request.sources.enumerated().map { index, source in
             let memo = source.memo.trimmed.isEmpty ? "" : "\n메모: \(source.memo)"
-            let tags = source.tags.isEmpty ? "" : "\n태그: \(source.tags.joined(separator: " "))"
             return """
-            \(index + 1). [\(source.bookTitle), \(source.pageReference), 저장 \(source.createdAt.overlineShortDate)]
-            \(source.text)\(memo)\(tags)
+            \(index + 1). [책: \(source.bookTitle)]
+            \(source.text)\(memo)
             """
         }
         .joined(separator: "\n\n")
 
         return """
-        사용자 질문:
-        \(request.userPrompt)
+        작업 모드:
+        \(request.category)
 
-        선택 범위:
-        글조각 \(request.sources.count)개, 책 \(bookCount)권, 날짜 \(dateRange)
+        책 맥락:
+        \(bookContext)
 
         선택한 글조각:
         \(sourceText)
+
+        사용자 요청:
+        \(request.userPrompt)
         """
+    }
+
+    private func modeSystemPrompt(for request: LLMInsightRequest) -> String {
+        switch request.category {
+        case "질문":
+            """
+            현재 모드: 질문
+            목적: 선택한 글조각이 독자에게 남기는 좋은 질문을 뽑는 것입니다.
+            작성 규칙:
+            - 단순 확인 질문이 아니라, 생각을 더 밀고 나가게 하는 질문을 만드세요.
+            - 글조각의 핵심 긴장을 먼저 파악하고, 그 긴장이 드러나는 질문을 1-3개 제시하세요.
+            - 각 질문은 짧고 선명해야 하며, 필요한 경우 한 문장으로 왜 중요한지 덧붙이세요.
+            - 답을 단정하지 말고, 독자가 다음 메모를 이어갈 수 있게 여지를 남기세요.
+            """
+        case "연결":
+            """
+            현재 모드: 연결
+            목적: 선택한 글조각들 사이의 공통 패턴, 반복되는 문제의식, 또는 대비되는 관점을 찾아 하나의 생각으로 묶는 것입니다.
+            작성 규칙:
+            - 여러 책이면 책 사이의 공통 구조를 우선 찾고, 한 책이면 선택된 글조각 안의 반복 테마를 찾으세요.
+            - 단순 키워드 나열 대신, "무엇과 무엇이 어떻게 연결되는지"를 분명히 쓰세요.
+            - 원문 표현을 그대로 이어붙이지 말고, 독자의 관점에서 붙일 수 있는 이름이나 문장으로 정리하세요.
+            - 답변은 2-4문장으로 작성하세요.
+            """
+        case "확장":
+            """
+            현재 모드: 확장
+            목적: 선택한 글조각에서 더 생각해볼 개념, 반론, 다음 탐구 방향을 제안하는 것입니다.
+            작성 규칙:
+            - 먼저 글조각의 핵심 주장이나 감각을 짧게 잡고, 그 다음 확장 가능한 방향을 제시하세요.
+            - 반론은 원문을 부정하기보다, 원문이 놓치고 있을 가능성을 조심스럽게 여는 방식으로 쓰세요.
+            - 추상적인 조언보다 독자가 바로 다음 메모로 이어갈 수 있는 생각의 갈래를 주세요.
+            - 답변은 2-4문장으로 작성하세요.
+            """
+        case "요약":
+            """
+            현재 모드: 요약
+            목적: 선택한 글조각들의 핵심을 하나의 자연스러운 문단으로 정리하는 것입니다.
+            작성 규칙:
+            - 선택된 글조각 전체가 함께 말하는 중심 생각을 한 문단으로 압축하세요.
+            - 문장이 "하여", "그리고", "하지만" 같은 중간 접속이나 잘린 술어로 시작하지 않게 하세요.
+            - 책 소개를 요약하지 말고, 선택한 글조각의 논지와 독자가 저장한 부분의 의미를 요약하세요.
+            - 글조각이 같은 내용을 반복하면 반복을 줄이고 한 번의 선명한 문장으로 합치세요.
+            - 답변은 2-3문장, 가능하면 한 문단으로 작성하세요.
+            """
+        default:
+            """
+            현재 모드: \(request.category)
+            작업 지시: \(request.instruction)
+            답변은 선택한 글조각과 책 맥락만 근거로 2-4문장으로 작성하세요.
+            """
+        }
+    }
+
+    private func bookContextText(for sources: [LLMInsightSource]) -> String {
+        var seenKeys = Set<String>()
+        var bookContexts: [String] = []
+
+        for source in sources {
+            let key = "\(source.bookTitle)\n\(source.bookAuthor)\n\(source.bookSummary)"
+            guard seenKeys.insert(key).inserted else { continue }
+
+            let author = source.bookAuthor.trimmed.isEmpty ? "저자 정보 없음" : source.bookAuthor
+            let summary = source.bookSummary.trimmed.isEmpty ? "책 소개 없음" : source.bookSummary
+            bookContexts.append(
+                """
+                - 제목: \(source.bookTitle)
+                  저자: \(author)
+                  책 소개: \(summary)
+                """
+            )
+        }
+
+        return bookContexts.isEmpty ? "책 정보 없음" : bookContexts.joined(separator: "\n")
     }
 
     private func errorMessage(from data: Data) -> String {

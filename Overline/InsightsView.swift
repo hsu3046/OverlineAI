@@ -1,3 +1,4 @@
+import Foundation
 import OSLog
 import SwiftUI
 
@@ -8,13 +9,15 @@ struct InsightsView: View {
     @Environment(AppIntentRouter.self) private var intentRouter
     @State private var question = "더 파고들 개념과 반론은?"
     @State private var selectedPrompt: InsightPrompt = .expand
+    @State private var selectedBookIDs: Set<ReadingBook.ID> = []
     @State private var selectedHighlightIDs: Set<Highlight.ID> = []
     @State private var isSourcePickerPresented = false
     @State private var isLLMSettingsPresented = false
-    @State private var isLLMDisclosurePresented = false
     @State private var llmSettings = LLMSettingsStore()
     @State private var isGeneratingInsight = false
     @State private var insightErrorMessage: String?
+    @State private var showsInsightSavedAlert = false
+    @State private var presentedDetailInsight: LibraryInsight?
     @State private var presentedSourceInsight: LibraryInsight?
 
     var body: some View {
@@ -48,11 +51,11 @@ struct InsightsView: View {
                             SavedInsightCard(
                                 insight: insight,
                                 canShowSources: !(insight.sourceHighlightIDs ?? []).isEmpty,
+                                openDetail: {
+                                    presentedDetailInsight = insight
+                                },
                                 showSources: {
                                     presentedSourceInsight = insight
-                                },
-                                delete: {
-                                    library.deleteInsight(insight.id)
                                 }
                             )
                         }
@@ -64,11 +67,9 @@ struct InsightsView: View {
         }
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
-        .background(Color.overlineCanvas.ignoresSafeArea())
+        .background(OverlineCanvasBackground().ignoresSafeArea())
         .onAppear {
-            if !applyInsightSeed(intentRouter.request) {
-                seedInitialSelectionIfNeeded()
-            }
+            _ = applyInsightSeed(intentRouter.request)
         }
         .onChange(of: intentRouter.request) { _, request in
             _ = applyInsightSeed(request)
@@ -76,6 +77,7 @@ struct InsightsView: View {
         .sheet(isPresented: $isSourcePickerPresented) {
             HighlightPickerSheet(
                 books: library.books,
+                selectedBookIDs: $selectedBookIDs,
                 selectedHighlightIDs: $selectedHighlightIDs
             )
             .presentationDetents([.medium, .large])
@@ -86,6 +88,18 @@ struct InsightsView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(item: $presentedDetailInsight) { insight in
+            InsightDetailSheet(
+                insight: insight,
+                sources: sourceEntries(for: insight),
+                delete: {
+                    library.deleteInsight(insight.id)
+                    presentedDetailInsight = nil
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
         .sheet(item: $presentedSourceInsight) { insight in
             InsightSourceSheet(
                 insight: insight,
@@ -94,44 +108,58 @@ struct InsightsView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .confirmationDialog("외부 AI로 보낼까요?", isPresented: $isLLMDisclosurePresented, titleVisibility: .visible) {
-            Button("\(llmSettings.provider.title)로 보내기") {
-                Task {
-                    await saveGeneratedInsight()
-                }
-            }
-
-            Button("취소", role: .cancel) {}
+        .alert("인사이트 저장됨", isPresented: $showsInsightSavedAlert) {
+            Button("확인", role: .cancel) {}
         } message: {
-            Text("선택한 \(selectedSourceCount)조각과 메모가 \(llmSettings.provider.title)로 전송됩니다. Overline은 캡처 내용을 자체 서버에 저장하지 않습니다.")
+            Text("생각 정리를 저장했습니다.")
         }
     }
 
     private var selectedSourceCount: Int {
-        selectedHighlightIDs.count
+        selectedSourceIDs.count
+    }
+
+    private var selectedSourceIDs: [Highlight.ID] {
+        effectiveSelectedHighlightIDs(in: library.books)
     }
 
     private func selectedSourcePayload() -> (sources: [LLMInsightSource], ids: [Highlight.ID]) {
+        let effectiveIDs = Set(selectedSourceIDs)
         var sources: [LLMInsightSource] = []
         var ids: [Highlight.ID] = []
 
         for book in library.books {
-            for highlight in book.highlights where selectedHighlightIDs.contains(highlight.id) {
+            for highlight in book.highlights where effectiveIDs.contains(highlight.id) {
                 ids.append(highlight.id)
                 sources.append(
                     LLMInsightSource(
                         bookTitle: book.title,
+                        bookAuthor: book.author,
+                        bookSummary: book.summary,
                         text: highlight.text,
-                        memo: highlight.memo,
-                        pageReference: highlight.pageReference,
-                        tags: highlight.tags,
-                        createdAt: highlight.createdAt
+                        memo: highlight.memo
                     )
                 )
             }
         }
 
         return (sources, ids)
+    }
+
+    private func effectiveSelectedHighlightIDs(in books: [ReadingBook]) -> [Highlight.ID] {
+        var seenIDs = Set<Highlight.ID>()
+        var orderedIDs: [Highlight.ID] = []
+
+        for book in books {
+            let isBookSelected = selectedBookIDs.contains(book.id)
+            for highlight in book.highlights where isBookSelected || selectedHighlightIDs.contains(highlight.id) {
+                if seenIDs.insert(highlight.id).inserted {
+                    orderedIDs.append(highlight.id)
+                }
+            }
+        }
+
+        return orderedIDs
     }
 
     private func sourceEntries(for insight: LibraryInsight) -> [InsightSourceEntry] {
@@ -147,18 +175,11 @@ struct InsightsView: View {
         }
     }
 
-    private func seedInitialSelectionIfNeeded() {
-        guard selectedHighlightIDs.isEmpty else { return }
-        let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: .now) ?? .distantPast
-        let weeklyHighlights = library.recentHighlights.filter { $0.createdAt >= weekAgo }
-        let seedHighlights = weeklyHighlights.isEmpty ? library.recentHighlights.prefix(3) : weeklyHighlights.prefix(8)
-        selectedHighlightIDs = Set(seedHighlights.map(\.id))
-    }
-
     @discardableResult
     private func applyInsightSeed(_ request: AppIntentRequest?) -> Bool {
         guard request?.tab == .insights, let seed = request?.insightSeed else { return false }
 
+        selectedBookIDs.removeAll()
         selectedHighlightIDs = seed.highlightIDs
         selectedPrompt = seed.prompt
         question = seed.question?.trimmed.isEmpty == false ? seed.question ?? seed.prompt.seedQuestion : seed.prompt.seedQuestion
@@ -171,15 +192,17 @@ struct InsightsView: View {
         guard !isGeneratingInsight else { return }
         guard selectedSourceCount > 0 else { return }
 
-        guard llmSettings.hasAPIKey(for: llmSettings.provider) else {
-            logInsightGenerationBlocked(reason: "missing_api_key")
-            insightErrorMessage = "\(llmSettings.provider.title) API 키를 먼저 입력해 주세요."
+        guard llmSettings.isReady(for: llmSettings.provider) else {
+            logInsightGenerationBlocked(reason: "missing_auth_credential")
+            insightErrorMessage = missingCredentialMessage(for: llmSettings.provider)
             isLLMSettingsPresented = true
             return
         }
 
         insightErrorMessage = nil
-        isLLMDisclosurePresented = true
+        Task {
+            await saveGeneratedInsight()
+        }
     }
 
     @MainActor
@@ -190,8 +213,8 @@ struct InsightsView: View {
 
         let prompt = question.trimmed.isEmpty ? selectedPrompt.seedQuestion : question.trimmed
 
-        guard llmSettings.hasAPIKey(for: llmSettings.provider) else {
-            insightErrorMessage = "\(llmSettings.provider.title) API 키를 먼저 입력해 주세요."
+        guard llmSettings.isReady(for: llmSettings.provider) else {
+            insightErrorMessage = missingCredentialMessage(for: llmSettings.provider)
             isLLMSettingsPresented = true
             return
         }
@@ -217,7 +240,7 @@ struct InsightsView: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    apiKey: llmSettings.apiKey(for: provider),
+                    credential: llmSettings.credential(for: provider),
                     category: selectedPrompt.title,
                     instruction: selectedPrompt.llmInstruction,
                     userPrompt: prompt,
@@ -247,6 +270,7 @@ struct InsightsView: View {
                 .llmInsight,
                 detail: "\(provider.title) · \(modelID) · \(sourceCount)조각 · \(durationMilliseconds)ms"
             )
+            showsInsightSavedAlert = true
         } catch {
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
@@ -270,6 +294,15 @@ struct InsightsView: View {
         insightMetricsLogger.info(
             "insight_generation_blocked reason=\(reason, privacy: .public)"
         )
+    }
+
+    private func missingCredentialMessage(for provider: LLMProvider) -> String {
+        switch llmSettings.authMode(for: provider) {
+        case .apiKey:
+            return "\(provider.title) API 키를 먼저 입력해 주세요."
+        case .subscription:
+            return "\(provider.title) 구독 토큰을 먼저 연결해 주세요."
+        }
     }
 
     private func logInsightGenerationRequested(
@@ -402,6 +435,21 @@ private struct LLMSettingsSheet: View {
                     Text("목록에 없는 모델도 제공자 문서의 모델 ID를 그대로 입력해 사용할 수 있습니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if settings.provider.supportsSubscriptionAuth {
+                        Picker("인증", selection: authModeBinding) {
+                            ForEach(LLMAuthMode.allCases) { mode in
+                                Label(mode.title, systemImage: mode.systemImage)
+                                    .tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    } else {
+                        LabeledContent("인증") {
+                            Text("API 키")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 Section {
@@ -417,7 +465,23 @@ private struct LLMSettingsSheet: View {
                 } header: {
                     Text("API 키")
                 } footer: {
-                    Text("API 키는 iOS Keychain에 이 기기 전용으로 저장됩니다.")
+                    Text("API 키는 백업 경로로 유지됩니다. 현재 제공자가 API 키 인증으로 설정된 경우에만 사용합니다.")
+                }
+
+                Section {
+                    ForEach(LLMProvider.allCases.filter(\.supportsSubscriptionAuth)) { provider in
+                        LLMSubscriptionTokenRow(
+                            provider: provider,
+                            token: Binding(
+                                get: { settings.subscriptionToken(for: provider) },
+                                set: { settings.setSubscriptionToken($0, for: provider) }
+                            )
+                        )
+                    }
+                } header: {
+                    Text("구독 연동 테스트")
+                } footer: {
+                    Text("OpenAI와 Claude 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다. 브라우저 OAuth 자동 로그인은 다음 단계에서 붙일 수 있도록 호출 경로를 먼저 분리했습니다.")
                 }
 
                 Section {
@@ -439,10 +503,10 @@ private struct LLMSettingsSheet: View {
                             }
                         }
                     }
-                    .disabled(isTestingConnection || !settings.hasAPIKey(for: settings.provider))
+                    .disabled(isTestingConnection || !settings.isReady(for: settings.provider))
 
-                    if !settings.hasAPIKey(for: settings.provider) {
-                        Text("\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다.")
+                    if !settings.isReady(for: settings.provider) {
+                        Text(connectionSetupHint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -479,10 +543,9 @@ private struct LLMSettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("완료") {
+                    OverlineDoneToolbarButton {
                         dismiss()
                     }
-                    .fontWeight(.semibold)
                 }
             }
         }
@@ -502,18 +565,33 @@ private struct LLMSettingsSheet: View {
         )
     }
 
+    private var authModeBinding: Binding<LLMAuthMode> {
+        Binding(
+            get: { settings.authMode(for: settings.provider) },
+            set: { settings.setAuthMode($0, for: settings.provider) }
+        )
+    }
+
     private var selectedModelIsPreset: Bool {
         settings.provider.modelOptions.contains { $0.id == settings.selectedModelID }
+    }
+
+    private var connectionSetupHint: String {
+        switch settings.authMode(for: settings.provider) {
+        case .apiKey:
+            return "\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다."
+        case .subscription:
+            return "\(settings.provider.title) 구독 토큰을 연결하면 현재 모델을 테스트할 수 있습니다."
+        }
     }
 
     @MainActor
     private func testConnection() async {
         guard !isTestingConnection else { return }
-        guard settings.hasAPIKey(for: settings.provider) else { return }
+        guard settings.isReady(for: settings.provider) else { return }
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
-        let apiKey = settings.apiKey(for: provider)
         let startedAt = Date()
 
         isTestingConnection = true
@@ -527,18 +605,17 @@ private struct LLMSettingsSheet: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    apiKey: apiKey,
+                    credential: settings.credential(for: provider),
                     category: "연결 테스트",
                     instruction: "연결이 정상인지 확인하기 위해 한 문장으로만 답하세요.",
                     userPrompt: "Overline AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
                     sources: [
                         LLMInsightSource(
                             bookTitle: "Overline Test",
+                            bookAuthor: "Overline",
+                            bookSummary: "독자가 책 속 글조각을 저장하고, 선택한 문장을 바탕으로 생각을 정리하는 테스트용 책입니다.",
                             text: "독서 메모를 안전하게 정리한다.",
-                            memo: "연결 확인용 테스트 문장",
-                            pageReference: "test",
-                            tags: [],
-                            createdAt: .now
+                            memo: "연결 확인용 테스트 문장"
                         )
                     ]
                 )
@@ -582,8 +659,10 @@ private extension Error {
         }
 
         switch llmError {
-        case .missingAPIKey:
-            return "missing_api_key"
+        case .missingCredential(_, let mode):
+            return "missing_\(mode.rawValue)"
+        case .unsupportedSubscription:
+            return "unsupported_subscription"
         case .invalidURL:
             return "invalid_url"
         case .invalidResponse:
@@ -605,12 +684,12 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
             title: "로컬 저장",
-            body: "OCR로 저장한 글조각, 메모, 캡처 스냅샷은 이 기기 안에 저장됩니다. Overline은 별도 서버에 캡처 내용을 저장하지 않습니다."
+            body: "OCR로 저장한 글조각과 메모만 이 기기 안에 저장됩니다. 캡처 사진은 OCR 완료 후 폐기합니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "key",
             title: "API 키 보관",
-            body: "OpenRouter, Anthropic, OpenAI, Gemini 키는 iOS Keychain에 이 기기 전용으로 저장됩니다."
+            body: "API 키와 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
@@ -620,7 +699,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
             title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용을 AI 학습 데이터로 사용하지 않습니다. 외부 제공자의 처리 조건은 사용자가 입력한 API 키의 계정 약관을 따릅니다."
+            body: "Overline은 캡처 내용을 AI 학습 데이터로 사용하지 않습니다. 외부 제공자의 처리 조건은 사용자가 연결한 계정 약관을 따릅니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "book.closed",
@@ -678,7 +757,7 @@ private struct OverlineTermsView: View {
         OverlineTerm(
             systemImage: "person.crop.circle",
             title: "개인 독서 메모",
-            body: "OCR 캡처와 스냅샷은 사용자가 직접 읽는 책의 개인 기록을 위해 이 기기에 저장됩니다."
+            body: "OCR 캡처 결과는 글조각과 메모로만 저장됩니다. 원문 사진은 개인 기록에도 남기지 않습니다."
         ),
         OverlineTerm(
             systemImage: "sparkles",
@@ -688,7 +767,7 @@ private struct OverlineTermsView: View {
         OverlineTerm(
             systemImage: "nosign",
             title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용, 메모, 스냅샷을 자체 AI 학습 데이터로 사용하지 않으며 별도 서버에 저장하지 않습니다."
+            body: "Overline은 캡처 내용과 메모를 자체 AI 학습 데이터로 사용하지 않으며 별도 서버에 저장하지 않습니다."
         ),
         OverlineTerm(
             systemImage: "square.and.arrow.up",
@@ -767,6 +846,69 @@ private struct LLMAPIKeyRow: View {
     }
 }
 
+private struct LLMSubscriptionTokenRow: View {
+    let provider: LLMProvider
+    @Binding var token: LLMSubscriptionToken
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: provider.systemImage)
+                    .font(.body.weight(.semibold))
+                    .frame(width: 24)
+                    .foregroundStyle(Color.overlineAccent)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(provider.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.overlineMutedInk)
+                    Text(token.hasAccessToken ? "구독 토큰 연결됨" : "구독 토큰 없음")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(token.hasAccessToken ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.72))
+                }
+
+                Spacer()
+
+                if token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty {
+                    Button {
+                        token = .empty
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.overlineMutedInk.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(provider.title) 구독 토큰 삭제")
+                }
+            }
+
+            SecureField("Access token", text: $token.accessToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.caption)
+                .privacySensitive()
+
+            switch provider {
+            case .openai:
+                TextField("ChatGPT account id (선택)", text: $token.accountID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .anthropic:
+                SecureField("Refresh token (선택)", text: $token.refreshToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.caption)
+                    .privacySensitive()
+            case .openrouter, .gemini:
+                EmptyView()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 private struct LLMActiveModelSummary: View {
     let settings: LLMSettingsStore
 
@@ -784,14 +926,17 @@ private struct LLMActiveModelSummary: View {
                 Text(settings.selectedModelTitle)
                     .font(.caption)
                     .foregroundStyle(Color.overlineMutedInk)
+                Text(settings.authMode(for: settings.provider).title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
             }
 
             Spacer()
 
-            Image(systemName: settings.hasAPIKey(for: settings.provider) ? "checkmark.circle.fill" : "exclamationmark.circle")
+            Image(systemName: settings.isReady(for: settings.provider) ? "checkmark.circle.fill" : "exclamationmark.circle")
                 .font(.body.weight(.semibold))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(settings.hasAPIKey(for: settings.provider) ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.68))
+                .foregroundStyle(settings.isReady(for: settings.provider) ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.68))
         }
         .accessibilityElement(children: .combine)
     }
@@ -836,7 +981,10 @@ private struct InsightComposer: View {
                                 Text("\(selectedCount)")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(Color.overlineMutedInk)
-                                    .frame(width: 17, height: 17)
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .frame(minWidth: 17, minHeight: 17)
                             }
                         }
                         .font(.body.weight(.semibold))
@@ -926,14 +1074,48 @@ private struct InsightComposer: View {
     }
 }
 
+private enum HighlightPickerMode: String, CaseIterable, Identifiable {
+    case books
+    case highlights
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .books: "책"
+        case .highlights: "글조각"
+        }
+    }
+}
+
 private struct HighlightPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let books: [ReadingBook]
+    @Binding var selectedBookIDs: Set<ReadingBook.ID>
     @Binding var selectedHighlightIDs: Set<Highlight.ID>
+    @State private var mode: HighlightPickerMode = .books
+    @State private var searchText = ""
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            OverlineSheetHeader(title: "글조각 선택") {
+                Color.clear
+            } trailing: {
+                OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
+                    dismiss()
+                }
+            }
+
+            if !selectableHighlights.isEmpty {
+                VStack(spacing: 10) {
+                    HighlightPickerModeControl(mode: $mode)
+                    OverlinePillSearchField(text: $searchText, prompt: "검색")
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+            }
+
             List {
                 if selectableHighlights.isEmpty {
                     ContentUnavailableView(
@@ -941,37 +1123,69 @@ private struct HighlightPickerSheet: View {
                         systemImage: "text.viewfinder",
                         description: Text("캡처 탭에서 문장을 저장하면 인사이트에 사용할 수 있습니다.")
                     )
-                } else {
-                    ForEach(books) { book in
-                        if !book.highlights.isEmpty {
-                            Section(book.title) {
-                                ForEach(book.highlights) { highlight in
-                                    Button {
-                                        toggle(highlight)
-                                    } label: {
-                                        HighlightPickerRow(
-                                            highlight: highlight,
-                                            isSelected: selectedHighlightIDs.contains(highlight.id)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
+                } else if mode == .books {
+                    if filteredBooks.isEmpty {
+                        ContentUnavailableView(
+                            "검색 결과 없음",
+                            systemImage: "magnifyingglass",
+                            description: Text("다른 검색어를 입력해 보세요.")
+                        )
+                    } else {
+                        Section {
+                            ForEach(filteredBooks) { book in
+                                Button {
+                                    toggle(book)
+                                } label: {
+                                    BookPickerRow(
+                                        book: book,
+                                        isSelected: selectedBookIDs.contains(book.id)
+                                    )
                                 }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else if filteredBooksForHighlights.isEmpty {
+                    ContentUnavailableView(
+                        "검색 결과 없음",
+                        systemImage: "magnifyingglass",
+                        description: Text("다른 검색어를 입력해 보세요.")
+                    )
+                } else {
+                    ForEach(filteredBooksForHighlights) { book in
+                        let highlights = filteredHighlights(in: book)
+                        Section(book.title) {
+                            ForEach(highlights) { highlight in
+                                let isIncludedByBook = selectedBookIDs.contains(book.id)
+                                Button {
+                                    guard !isIncludedByBook else { return }
+                                    toggle(highlight)
+                                } label: {
+                                    HighlightPickerRow(
+                                        highlight: highlight,
+                                        isSelected: selectedHighlightIDs.contains(highlight.id) || isIncludedByBook,
+                                        isIncludedByBook: isIncludedByBook
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("글조각 선택")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("완료") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                }
-            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+        }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .presentationBackground(.thinMaterial)
+    }
+
+    private func toggle(_ book: ReadingBook) {
+        if selectedBookIDs.contains(book.id) {
+            selectedBookIDs.remove(book.id)
+        } else {
+            selectedBookIDs.insert(book.id)
         }
     }
 
@@ -986,11 +1200,163 @@ private struct HighlightPickerSheet: View {
     private var selectableHighlights: [Highlight] {
         books.flatMap(\.highlights)
     }
+
+    private var booksWithHighlights: [ReadingBook] {
+        books.filter { !$0.highlights.isEmpty }
+    }
+
+    private var searchQuery: String {
+        searchText.trimmed
+    }
+
+    private var filteredBooks: [ReadingBook] {
+        guard !searchQuery.isEmpty else { return booksWithHighlights }
+        return booksWithHighlights.filter { bookMatches($0) }
+    }
+
+    private var filteredBooksForHighlights: [ReadingBook] {
+        booksWithHighlights.filter { !filteredHighlights(in: $0).isEmpty }
+    }
+
+    private func filteredHighlights(in book: ReadingBook) -> [Highlight] {
+        guard !searchQuery.isEmpty else { return book.highlights }
+        return book.highlights.filter { highlightMatches($0, in: book) }
+    }
+
+    private func bookMatches(_ book: ReadingBook) -> Bool {
+        book.title.localizedCaseInsensitiveContains(searchQuery)
+            || book.author.localizedCaseInsensitiveContains(searchQuery)
+            || book.summary.localizedCaseInsensitiveContains(searchQuery)
+    }
+
+    private func highlightMatches(_ highlight: Highlight, in book: ReadingBook) -> Bool {
+        book.title.localizedCaseInsensitiveContains(searchQuery)
+            || highlight.text.localizedCaseInsensitiveContains(searchQuery)
+            || highlight.pageReference.localizedCaseInsensitiveContains(searchQuery)
+            || highlight.tags.contains { $0.localizedCaseInsensitiveContains(searchQuery) }
+    }
+}
+
+private struct HighlightPickerModeControl: View {
+    @Binding var mode: HighlightPickerMode
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(HighlightPickerMode.allCases) { item in
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        mode = item
+                    }
+                } label: {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(mode == item ? Color.overlineInk : Color.overlineMutedInk)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: OverlinePillSearchField.height - 6)
+                        .contentShape(Rectangle())
+                        .background {
+                            if mode == item {
+                                Capsule(style: .continuous)
+                                    .fill(Color.white.opacity(0.68))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(mode == item ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .frame(height: OverlinePillSearchField.height)
+        .background(.thinMaterial, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(Color.white.opacity(0.34), lineWidth: 1)
+        }
+    }
+}
+
+struct OverlinePillSearchField: View {
+    static let height: CGFloat = 42
+
+    @Binding var text: String
+    let prompt: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+
+            TextField(prompt, text: $text)
+                .font(.subheadline)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("검색어 지우기")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: Self.height)
+        .background(.thinMaterial, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(Color.white.opacity(0.34), lineWidth: 1)
+        }
+    }
+}
+
+private struct BookPickerRow: View {
+    let book: ReadingBook
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title3.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.55))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(book.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.overlineInk)
+                    .lineLimit(2)
+
+                if !book.author.trimmed.isEmpty {
+                    Text(book.author)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.overlineMutedInk)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            Text("\(book.highlights.count)조각")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.overlineMutedInk.opacity(0.82))
+                .lineLimit(1)
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 private struct HighlightPickerRow: View {
     let highlight: Highlight
     let isSelected: Bool
+    let isIncludedByBook: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -1004,12 +1370,16 @@ private struct HighlightPickerRow: View {
                 Text(highlight.text)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Color.overlineInk)
+                    .lineSpacing(3)
                     .lineLimit(3)
 
                 HStack(spacing: 8) {
                     Text(highlight.pageReference)
                     ForEach(highlight.tags.prefix(2), id: \.self) { tag in
                         Text(tag)
+                    }
+                    if isIncludedByBook {
+                        Text("책으로 포함됨")
                     }
                 }
                 .font(.caption2.weight(.semibold))
@@ -1078,7 +1448,15 @@ private struct InsightSourceSheet: View {
     let sources: [InsightSourceEntry]
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            OverlineSheetHeader(title: "근거 글조각") {
+                Color.clear
+            } trailing: {
+                OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
+                    dismiss()
+                }
+            }
+
             List {
                 if sources.isEmpty {
                     ContentUnavailableView("근거 글조각 없음", systemImage: "doc.text.magnifyingglass")
@@ -1093,17 +1471,11 @@ private struct InsightSourceSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("근거 글조각")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("완료") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                }
-            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .presentationBackground(.thinMaterial)
     }
 }
 
@@ -1124,12 +1496,14 @@ private struct InsightSourceRow: View {
             Text(source.highlight.text)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Color.overlineInk)
+                .lineSpacing(4)
                 .lineLimit(5)
 
             if !source.highlight.memo.isEmpty {
                 Text(source.highlight.memo)
                     .font(.caption)
                     .foregroundStyle(Color.overlineMutedInk)
+                    .lineSpacing(3)
                     .lineLimit(3)
             }
         }
@@ -1137,43 +1511,221 @@ private struct InsightSourceRow: View {
     }
 }
 
+private struct InsightMarkdownText: View {
+    let text: String
+    var font: Font
+    var foregroundStyle: Color
+    var lineSpacing: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: lineSpacing) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                if segment.isDivider {
+                    Divider()
+                        .overlay(foregroundStyle.opacity(0.18))
+                        .padding(.vertical, lineSpacing * 0.35)
+                } else {
+                    markdownText(segment.text)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func markdownText(_ value: String) -> some View {
+        if let attributed = try? AttributedString(markdown: value) {
+            Text(attributed)
+                .font(font)
+                .foregroundStyle(foregroundStyle)
+                .lineSpacing(lineSpacing)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(value)
+                .font(font)
+                .foregroundStyle(foregroundStyle)
+                .lineSpacing(lineSpacing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var segments: [InsightMarkdownSegment] {
+        var result: [InsightMarkdownSegment] = []
+        var buffer: [String] = []
+
+        func flushBuffer() {
+            let value = buffer.joined(separator: "\n").trimmed
+            if !value.isEmpty {
+                result.append(InsightMarkdownSegment(text: value, isDivider: false))
+            }
+            buffer.removeAll()
+        }
+
+        for line in text.components(separatedBy: .newlines) {
+            let trimmedLine = line.trimmed
+            if trimmedLine == "---" || trimmedLine == "***" || trimmedLine == "___" {
+                flushBuffer()
+                result.append(InsightMarkdownSegment(text: "", isDivider: true))
+            } else {
+                buffer.append(line)
+            }
+        }
+
+        flushBuffer()
+        return result.isEmpty ? [InsightMarkdownSegment(text: text, isDivider: false)] : result
+    }
+}
+
+private struct InsightMarkdownSegment {
+    let text: String
+    let isDivider: Bool
+}
+
+private struct InsightDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let insight: LibraryInsight
+    let sources: [InsightSourceEntry]
+    let delete: () -> Void
+    @State private var showsDeleteConfirmation = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            OverlineSheetHeader(title: "인사이트") {
+                OverlineSheetIconButton(
+                    systemImage: "trash",
+                    accessibilityLabel: "인사이트 삭제",
+                    tint: Color.overlineMutedInk.opacity(0.72),
+                    font: .title2.weight(.regular)
+                ) {
+                    showsDeleteConfirmation = true
+                }
+            } trailing: {
+                OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
+                    dismiss()
+                }
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top, spacing: 10) {
+                            InsightCategoryIcon(prompt: prompt)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(insight.prompt)
+                                    .font(.title3.weight(.bold))
+                                    .foregroundStyle(Color.overlineInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text(insight.createdAt.overlineShortDate)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Color.overlineMutedInk.opacity(0.78))
+                            }
+                        }
+
+                        InsightMarkdownText(
+                            text: insight.body,
+                            font: .body,
+                            foregroundStyle: Color.overlineInk,
+                            lineSpacing: 6
+                        )
+                    }
+                    .padding(16)
+                    .insightGlassSurface(
+                        cornerRadius: 20,
+                        tint: Color.white.opacity(0.12),
+                        fillOpacity: 0.06,
+                        strokeOpacity: 0.28,
+                        shadowOpacity: 0.05,
+                        shadowRadius: 14
+                    )
+
+                    if !sources.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            InsightSectionHeader(
+                                title: "근거 글조각",
+                                systemImage: "doc.text",
+                                trailingText: "\(sources.count)"
+                            )
+
+                            VStack(spacing: 0) {
+                                ForEach(sources) { source in
+                                    InsightSourceRow(source: source)
+                                        .padding(.vertical, 10)
+
+                                    if source.id != sources.last?.id {
+                                        Divider()
+                                            .opacity(0.42)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .insightGlassSurface(
+                                cornerRadius: 18,
+                                tint: Color.white.opacity(0.10),
+                                fillOpacity: 0.045,
+                                strokeOpacity: 0.24,
+                                shadowOpacity: 0.04,
+                                shadowRadius: 12
+                            )
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .scrollIndicators(.hidden)
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        }
+        .confirmationDialog("인사이트를 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
+            Button("삭제", role: .destructive) {
+                delete()
+            }
+            Button("취소", role: .cancel) {}
+        }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .presentationBackground(.thinMaterial)
+    }
+
+    private var prompt: InsightPrompt {
+        InsightPrompt(rawValue: insight.categoryRaw) ?? .connect
+    }
+}
+
 private struct SavedInsightCard: View {
     let insight: LibraryInsight
     let canShowSources: Bool
+    let openDetail: () -> Void
     let showSources: () -> Void
-    let delete: () -> Void
-    @State private var showsDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 InsightCategoryIcon(prompt: InsightPrompt(rawValue: insight.categoryRaw) ?? .connect)
 
-                Text(insight.prompt)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color.overlineInk)
-                    .lineLimit(2)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(insight.prompt)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(Color.overlineInk)
+                        .lineLimit(2)
+
+                    Text(insight.createdAt.overlineShortDate)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer(minLength: 0)
 
-                Button {
-                    showsDeleteConfirmation = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption.weight(.bold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("인사이트 삭제")
+                InsightShareButton(item: insight.shareText)
             }
 
-            Text(insight.body)
-                .font(.subheadline)
-                .foregroundStyle(Color.overlineMutedInk)
-                .fixedSize(horizontal: false, vertical: true)
+            InsightMarkdownText(
+                text: insight.body,
+                font: .subheadline,
+                foregroundStyle: Color.overlineMutedInk,
+                lineSpacing: 4
+            )
 
             HStack(spacing: 10) {
                 if canShowSources {
@@ -1186,14 +1738,14 @@ private struct SavedInsightCard: View {
                 } else {
                     Label("\(insight.sourceCount)조각", systemImage: "doc.text")
                 }
-
-                Spacer()
-                Text(insight.createdAt.overlineShortDate)
             }
             .font(.caption2.weight(.semibold))
             .foregroundStyle(Color.overlineMutedInk.opacity(0.82))
         }
         .padding(14)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onTapGesture(perform: openDetail)
+        .accessibilityAddTraits(.isButton)
         .insightGlassSurface(
             cornerRadius: 16,
             tint: Color.white.opacity(0.11),
@@ -1202,12 +1754,30 @@ private struct SavedInsightCard: View {
             shadowOpacity: 0.05,
             shadowRadius: 14
         )
-        .confirmationDialog("인사이트를 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
-            Button("삭제", role: .destructive) {
-                delete()
-            }
-            Button("취소", role: .cancel) {}
+    }
+}
+
+private struct InsightShareButton: View {
+    let item: String
+
+    var body: some View {
+        ShareLink(item: item) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 19, weight: .regular))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
+                .frame(width: 36, height: 34)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("인사이트 공유")
+    }
+}
+
+private extension LibraryInsight {
+    var shareText: String {
+        let parts = [prompt.trimmed, body.trimmed].filter { !$0.isEmpty }
+        return parts.isEmpty ? "인사이트" : parts.joined(separator: "\n\n")
     }
 }
 

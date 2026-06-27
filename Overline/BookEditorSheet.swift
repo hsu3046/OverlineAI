@@ -23,7 +23,9 @@ struct BookEditorSheet: View {
     @State private var title = ""
     @State private var author = ""
     @State private var summary = ""
+    @State private var tagsText = ""
     @State private var publisher = ""
+    @State private var publishedDate = ""
     @State private var isbn = ""
     @State private var coverURLString = ""
     @State private var metadataSource: BookMetadataSource = .manual
@@ -36,105 +38,58 @@ struct BookEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if isAddingBook {
-                    Section("도서 찾기") {
-                        Button {
-                            isISBNScannerPresented = true
-                        } label: {
-                            Label("ISBN 스캔", systemImage: "barcode.viewfinder")
-                        }
-                        .accessibilityLabel("ISBN 바코드 스캔")
-
-                        HStack(spacing: 10) {
-                            TextField("제목, 저자, ISBN", text: $searchQuery)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .submitLabel(.search)
-                                .onSubmit {
-                                    Task {
-                                        await searchBooks()
-                                    }
-                                }
-
-                            Button {
-                                Task {
-                                    await searchBooks()
-                                }
-                            } label: {
-                                if isSearching {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                } else {
-                                    Image(systemName: "magnifyingglass")
-                                        .font(.body.weight(.semibold))
-                                }
-                            }
-                            .disabled(searchQuery.trimmed.isEmpty || isSearching)
-                            .accessibilityLabel("도서 검색")
-                        }
-
-                        if let searchErrorMessage {
-                            Text(searchErrorMessage)
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                        }
-
-                        ForEach(searchResults) { result in
-                            Button {
-                                apply(result)
-                            } label: {
-                                BookSearchResultRow(result: result)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-
-                Section {
-                    TextField("책 이름", text: $title)
-                    TextField("저자", text: $author)
-                    TextField("책 소개", text: $summary, axis: .vertical)
-                        .lineLimit(3...5)
-                }
-
-                Section("세부 정보") {
-                    TextField("출판사", text: $publisher)
-                    TextField("ISBN", text: $isbn)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("표지 URL", text: $coverURLString)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-
-                if case .edit = mode {
-                    Section {
-                        Button(role: .destructive) {
-                            showsDeleteConfirmation = true
-                        } label: {
-                            Label("삭제", systemImage: "trash")
-                        }
-                    }
-                }
-            }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("취소") {
+            VStack(spacing: 0) {
+                OverlineSheetHeader(title: navigationTitle) {
+                    OverlineSheetIconButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "취소",
+                        tint: Color.overlineMutedInk.opacity(0.72),
+                        font: .title3.weight(.semibold)
+                    ) {
                         dismiss()
                     }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("완료") {
+                } trailing: {
+                    OverlineSheetIconButton(
+                        systemImage: "checkmark",
+                        accessibilityLabel: "완료",
+                        isDisabled: title.trimmed.isEmpty
+                    ) {
                         save()
                     }
-                    .fontWeight(.semibold)
-                    .disabled(title.trimmed.isEmpty)
                 }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        if isAddingBook {
+                            searchSection
+                        }
+
+                        editorField("책 이름", prompt: "책 이름", text: $title, axis: .vertical, lineLimit: 1...3)
+                        editorField("저자", prompt: "저자", text: $author, axis: .vertical, lineLimit: 1...3)
+                        editorField("책 소개", prompt: "책 소개", text: $summary, axis: .vertical, lineLimit: 3...8)
+                        editorField("태그", prompt: "태그", text: $tagsText, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
+
+                        VStack(alignment: .leading, spacing: 14) {
+                            OverlineEditorLabel(title: "세부 정보")
+                            editorFieldContent(prompt: "출판사", text: $publisher, axis: .vertical, lineLimit: 1...2)
+                            editorFieldContent(prompt: "발행일", text: $publishedDate, autocorrectionDisabled: true)
+                            editorFieldContent(prompt: "ISBN", text: $isbn, autocorrectionDisabled: true)
+                            editorFieldContent(prompt: "표지 URL", text: $coverURLString, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
+                        }
+
+                        if case .edit = mode {
+                            deleteButton
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 8)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    .padding(.bottom, 48)
+                }
+                .scrollIndicators(.hidden)
             }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .confirmationDialog("책을 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
                 Button("삭제", role: .destructive) {
                     delete()
@@ -168,12 +123,155 @@ struct BookEditorSheet: View {
         return false
     }
 
+    private var formControlHeight: CGFloat {
+        64
+    }
+
+    private var formControlCornerRadius: CGFloat {
+        22
+    }
+
+    private var searchSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            OverlineEditorLabel(title: "도서 찾기")
+
+            VStack(spacing: 14) {
+                Button {
+                    isISBNScannerPresented = true
+                } label: {
+                    Label("ISBN 스캔", systemImage: "barcode.viewfinder")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(Color.overlineAccent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("ISBN 바코드 스캔")
+
+                Divider()
+                    .opacity(0.46)
+
+                HStack(spacing: 10) {
+                    TextField("제목, 저자, ISBN", text: $searchQuery)
+                        .font(.title3.weight(.medium))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit {
+                            Task {
+                                await searchBooks()
+                            }
+                        }
+
+                    Button {
+                        Task {
+                            await searchBooks()
+                        }
+                    } label: {
+                        if isSearching {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.title3.weight(.semibold))
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(searchQuery.trimmed.isEmpty || isSearching)
+                    .foregroundStyle(searchQuery.trimmed.isEmpty ? Color.overlineMutedInk.opacity(0.38) : Color.overlineAccent)
+                    .accessibilityLabel("도서 검색")
+                }
+
+                if let searchErrorMessage {
+                    Text(searchErrorMessage)
+                        .font(.caption)
+                        .foregroundStyle(Color.overlineCoral)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                ForEach(searchResults) { result in
+                    Button {
+                        apply(result)
+                    } label: {
+                        BookSearchResultRow(result: result)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(18)
+            .overlineGlassControl(cornerRadius: 24)
+        }
+    }
+
+    private func editorField(
+        _ label: String,
+        prompt: String,
+        text: Binding<String>,
+        axis: Axis = .horizontal,
+        lineLimit: ClosedRange<Int> = 1...1,
+        autocorrectionDisabled: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            OverlineEditorLabel(title: label)
+            editorFieldContent(
+                prompt: prompt,
+                text: text,
+                axis: axis,
+                lineLimit: lineLimit,
+                autocorrectionDisabled: autocorrectionDisabled
+            )
+        }
+    }
+
+    private func editorFieldContent(
+        prompt: String,
+        text: Binding<String>,
+        axis: Axis = .horizontal,
+        lineLimit: ClosedRange<Int> = 1...1,
+        autocorrectionDisabled: Bool = false
+    ) -> some View {
+        TextField(prompt, text: text, axis: axis)
+            .font(.title3.weight(.medium))
+            .lineLimit(lineLimit)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(autocorrectionDisabled)
+            .padding(.horizontal, 18)
+            .padding(.vertical, axis == .vertical ? 14 : 0)
+            .frame(
+                minHeight: axis == .vertical ? verticalControlHeight(for: lineLimit) : formControlHeight,
+                alignment: axis == .vertical ? .topLeading : .leading
+            )
+            .overlineGlassControl(cornerRadius: formControlCornerRadius)
+    }
+
+    private func verticalControlHeight(for lineLimit: ClosedRange<Int>) -> CGFloat {
+        lineLimit.lowerBound >= 3 ? 132 : formControlHeight
+    }
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showsDeleteConfirmation = true
+        } label: {
+            Image(systemName: "trash")
+                .font(.title2.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.overlineCoral)
+                .frame(width: 48, height: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("책 삭제")
+    }
+
     private func loadBook() {
         guard case .edit(let bookID) = mode, let book = library.book(with: bookID) else { return }
         title = book.title
         author = book.author
         summary = book.summary
+        tagsText = book.tags.joined(separator: " ")
         publisher = book.publisher ?? ""
+        publishedDate = book.publishedDate ?? ""
         isbn = book.isbn ?? ""
         coverURLString = book.coverURLString ?? ""
         metadataSource = book.metadataSource ?? .manual
@@ -189,7 +287,9 @@ struct BookEditorSheet: View {
                 title: title,
                 author: author,
                 summary: summary,
+                tagsText: tagsText,
                 publisher: publisher,
+                publishedDate: publishedDate,
                 isbn: isbn,
                 coverURLString: coverURLString,
                 metadataSource: metadataSource
@@ -200,7 +300,9 @@ struct BookEditorSheet: View {
                 title: title,
                 author: author,
                 summary: summary,
+                tagsText: tagsText,
                 publisher: publisher,
+                publishedDate: publishedDate,
                 isbn: isbn,
                 coverURLString: coverURLString,
                 metadataSource: metadataSource
@@ -211,7 +313,7 @@ struct BookEditorSheet: View {
     }
 
     @MainActor
-    private func searchBooks() async {
+    private func searchBooks(autoApplyFirstResult: Bool = false) async {
         guard !searchQuery.trimmed.isEmpty else { return }
 
         isSearching = true
@@ -233,6 +335,10 @@ struct BookEditorSheet: View {
             if results.isEmpty {
                 searchErrorMessage = "검색 결과가 없습니다."
             } else {
+                if autoApplyFirstResult, let firstResult = results.first {
+                    apply(firstResult)
+                }
+
                 if let sourceTitle = results.first?.sourceTitle {
                     MVPReadinessStore.markVerified(.kakaoSearch, detail: "\(sourceTitle) 도서 검색 성공")
                 }
@@ -250,6 +356,7 @@ struct BookEditorSheet: View {
         author = result.author.isEmpty ? "Unknown" : result.author
         summary = result.summary.isEmpty ? summary : result.summary
         publisher = result.publisher
+        publishedDate = result.publishedDate
         isbn = result.isbn
         coverURLString = result.coverURLString
         metadataSource = result.source
@@ -269,7 +376,7 @@ struct BookEditorSheet: View {
         }
 
         Task {
-            await searchBooks()
+            await searchBooks(autoApplyFirstResult: true)
         }
     }
 
@@ -301,16 +408,12 @@ private struct BookSearchResultRow: View {
                     .foregroundStyle(Color.overlineMutedInk)
                     .lineLimit(1)
 
-                Text(result.sourceTitle)
+                Text([result.publishedDate, result.sourceTitle].filter { !$0.trimmed.isEmpty }.joined(separator: " · "))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.68))
             }
 
             Spacer(minLength: 0)
-
-            Image(systemName: "plus.circle")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

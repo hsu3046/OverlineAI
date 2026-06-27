@@ -6,6 +6,7 @@ struct BookMetadataCandidate: Identifiable, Hashable {
     let author: String
     let summary: String
     let publisher: String
+    let publishedDate: String
     let isbn: String
     let coverURLString: String
     let source: BookMetadataSource
@@ -172,6 +173,7 @@ struct BookMetadataSearchClient {
                 author: (document.authors ?? []).joined(separator: ", ").trimmed,
                 summary: (document.contents ?? "").strippingHTML.trimmed,
                 publisher: (document.publisher ?? "").trimmed,
+                publishedDate: (document.datetime ?? "").normalizedPublicationDate,
                 isbn: (document.isbn ?? "").trimmed,
                 coverURLString: (document.thumbnail ?? "").normalizedHTTPSURLString,
                 source: .kakao
@@ -259,6 +261,7 @@ struct BookMetadataSearchClient {
                 author: (item.author ?? "").strippingHTML.trimmed,
                 summary: (item.description ?? "").strippingHTML.trimmed,
                 publisher: (item.publisher ?? "").trimmed,
+                publishedDate: (item.pubDate ?? "").normalizedPublicationDate,
                 isbn: isbnValues.joined(separator: " "),
                 coverURLString: (item.cover ?? "").normalizedHTTPSURLString,
                 source: .aladin
@@ -383,6 +386,7 @@ private struct KakaoBookDocument: Decodable {
     let contents: String?
     let isbn: String?
     let publisher: String?
+    let datetime: String?
     let authors: [String]?
     let thumbnail: String?
 }
@@ -420,7 +424,33 @@ private struct AladinBookItem: Decodable {
     let isbn: String?
     let isbn13: String?
     let publisher: String?
+    let pubDate: String?
     let cover: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case author
+        case description
+        case isbn
+        case isbn13
+        case publisher
+        case pubDate
+        case pubdate
+        case cover
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        author = try container.decodeIfPresent(String.self, forKey: .author)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        isbn = try container.decodeIfPresent(String.self, forKey: .isbn)
+        isbn13 = try container.decodeIfPresent(String.self, forKey: .isbn13)
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate)
+            ?? container.decodeIfPresent(String.self, forKey: .pubdate)
+        cover = try container.decodeIfPresent(String.self, forKey: .cover)
+    }
 }
 
 private extension String {
@@ -440,6 +470,16 @@ private extension String {
         return self
     }
 
+    var normalizedPublicationDate: String {
+        let trimmedValue = trimmed
+        guard !trimmedValue.isEmpty else { return "" }
+
+        if let dateOnly = trimmedValue.split(separator: "T").first, dateOnly.count == 10 {
+            return String(dateOnly)
+        }
+
+        return trimmedValue
+    }
 }
 
 private extension Array where Element: Hashable {

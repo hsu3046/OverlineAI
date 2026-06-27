@@ -57,7 +57,7 @@ struct OCRTextRecognizer {
 
             let lines = recognizedLines.map(\.text)
 
-            let text = lines.joined(separator: " ").trimmedForOCR
+            let text = OCRLineJoiner.joined(lines)
             guard !text.isEmpty else {
                 throw OCRTextRecognizerError.noTextFound
             }

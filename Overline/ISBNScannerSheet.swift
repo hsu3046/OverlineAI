@@ -224,7 +224,7 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
             }
 
             guard
-                let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                let camera = CameraDeviceSelection.preferredBackCamera(),
                 let input = try? AVCaptureDeviceInput(device: camera),
                 session.canAddInput(input)
             else {
@@ -235,6 +235,8 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
             session.beginConfiguration()
             session.sessionPreset = .high
             session.addInput(input)
+            CameraDeviceSelection.logSelectedCamera(camera)
+            CameraDeviceSelection.applyPreferredCenterCropZoom(to: camera)
 
             let metadataOutput = AVCaptureMetadataOutput()
             guard session.canAddOutput(metadataOutput) else {

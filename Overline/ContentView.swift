@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .capture
     @State private var isBottomMenuCompact = false
     @State private var isForwardTabTransition = true
+    @State private var libraryRootResetToken = 0
 
     var body: some View {
         ZStack {
@@ -36,7 +37,7 @@ struct ContentView: View {
             .padding(.bottom, 8)
         }
         .tint(Color.overlineAccent)
-        .background(Color.overlineCanvas.ignoresSafeArea())
+        .background(OverlineCanvasBackground().ignoresSafeArea())
         .environment(\.setBottomMenuCompact, setBottomMenuCompact)
         .onAppear {
             recordAppOpen()
@@ -63,7 +64,7 @@ struct ContentView: View {
             }
         case .library:
             NavigationStack {
-                LibraryView()
+                LibraryView(rootResetToken: libraryRootResetToken)
             }
         case .insights:
             NavigationStack {
@@ -85,7 +86,13 @@ struct ContentView: View {
     }
 
     private func selectTab(_ tab: AppTab) {
-        guard selectedTab != tab else { return }
+        guard selectedTab != tab else {
+            if tab == .library {
+                libraryRootResetToken += 1
+            }
+            setBottomMenuCompact(false)
+            return
+        }
 
         isForwardTabTransition = tab.order > selectedTab.order
         withAnimation(OverlineMotion.tab) {
@@ -168,7 +175,6 @@ private struct OverlineBottomMenuItem: View {
 
     var body: some View {
         Button {
-            guard selectedTab != tab else { return }
             selectTab(tab)
         } label: {
             tabLabel
@@ -249,7 +255,6 @@ private extension View {
                     .padding(.horizontal, 24)
                     .padding(.top, 1)
             }
-            .shadow(color: Color.black.opacity(0.15), radius: 24, y: 10)
     }
 
     func metricCardChrome(color: Color, cornerRadius: CGFloat) -> some View {
@@ -265,7 +270,6 @@ private extension View {
                     .padding(.leading, 14)
                     .padding(.top, 10)
             }
-            .shadow(color: Color.black.opacity(0.08), radius: 14, y: 6)
     }
 }
 
@@ -324,6 +328,52 @@ extension Color {
     static let overlineCoral = Color(red: 0.84, green: 0.31, blue: 0.25)
     static let overlinePlum = Color(red: 0.34, green: 0.20, blue: 0.40)
     static let overlineHighlight = Color(red: 1.00, green: 0.83, blue: 0.22)
+}
+
+struct OverlineCanvasBackground: View {
+    var body: some View {
+        Color.overlineCanvas
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.10),
+                        Color.clear,
+                        Color.overlineMutedInk.opacity(0.035)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+            .overlay {
+                OverlineCanvasTexture()
+            }
+    }
+}
+
+private struct OverlineCanvasTexture: View {
+    var body: some View {
+        Canvas { context, size in
+            var grain = Path()
+            let spacing: CGFloat = 9
+            for y in stride(from: CGFloat.zero, through: size.height, by: spacing) {
+                for x in stride(from: CGFloat.zero, through: size.width, by: spacing) {
+                    let column = Int((x / spacing).rounded(.down))
+                    let row = Int((y / spacing).rounded(.down))
+                    guard (column + row).isMultiple(of: 3) else { continue }
+                    grain.addEllipse(in: CGRect(x: x, y: y, width: 0.65, height: 0.65))
+                }
+            }
+            context.fill(grain, with: .color(Color.white.opacity(0.06)))
+
+            var fibers = Path()
+            for y in stride(from: CGFloat(6), through: size.height, by: 22) {
+                fibers.move(to: CGPoint(x: 0, y: y))
+                fibers.addLine(to: CGPoint(x: size.width, y: y + 1.2))
+            }
+            context.stroke(fibers, with: .color(Color.overlineMutedInk.opacity(0.018)), lineWidth: 0.45)
+        }
+        .allowsHitTesting(false)
+    }
 }
 
 struct SectionHeader: View {

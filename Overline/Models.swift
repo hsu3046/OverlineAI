@@ -145,7 +145,6 @@ struct Highlight: Identifiable, Hashable, Codable {
     var tags: [String]
     var stickyTone: StickyTone
     var source: HighlightSource
-    var snapshotFileName: String?
     var reviewedAt: Date?
 
     init(
@@ -158,7 +157,6 @@ struct Highlight: Identifiable, Hashable, Codable {
         tags: [String],
         stickyTone: StickyTone,
         source: HighlightSource,
-        snapshotFileName: String? = nil,
         reviewedAt: Date? = nil
     ) {
         self.id = id
@@ -170,7 +168,6 @@ struct Highlight: Identifiable, Hashable, Codable {
         self.tags = tags
         self.stickyTone = stickyTone
         self.source = source
-        self.snapshotFileName = snapshotFileName
         self.reviewedAt = reviewedAt
     }
 }
@@ -672,7 +669,7 @@ enum MVPReadinessItem: String, Codable, CaseIterable, Identifiable {
         case .pageBoundary:
             "페이지 경계 감지"
         case .snapshotCrop:
-            "캡처 스냅샷 저장"
+            "원문 사진 미저장"
         case .lowLight:
             "저조도 캡처"
         case .isbnScan:
@@ -1052,7 +1049,9 @@ struct ReadingBook: Identifiable, Hashable, Codable {
     var title: String
     var author: String
     var summary: String
+    var tags: [String]
     var publisher: String?
+    var publishedDate: String?
     var isbn: String?
     var coverURLString: String?
     var metadataSource: BookMetadataSource?
@@ -1064,7 +1063,9 @@ struct ReadingBook: Identifiable, Hashable, Codable {
         title: String,
         author: String,
         summary: String,
+        tags: [String] = [],
         publisher: String? = nil,
+        publishedDate: String? = nil,
         isbn: String? = nil,
         coverURLString: String? = nil,
         metadataSource: BookMetadataSource? = .manual,
@@ -1075,12 +1076,45 @@ struct ReadingBook: Identifiable, Hashable, Codable {
         self.title = title
         self.author = author
         self.summary = summary
+        self.tags = tags
         self.publisher = publisher
+        self.publishedDate = publishedDate
         self.isbn = isbn
         self.coverURLString = coverURLString
         self.metadataSource = metadataSource
         self.coverTheme = coverTheme
         self.highlights = highlights
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case author
+        case summary
+        case tags
+        case publisher
+        case publishedDate
+        case isbn
+        case coverURLString
+        case metadataSource
+        case coverTheme
+        case highlights
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        author = try container.decode(String.self, forKey: .author)
+        summary = try container.decode(String.self, forKey: .summary)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        publishedDate = try container.decodeIfPresent(String.self, forKey: .publishedDate)
+        isbn = try container.decodeIfPresent(String.self, forKey: .isbn)
+        coverURLString = try container.decodeIfPresent(String.self, forKey: .coverURLString)
+        metadataSource = try container.decodeIfPresent(BookMetadataSource.self, forKey: .metadataSource)
+        coverTheme = try container.decode(CoverTheme.self, forKey: .coverTheme)
+        highlights = try container.decode([Highlight].self, forKey: .highlights)
     }
 }
 
@@ -1093,14 +1127,6 @@ struct LibraryStateSnapshot: Codable, Equatable {
         books.isEmpty && insights.isEmpty
     }
 
-    var snapshotFileNames: Set<String> {
-        Set(
-            books
-                .flatMap(\.highlights)
-                .compactMap(\.snapshotFileName)
-                .filter { !$0.trimmed.isEmpty }
-        )
-    }
 }
 
 struct LibraryStorageStatus: Equatable {
@@ -1231,10 +1257,8 @@ private struct CapturedHighlightMetadata {
             ?? Self.extractedPageReference(from: memo)
             ?? fallbackPageReference
 
-        let defaultTags = [detectedLanguage.tag, "#인용"]
         tags = Self.deduplicated(
-            defaultTags
-            + Self.extractedTags(from: memo)
+            Self.extractedTags(from: memo)
             + Self.normalizedTags(from: tagsText)
         )
     }
@@ -1282,7 +1306,7 @@ private struct CapturedHighlightMetadata {
         return normalizedPageReference(trimmedValue)
     }
 
-    private static func normalizedTags(from text: String) -> [String] {
+    static func normalizedTags(from text: String) -> [String] {
         text
             .split(whereSeparator: { $0.isWhitespace || $0 == "," })
             .compactMap { token -> String? in
@@ -1302,7 +1326,7 @@ private struct CapturedHighlightMetadata {
             .trimmed
 
         guard !digitsAndRange.isEmpty else { return value.trimmed }
-        return "p. \(digitsAndRange)"
+        return "p.\(digitsAndRange)"
     }
 
     static func deduplicated(_ tags: [String]) -> [String] {
@@ -1339,7 +1363,7 @@ enum PageReferenceInference {
         guard hasPageMarker || edgeDistance <= 0.24 else { return nil }
         guard line.boundingBox.width <= 0.30, line.boundingBox.height <= 0.10 else { return nil }
 
-        let pageReference = "p. \(pageNumber)"
+        let pageReference = "p.\(pageNumber)"
         let score = edgeDistance
             + line.boundingBox.width * 0.45
             + line.boundingBox.height * 0.45
@@ -1509,7 +1533,9 @@ final class ReadingLibrary {
         title: String,
         author: String,
         summary: String,
+        tagsText: String = "",
         publisher: String = "",
+        publishedDate: String = "",
         isbn: String = "",
         coverURLString: String = "",
         metadataSource: BookMetadataSource = .manual
@@ -1518,7 +1544,9 @@ final class ReadingLibrary {
             title: title.trimmed.isEmpty ? "새 책" : title.trimmed,
             author: author.trimmed.isEmpty ? "Unknown" : author.trimmed,
             summary: summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed,
+            tags: CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText)),
             publisher: publisher.trimmed.nilIfEmpty,
+            publishedDate: publishedDate.trimmed.nilIfEmpty,
             isbn: isbn.trimmed.nilIfEmpty,
             coverURLString: coverURLString.trimmed.nilIfEmpty,
             metadataSource: metadataSource,
@@ -1537,7 +1565,9 @@ final class ReadingLibrary {
         title: String,
         author: String,
         summary: String,
+        tagsText: String = "",
         publisher: String = "",
+        publishedDate: String = "",
         isbn: String = "",
         coverURLString: String = "",
         metadataSource: BookMetadataSource = .manual
@@ -1547,7 +1577,9 @@ final class ReadingLibrary {
         books[index].title = title.trimmed.isEmpty ? books[index].title : title.trimmed
         books[index].author = author.trimmed.isEmpty ? "Unknown" : author.trimmed
         books[index].summary = summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed
+        books[index].tags = CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText))
         books[index].publisher = publisher.trimmed.nilIfEmpty
+        books[index].publishedDate = publishedDate.trimmed.nilIfEmpty
         books[index].isbn = isbn.trimmed.nilIfEmpty
         books[index].coverURLString = coverURLString.trimmed.nilIfEmpty
         books[index].metadataSource = metadataSource
@@ -1555,11 +1587,6 @@ final class ReadingLibrary {
     }
 
     func deleteBook(_ bookID: ReadingBook.ID) {
-        guard let book = books.first(where: { $0.id == bookID }) else { return }
-
-        book.highlights.forEach { highlight in
-            HighlightSnapshotStore.delete(highlight.snapshotFileName)
-        }
         books.removeAll { $0.id == bookID }
 
         if selectedBookID == bookID {
@@ -1574,12 +1601,11 @@ final class ReadingLibrary {
         text: String,
         memo: String,
         language: CaptureLanguage,
-        pageReference: String = "p. 42",
+        pageReference: String = "p.42",
         explicitPageReference: String = "",
         tagsText: String = "",
         bookID: ReadingBook.ID? = nil,
-        stickyTone: StickyTone? = nil,
-        snapshotData: Data? = nil
+        stickyTone: StickyTone? = nil
     ) -> Highlight {
         let metadata = CapturedHighlightMetadata(
             memo: memo,
@@ -1589,21 +1615,22 @@ final class ReadingLibrary {
             tagsText: tagsText
         )
 
-        var highlight = Highlight(
-            text: text.trimmed,
-            memo: memo.trimmed,
+        let targetBookID = bookID ?? selectedBookID
+        let normalizedText = text.normalizedQuotesForStorage.trimmed
+        let normalizedMemo = memo.normalizedQuotesForStorage.trimmed
+        let highlightTags = CapturedHighlightMetadata.deduplicated(defaultTags(for: targetBookID) + metadata.tags)
+
+        let highlight = Highlight(
+            text: normalizedText,
+            memo: normalizedMemo,
             pageReference: metadata.pageReference,
             language: language,
-            tags: metadata.tags,
+            tags: highlightTags,
             stickyTone: stickyTone ?? StickyTone.allCases[recentHighlights.count % StickyTone.allCases.count],
             source: .capture
         )
 
-        if let snapshotData {
-            highlight.snapshotFileName = HighlightSnapshotStore.save(snapshotData, for: highlight.id)
-        }
-
-        append(highlight, to: bookID ?? selectedBookID)
+        append(highlight, to: targetBookID)
         persist()
         return highlight
     }
@@ -1616,24 +1643,27 @@ final class ReadingLibrary {
         bookID: ReadingBook.ID? = nil,
         stickyTone: StickyTone = .mint
     ) -> Highlight {
-        let detectedLanguage = CaptureLanguage.detect(from: thought)
+        let normalizedThought = thought.normalizedQuotesForStorage
+        let detectedLanguage = CaptureLanguage.detect(from: normalizedThought)
         let metadata = CapturedHighlightMetadata(
-            memo: thought,
+            memo: normalizedThought,
             detectedLanguage: detectedLanguage,
             fallbackPageReference: "Inbox",
             explicitPageReference: pageReference,
             tagsText: tagsText
         )
+        let targetBookID = bookID ?? selectedBookID
+        let highlightTags = CapturedHighlightMetadata.deduplicated(defaultTags(for: targetBookID) + metadata.tags)
         let highlight = Highlight(
-            text: thought.trimmed,
+            text: normalizedThought.trimmed,
             memo: "Shortcut",
             pageReference: metadata.pageReference,
             language: detectedLanguage,
-            tags: CapturedHighlightMetadata.deduplicated(["#아이디어"] + metadata.tags),
+            tags: highlightTags,
             stickyTone: stickyTone,
             source: .shortcut
         )
-        append(highlight, to: bookID ?? selectedBookID)
+        append(highlight, to: targetBookID)
         persist()
         return highlight
     }
@@ -1667,12 +1697,7 @@ final class ReadingLibrary {
         let snapshot = currentSnapshot
         if !snapshot.isEmpty {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
-            HighlightSnapshotStore.backupForReset(fileNames: snapshot.snapshotFileNames)
         }
-
-        books
-            .flatMap(\.highlights)
-            .forEach { HighlightSnapshotStore.delete($0.snapshotFileName) }
 
         books = []
         savedInsights = []
@@ -1691,7 +1716,6 @@ final class ReadingLibrary {
             return false
         }
 
-        HighlightSnapshotStore.restoreResetBackup(fileNames: snapshot.snapshotFileNames)
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
@@ -1712,6 +1736,7 @@ final class ReadingLibrary {
         pageReference: String,
         tagsText: String,
         bookID: ReadingBook.ID? = nil,
+        stickyTone: StickyTone? = nil,
         isReviewed: Bool = false
     ) {
         guard
@@ -1723,13 +1748,14 @@ final class ReadingLibrary {
             return
         }
 
-        let trimmedText = text.trimmed
+        let trimmedText = text.normalizedQuotesForStorage.trimmed
         guard !trimmedText.isEmpty else { return }
 
         let tags = tagsText
             .split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" })
             .map { String($0).trimmed }
             .filter { !$0.isEmpty }
+            .map { $0.hasPrefix("#") ? $0 : "#\($0)" }
 
         let detectedLanguage = CaptureLanguage.detect(from: trimmedText)
         let targetBookID = bookID ?? books[bookIndex].id
@@ -1737,10 +1763,11 @@ final class ReadingLibrary {
 
         var updatedHighlight = books[bookIndex].highlights[highlightIndex]
         updatedHighlight.text = trimmedText
-        updatedHighlight.memo = memo.trimmed
-        updatedHighlight.pageReference = pageReference.trimmed.isEmpty ? "p. ?" : pageReference.trimmed
+        updatedHighlight.memo = memo.normalizedQuotesForStorage.trimmed
+        updatedHighlight.pageReference = pageReference.trimmed.isEmpty ? "p.?" : pageReference.trimmed
         updatedHighlight.language = detectedLanguage
-        updatedHighlight.tags = tags.isEmpty ? [detectedLanguage.tag] : tags
+        updatedHighlight.tags = CapturedHighlightMetadata.deduplicated(tags)
+        updatedHighlight.stickyTone = stickyTone ?? updatedHighlight.stickyTone
         updatedHighlight.reviewedAt = isReviewed ? (updatedHighlight.reviewedAt ?? .now) : nil
 
         if targetBookIndex == bookIndex {
@@ -1758,13 +1785,11 @@ final class ReadingLibrary {
         guard
             let bookIndex = books.firstIndex(where: { book in
                 book.highlights.contains { $0.id == highlightID }
-            }),
-            let highlight = books[bookIndex].highlights.first(where: { $0.id == highlightID })
+            })
         else {
             return
         }
 
-        HighlightSnapshotStore.delete(highlight.snapshotFileName)
         books[bookIndex].highlights.removeAll { $0.id == highlightID }
         persist()
     }
@@ -1791,6 +1816,17 @@ final class ReadingLibrary {
         selectedBookID = books[targetIndex].id
     }
 
+    private func defaultTags(for bookID: ReadingBook.ID?) -> [String] {
+        guard
+            let bookID,
+            let book = books.first(where: { $0.id == bookID })
+        else {
+            return []
+        }
+
+        return book.tags
+    }
+
     private func persist() {
         refreshDerivedState()
         let snapshot = currentSnapshot
@@ -1815,9 +1851,8 @@ final class ReadingLibrary {
     }
 
     private func cleanupSnapshotFilesIfNeeded() {
-        guard persistence != nil else { return }
-
-        HighlightSnapshotStore.cleanup(keeping: currentSnapshot.snapshotFileNames)
+        HighlightSnapshotStore.cleanup()
+        HighlightSnapshotStore.clearResetBackup()
     }
 
     private var currentSnapshot: LibraryStateSnapshot {
@@ -1933,7 +1968,7 @@ enum SampleData {
                 Highlight(
                     text: "책에 직접 선을 긋지 않아도, 문장은 이미 나를 통과하고 있었다.",
                     memo: "빌린 책이라는 제약이 오히려 기록 방식을 바꾼다.",
-                    pageReference: "p. 18",
+                    pageReference: "p.18",
                     createdAt: .now.addingTimeInterval(-1800),
                     language: .korean,
                     tags: ["#철학", "#인용"],
@@ -1943,7 +1978,7 @@ enum SampleData {
                 Highlight(
                     text: "A note is not a copy of reading. It is the shape reading leaves behind.",
                     memo: "Socratic Mode 첫 질문 후보.",
-                    pageReference: "p. 31",
+                    pageReference: "p.31",
                     createdAt: .now.addingTimeInterval(-3600),
                     language: .english,
                     tags: ["#아이디어"],
@@ -1961,7 +1996,7 @@ enum SampleData {
                 Highlight(
                     text: "Every underline is a coordinate for returning.",
                     memo: "Cross-book 연결: 회귀, 좌표, 기억.",
-                    pageReference: "p. 7",
+                    pageReference: "p.7",
                     createdAt: .now.addingTimeInterval(-86400),
                     language: .english,
                     tags: ["#theme"],
@@ -1995,7 +2030,7 @@ extension Date {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "M월d HH:mm"
+        formatter.dateFormat = "M월d일(E) HH:mm"
         return formatter.string(from: self)
     }
 }
@@ -2003,6 +2038,10 @@ extension Date {
 extension String {
     nonisolated var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated var normalizedQuotesForStorage: String {
+        replacingOccurrences(of: "[“”„‟«»＂]", with: "\"", options: .regularExpression)
     }
 
     nonisolated var nilIfEmpty: String? {

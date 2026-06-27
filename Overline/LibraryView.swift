@@ -5,6 +5,7 @@ import UIKit
 
 struct LibraryView: View {
     @Environment(ReadingLibrary.self) private var library
+    var rootResetToken = 0
     @State private var presentedSheet: LibrarySheet?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
@@ -79,7 +80,7 @@ struct LibraryView: View {
                                     activeBookID = book.id
                                 } label: {
                                     BookCoverCard(book: book)
-                                        .frame(width: 168)
+                                        .containerRelativeFrame(.horizontal, count: 3, spacing: 14)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("\(book.title) 열기")
@@ -107,8 +108,7 @@ struct LibraryView: View {
             HStack(spacing: 10) {
                 SectionHeader(
                     title: "최근 글조각",
-                    systemImage: "quote.opening",
-                    trailingText: "\(library.highlightCount)"
+                    systemImage: "quote.opening"
                 )
 
                 if library.highlightCount > displayedHighlights.count {
@@ -126,7 +126,7 @@ struct LibraryView: View {
             .listRowChrome(top: 10, bottom: 8)
 
             ForEach(displayedHighlights) { highlight in
-                HighlightRow(
+                ScrapbookCard(
                     highlight: highlight,
                     edit: {
                         presentedSheet = .editHighlight(highlight.id)
@@ -174,17 +174,20 @@ struct LibraryView: View {
             }
             Button("취소", role: .cancel) {}
         } message: {
-            Text("초기화 직전의 책, 글조각, 인사이트, 캡처 스냅샷을 이 기기 안의 복구 백업에서 되돌립니다.")
+            Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
         }
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
-        .background(Color.overlineCanvas.ignoresSafeArea())
+        .background(OverlineCanvasBackground().ignoresSafeArea())
         .navigationDestination(isPresented: isBookNavigationPresented) {
             if let activeBookID {
                 ScrapbookView(bookID: activeBookID)
             } else {
                 EmptyView()
             }
+        }
+        .onChange(of: rootResetToken) { _, _ in
+            activeBookID = nil
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -220,7 +223,7 @@ struct LibraryView: View {
     }
 
     private var displayedHighlights: [Highlight] {
-        return Array(library.recentHighlights.prefix(4))
+        return Array(library.recentHighlights.prefix(10))
     }
 
     private var isBookNavigationPresented: Binding<Bool> {
@@ -317,78 +320,92 @@ private struct HighlightBrowserSheet: View {
     @Environment(ReadingLibrary.self) private var library
     @State private var searchText = ""
     @State private var selectedBookID: ReadingBook.ID?
+    @State private var isBookFilterPresented = false
     @State private var presentedHighlight: HighlightEditorPresentation?
 
     var body: some View {
         NavigationStack {
-            List {
-                if !library.books.isEmpty {
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            HighlightFilterChip(
-                                title: "전체",
-                                count: library.highlightCount,
-                                isSelected: selectedBookID == nil
+            VStack(spacing: 0) {
+                if !library.recentHighlights.isEmpty {
+                    VStack(spacing: 10) {
+                        if !library.books.isEmpty {
+                            OverlineBookSelectorButton(
+                                title: selectedBookFilterTitle,
+                                subtitle: "\(filteredHighlights.count)조각",
+                                systemImage: selectedBookID == nil ? "tray.full" : "book.closed",
+                                height: 52,
+                                cornerRadius: 26,
+                                titleFont: .subheadline.weight(.semibold),
+                                subtitleFont: .caption2.weight(.semibold)
                             ) {
-                                selectedBookID = nil
-                            }
-
-                            ForEach(library.books) { book in
-                                HighlightFilterChip(
-                                    title: book.title,
-                                    count: book.highlights.count,
-                                    isSelected: selectedBookID == book.id
-                                ) {
-                                    selectedBookID = book.id
-                                }
+                                isBookFilterPresented = true
                             }
                         }
-                        .padding(.vertical, 2)
+
+                        OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 책 검색")
                     }
-                    .scrollIndicators(.hidden)
-                    .listRowChrome(top: 8, bottom: 10)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 10)
                 }
 
-                ForEach(filteredHighlights) { highlight in
-                    HighlightRow(
-                        highlight: highlight,
-                        edit: {
-                            presentedHighlight = HighlightEditorPresentation(id: highlight.id)
+                List {
+                    ForEach(filteredHighlights) { highlight in
+                        ScrapbookCard(
+                            highlight: highlight,
+                            edit: {
+                                presentedHighlight = HighlightEditorPresentation(id: highlight.id)
+                            }
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteHighlight(highlight)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                            .tint(.red)
                         }
-                    )
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            deleteHighlight(highlight)
-                        } label: {
-                            Label("삭제", systemImage: "trash")
-                        }
-                        .tint(.red)
+                        .listRowChrome(top: 0, bottom: 12)
                     }
-                    .listRowChrome(top: 0, bottom: 12)
-                }
 
-                if filteredHighlights.isEmpty {
-                    ContentUnavailableView(
-                        searchText.trimmed.isEmpty ? "글조각 없음" : "검색 결과 없음",
-                        systemImage: "text.viewfinder",
-                        description: Text(searchText.trimmed.isEmpty ? "캡처한 글조각이 여기에 모입니다." : "다른 단어, 태그, 책 이름으로 찾아보세요.")
-                    )
-                    .listRowChrome(top: 24, bottom: 24)
+                    if filteredHighlights.isEmpty {
+                        ContentUnavailableView(
+                            searchText.trimmed.isEmpty ? "글조각 없음" : "검색 결과 없음",
+                            systemImage: "text.viewfinder",
+                            description: Text(searchText.trimmed.isEmpty ? "캡처한 글조각이 여기에 모입니다." : "다른 단어, 태그, 책 이름으로 찾아보세요.")
+                        )
+                        .listRowChrome(top: 24, bottom: 24)
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color.overlineCanvas.ignoresSafeArea())
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle("글조각")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "글조각, 태그, 책 검색")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("완료") {
+                    OverlineDoneToolbarButton {
                         dismiss()
                     }
-                    .fontWeight(.semibold)
                 }
+            }
+            .sheet(isPresented: $isBookFilterPresented) {
+                OverlineBookPickerSheet(
+                    title: "책 선택",
+                    books: library.books,
+                    selectedBookID: selectedBookID,
+                    includesAllOption: true,
+                    allTitle: "전체",
+                    allCount: library.highlightCount,
+                    onSelect: { bookID in
+                        selectedBookID = bookID
+                    }
+                )
+                .presentationDetents([.height(bookFilterSheetHeight), .medium])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.thinMaterial)
             }
             .sheet(item: $presentedHighlight) { presentation in
                 HighlightEditorSheet(highlightID: presentation.id)
@@ -396,6 +413,16 @@ private struct HighlightBrowserSheet: View {
                     .presentationDragIndicator(.visible)
             }
         }
+        .presentationBackground(.thinMaterial)
+    }
+
+    private var selectedBookFilterTitle: String {
+        guard let selectedBookID else { return "전체" }
+        return library.book(with: selectedBookID)?.title ?? "전체"
+    }
+
+    private var bookFilterSheetHeight: CGFloat {
+        OverlineBookPickerMetrics.sheetHeight(bookCount: library.books.count, includesAllOption: true)
     }
 
     private var filteredHighlights: [Highlight] {
@@ -430,38 +457,6 @@ private struct HighlightBrowserSheet: View {
 
 private struct HighlightEditorPresentation: Identifiable {
     let id: Highlight.ID
-}
-
-private struct HighlightFilterChip: View {
-    let title: String
-    let count: Int
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Text(title)
-                    .lineLimit(1)
-
-                Text("\(count)")
-                    .foregroundStyle(Color.overlineMutedInk.opacity(isSelected ? 0.72 : 0.54))
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(isSelected ? Color.overlineInk : Color.overlineMutedInk.opacity(0.78))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.46) : Color.white.opacity(0.20))
-            }
-            .overlay {
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(isSelected ? 0.58 : 0.28), lineWidth: 1)
-            }
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 private struct MVPReadinessSheet: View {
@@ -571,9 +566,9 @@ private struct MVPReadinessSheet: View {
                     )
 
                     MVPReadinessToggle(
-                        title: "캡처 스냅샷 저장",
-                        detail: "선택한 문장 주변 이미지가 책장 상세에 저장됨",
-                        systemImage: "crop",
+                        title: "원문 사진 미저장",
+                        detail: "OCR 완료 후 사진은 폐기하고 글조각만 저장",
+                        systemImage: "photo.badge.minus",
                         verifiedAt: checklist.snapshotCropVerifiedAt,
                         isOn: $checklist.snapshotCropVerified
                     )
@@ -727,7 +722,7 @@ private struct MVPReadinessSheet: View {
 
         현장 절차
         1. 실제 iPhone에서 책 한 줄을 swipe해 10초 안에 저장
-        2. OCR 정확도, 페이지 경계, 스냅샷, 저조도, ISBN, 음성 메모 확인
+        2. OCR 정확도, 페이지 경계, 원문 사진 미저장, 저조도, ISBN, 음성 메모 확인
         3. 도서 API와 LLM 연결 테스트 성공 날짜 확인
         4. 테스트 세션 기록에서 실제 iPhone 10/10 세션 저장
         5. 검증 리포트의 MVP 판정이 통과 가능인지 확인
@@ -1014,7 +1009,7 @@ private struct MVPDeviceTestSessionLogView: View {
                 }
                 .font(.subheadline.weight(.semibold))
             } footer: {
-                Text("원문, 스냅샷, API 키는 이 기록에 포함하지 않습니다.")
+                Text("원문 사진과 API 키는 이 기록에 포함하지 않습니다.")
             }
 
             if let lastSavedSession {
@@ -1272,7 +1267,7 @@ private struct MVPReadinessTestPlanView: View {
             steps: [
                 "실제 iPhone에서 실행하고 카메라, 마이크, 음성 인식 권한을 허용",
                 "MVP 점검의 검증 리포트에서 프리플라이트 준비 상태를 확인",
-                "도서 API 키 준비, LLM API 키 준비, 주 저장소, 백업 저장, 스냅샷 정책이 준비 상태인지 확인",
+                "도서 API 키 준비, LLM API 키 준비, 주 저장소, 백업 저장, 원문 사진 미저장 정책이 준비 상태인지 확인",
                 "한국어 종이책 1권과 ISBN 바코드가 보이는 뒷표지 준비",
                 "실제 검색과 연결 테스트로 도서 API와 LLM 연결 날짜를 남기기"
             ]
@@ -1284,7 +1279,7 @@ private struct MVPReadinessTestPlanView: View {
                 "캡처 탭을 열고 페이지를 2초 정도 비춘 뒤 문장 위를 가로로 긋기",
                 "페이지 윤곽선이 실제 종이 페이지에 맞게 따라오는지 확인",
                 "글조각 저장 상태에 10초 이하 시간이 표시되는지 확인",
-                "책장 상세에서 캡처 스냅샷과 OCR 텍스트가 함께 저장됐는지 확인",
+                "책장 상세에서 OCR 텍스트만 저장되고 원문 사진이 남지 않는지 확인",
                 "조명이 어두울 때 저조도 안내와 플래시 토글이 실제로 동작하는지 확인"
             ]
         ),
@@ -1396,7 +1391,7 @@ private struct MVPReadinessTestPlanView: View {
         - 시뮬레이터 세션은 UI 빌드 확인용입니다.
         - 기능 점검 10/10은 체크리스트 완료이고, MVP 통과 가능은 실제 iPhone 세션까지 통과한 상태입니다.
         - 도서 API 키 준비와 LLM API 키 준비는 프리플라이트이고, 도서 API와 LLM 연결은 실제 검증 증거입니다.
-        - 원문, 스냅샷, API 키는 이 체크리스트에 포함하지 않습니다.
+        - 원문 사진과 API 키는 이 체크리스트에 포함하지 않습니다.
 
         \(sectionText)
 
@@ -1567,7 +1562,6 @@ private struct MVPPreflightStatus {
         let configuredLLMTitle = configuredLLMProviders.isEmpty
             ? "대기"
             : configuredLLMProviders.map { $0.shortTitle }.joined(separator: ", ")
-        let snapshotPolicyLabel = HighlightSnapshotStore.storagePolicyLabel
 
         return MVPPreflightStatus(
             rows: [
@@ -1624,10 +1618,10 @@ private struct MVPPreflightStatus {
                     isReady: library.storageStatus.fallbackSaveSucceeded
                 ),
                 MVPPreflightRow(
-                    systemImage: "photo.on.rectangle",
-                    title: "스냅샷 정책",
-                    value: snapshotPolicyLabel,
-                    isReady: snapshotPolicyLabel == "로컬 저장 · 백업 제외"
+                    systemImage: "photo.badge.minus",
+                    title: "원문 사진",
+                    value: "OCR 후 폐기",
+                    isReady: true
                 ),
                 MVPPreflightRow(
                     systemImage: "hand.raised",
@@ -1846,14 +1840,14 @@ private struct MVPReadinessReportView: View {
                 MVPReportMetricRow(systemImage: "building.columns", title: "도서 DB 출처", value: metadataSourceSummary)
                 MVPReportMetricRow(systemImage: "text.badge.checkmark", title: "출처 표기", value: "책 상세 하단")
                 MVPReportMetricRow(
-                    systemImage: "externaldrive",
-                    title: "캡처 스냅샷",
-                    value: "\(snapshotHighlightCount)개 로컬 저장"
+                    systemImage: "photo.badge.minus",
+                    title: "원문 사진",
+                    value: "저장 안 함"
                 )
                 MVPReportMetricRow(
                     systemImage: "lock.shield",
-                    title: "스냅샷 정책",
-                    value: HighlightSnapshotStore.storagePolicyLabel
+                    title: "사진 정책",
+                    value: "OCR 후 폐기"
                 )
                 MVPReportMetricRow(
                     systemImage: "key",
@@ -2167,13 +2161,6 @@ private struct MVPReadinessReportView: View {
         .count
     }
 
-    private var snapshotHighlightCount: Int {
-        library.books
-            .flatMap(\.highlights)
-            .filter { !($0.snapshotFileName ?? "").trimmed.isEmpty }
-            .count
-    }
-
     private var metadataSourceSummary: String {
         let grouped = Dictionary(grouping: library.books) { book in
             book.metadataSource ?? .manual
@@ -2277,8 +2264,8 @@ private struct MVPReadinessReportView: View {
         표지 이미지: \(coverURLReferenceCount)권 URL 참조
         표지 저장: 앱 저장 없음
         도서 DB 출처: \(metadataSourceSummary)
-        캡처 스냅샷: \(snapshotHighlightCount)개 로컬 저장
-        스냅샷 정책: \(HighlightSnapshotStore.storagePolicyLabel)
+        원문 사진: 저장 안 함
+        사진 정책: OCR 후 폐기
         API 키 보관: \(KeychainStringStore.storagePolicyLabel)
         개인정보 매니페스트: \(MVPPrivacyManifestStatus.label)
         권한 문구: \(MVPPermissionPurposeStatus.label)
@@ -2522,9 +2509,9 @@ private struct MVPReadinessReportView: View {
             ),
             MVPReportRemainingItem(
                 isDone: checklist.snapshotCropVerified,
-                systemImage: "crop",
-                title: "캡처 스냅샷 저장",
-                detail: "저장된 글조각 상세에서 선택 영역 스냅샷 확인"
+                systemImage: "photo.badge.minus",
+                title: "원문 사진 미저장",
+                detail: "캡처 후 글조각만 저장되고 원문 사진은 남지 않는지 확인"
             ),
             MVPReportRemainingItem(
                 isDone: checklist.lowLightVerified,
@@ -2905,41 +2892,18 @@ private struct BookCoverCard: View {
     let book: ReadingBook
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .bottomLeading) {
-                BookCoverArtwork(book: book, cornerRadius: 8)
-                    .aspectRatio(0.72, contentMode: .fit)
-                    .overlay(alignment: .topTrailing) {
-                        Text("\(book.highlights.count)")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
-                            .background(.black.opacity(0.28), in: Capsule())
-                            .padding(10)
-                    }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(book.title)
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(book.author)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
-                }
-                .frame(height: 52, alignment: .bottomLeading)
-                .padding(14)
+        BookCoverArtwork(book: book, cornerRadius: 8)
+            .aspectRatio(0.72, contentMode: .fit)
+            .overlay(alignment: .topTrailing) {
+                Text("\(book.highlights.count)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.28), in: Capsule())
+                    .padding(10)
             }
-        }
-        .padding(8)
-        .background(Color.overlinePaper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.08), lineWidth: 1)
-        }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -2958,16 +2922,17 @@ private struct HighlightRow: View {
                     Text(highlight.text)
                         .font(.body.weight(.medium))
                         .foregroundStyle(Color.overlineInk)
-                        .lineLimit(3)
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 8) {
                         if let pageReference = highlight.visiblePageReference {
                             Text(pageReference)
                         }
-                        Text(highlight.createdAt.overlineShortDate)
                         ForEach(highlight.tags.prefix(2), id: \.self) { tag in
                             Text(tag)
                         }
+                        Text(highlight.createdAt.overlineShortDate)
                     }
                     .font(.caption)
                     .foregroundStyle(Color.overlineMutedInk)
@@ -2993,6 +2958,7 @@ struct ScrapbookView: View {
     @Environment(ReadingLibrary.self) private var library
     let bookID: ReadingBook.ID
     @State private var presentedSheet: ScrapbookSheet?
+    @State private var searchText = ""
 
     private let columns = [
         GridItem(.flexible(), spacing: 0)
@@ -3007,11 +2973,15 @@ struct ScrapbookView: View {
                             presentedSheet = .editBook(book.id)
                         }
 
+                        if !book.highlights.isEmpty {
+                            OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
+                        }
+
+                        let highlights = filteredHighlights(in: book)
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                            ForEach(Array(book.highlights.enumerated()), id: \.element.id) { index, highlight in
+                            ForEach(highlights) { highlight in
                                 ScrapbookCard(
                                     highlight: highlight,
-                                    countLabel: "\(index + 1) / \(book.highlights.count)",
                                     edit: {
                                         presentedSheet = .editHighlight(highlight.id)
                                     }
@@ -3019,12 +2989,22 @@ struct ScrapbookView: View {
                             }
                         }
 
+                        if highlights.isEmpty {
+                            ContentUnavailableView(
+                                "검색 결과 없음",
+                                systemImage: "magnifyingglass",
+                                description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 24)
+                        }
+
                     }
                     .padding(16)
                 }
                 .scrollIndicators(.hidden)
                 .overlineBottomMenuCompaction()
-                .background(Color.overlineCanvas.ignoresSafeArea())
+                .background(OverlineCanvasBackground().ignoresSafeArea())
                 .navigationTitle(book.title)
                 .sheet(item: $presentedSheet) { sheet in
                     switch sheet {
@@ -3041,6 +3021,22 @@ struct ScrapbookView: View {
             } else {
                 ContentUnavailableView("책을 찾을 수 없음", systemImage: "books.vertical")
             }
+        }
+    }
+
+    private func filteredHighlights(in book: ReadingBook) -> [Highlight] {
+        let query = searchText.trimmed
+        guard !query.isEmpty else { return book.highlights }
+
+        return book.highlights.filter { highlight in
+            [
+                highlight.text,
+                highlight.memo,
+                highlight.pageReference,
+                highlight.tags.joined(separator: " ")
+            ]
+            .joined(separator: " ")
+            .range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
     }
 }
@@ -3062,25 +3058,39 @@ private struct ScrapbookHeader: View {
     var edit: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack(alignment: .topTrailing) {
-                HStack(alignment: .top, spacing: 16) {
-                    bookCover
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
+                bookCover
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .onTapGesture(perform: edit)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("책 편집")
 
+                VStack(alignment: .leading, spacing: 5) {
                     bookInfo
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: edit)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("책 편집")
 
-                    Spacer()
+                    HStack {
+                        Spacer(minLength: 0)
+                        OverlineShareButton(item: book.shareText, accessibilityLabel: "전체 메모 공유")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture(perform: edit)
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("책 편집")
+                    .layoutPriority(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-                HStack(spacing: 2) {
-                    OverlineShareButton(item: book.shareText, accessibilityLabel: "전체 메모 공유")
-                }
+            if !book.summary.trimmed.isEmpty {
+                Text(book.summary)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 2)
@@ -3093,19 +3103,14 @@ private struct ScrapbookHeader: View {
     }
 
     private var bookInfo: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            BookMetaLine(systemImage: "book.closed", text: book.title)
+        VStack(alignment: .leading, spacing: 8) {
+            BookMetaLine(systemImage: "book.closed", text: book.title, lineLimit: 2)
             BookMetaLine(systemImage: "person.crop.circle", text: book.author)
-
-            Text(book.summary)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
-                .lineLimit(3)
-                .truncationMode(.tail)
-                .fixedSize(horizontal: false, vertical: true)
+            if let publishedDate = book.publishedDate, !publishedDate.trimmed.isEmpty {
+                BookMetaLine(systemImage: "calendar", text: publishedDate)
+            }
         }
-        .padding(.top, 10)
-        .padding(.trailing, 34)
+        .padding(.top, 6)
     }
 }
 
@@ -3138,83 +3143,99 @@ private struct BookCoverArtwork: View {
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 }
             }
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(.black.opacity(0.2))
-                    .frame(width: 8)
-                    .padding(.vertical, 12)
-                    .padding(.leading, 10)
-            }
-            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+}
+
+private struct ScrapbookMemoNote: View {
+    let memo: String
+    let tone: StickyTone
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(tone.paper.opacity(0.92))
+                .frame(width: 4)
+
+            Text(memo)
+                .font(.subheadline)
+                .foregroundStyle(Color.overlineInk.opacity(0.82))
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tone.paper.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(tone.paper.opacity(0.24), lineWidth: 1)
+        }
     }
 }
 
 private struct BookMetaLine: View {
     let systemImage: String
     let text: String
+    var lineLimit = 1
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
             Image(systemName: systemImage)
-                .font(.caption.weight(.bold))
+                .font(.system(size: 14, weight: .bold))
                 .frame(width: 18)
                 .foregroundStyle(Color.overlineAccent)
 
             Text(text)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .lineLimit(lineLimit)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 struct ScrapbookCard: View {
     let highlight: Highlight
-    var countLabel: String?
     var edit: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let countLabel {
-                HStack {
-                    Text(countLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(highlight.stickyTone.paper.opacity(0.94))
+                    .frame(width: 6)
 
-                    Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(highlight.text)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.overlineInk)
+                        .lineSpacing(5)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    OverlineShareButton(item: highlight.shareText, accessibilityLabel: "공유")
+                    if !highlight.memo.isEmpty {
+                        ScrapbookMemoNote(memo: highlight.memo, tone: highlight.stickyTone)
+                    }
                 }
-                .padding(.leading, 2)
-                .padding(.trailing, -2)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HighlightPagePreview(snapshotURL: HighlightSnapshotStore.url(for: highlight.snapshotFileName))
-
-                Text(highlight.text)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Color.overlineInk)
-                    .lineLimit(5)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if !highlight.memo.isEmpty {
-                    Text(highlight.memo)
-                        .font(.subheadline)
-                        .foregroundStyle(highlight.stickyTone.ink)
-                        .lineLimit(4)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(highlight.stickyTone.paper, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
-
-                HighlightMetaBar(highlight: highlight)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: edit)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
+
+            HStack(alignment: .center, spacing: 10) {
+                HighlightMetaBar(highlight: highlight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                OverlineShareButton(
+                    item: highlight.shareText,
+                    accessibilityLabel: "공유",
+                    iconYOffset: -2
+                )
+            }
+            .frame(minHeight: 26, alignment: .center)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3294,14 +3315,16 @@ private extension View {
 private struct OverlineShareButton: View {
     let item: String
     let accessibilityLabel: String
+    var iconYOffset: CGFloat = 0
 
     var body: some View {
         ShareLink(item: item) {
             Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 21, weight: .regular))
+                .font(.system(size: 18, weight: .regular))
                 .symbolRenderingMode(.monochrome)
-                .foregroundStyle(Color.overlineMutedInk.opacity(0.68))
-                .frame(width: 36, height: 34)
+                .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
+                .offset(y: iconYOffset)
+                .frame(width: 30, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -3381,53 +3404,6 @@ private extension ReadingBook {
     }
 }
 
-private struct HighlightPagePreview: View {
-    var snapshotURL: URL?
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(Color.overlinePaper)
-            .frame(height: 120)
-            .overlay {
-                if let image = snapshotImage {
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    fallbackLines
-                }
-            }
-            .overlay(alignment: .topLeading) {
-                HighlighterStroke()
-                    .padding(.horizontal, 18)
-                    .padding(.top, 49)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-    }
-
-    private var snapshotImage: Image? {
-        guard
-            let snapshotURL,
-            let uiImage = UIImage(contentsOfFile: snapshotURL.path)
-        else {
-            return nil
-        }
-
-        return Image(uiImage: uiImage)
-    }
-
-    private var fallbackLines: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            ForEach(0..<5, id: \.self) { _ in
-                Capsule()
-                    .fill(Color.overlineInk.opacity(0.09))
-                    .frame(height: 2)
-            }
-        }
-        .padding(18)
-    }
-}
-
 private struct HighlighterStroke: View {
     var body: some View {
         ZStack {
@@ -3450,19 +3426,19 @@ private struct HighlightMetaBar: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if let pageReference = highlight.visiblePageReference {
                     HighlightMetaItem(systemImage: "book.pages", text: pageReference)
                 }
                 if !highlight.visibleTagText.isEmpty {
                     HighlightMetaItem(systemImage: "tag", text: highlight.visibleTagText)
                 }
+                HighlightMetaItem(systemImage: "calendar", text: highlight.createdAt.overlineShortDate)
                 if highlight.reviewedAt != nil {
                     HighlightMetaItem(systemImage: "checkmark.seal", text: "검수")
                 }
-                Spacer(minLength: 0)
-                HighlightMetaItem(systemImage: "calendar", text: highlight.createdAt.overlineShortDate)
             }
+            .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 10) {
@@ -3472,13 +3448,17 @@ private struct HighlightMetaBar: View {
                     if !highlight.visibleTagText.isEmpty {
                         HighlightMetaItem(systemImage: "tag", text: highlight.visibleTagText)
                     }
+                }
+                HStack(spacing: 10) {
+                    HighlightMetaItem(systemImage: "calendar", text: highlight.createdAt.overlineShortDate)
                     if highlight.reviewedAt != nil {
                         HighlightMetaItem(systemImage: "checkmark.seal", text: "검수")
                     }
                 }
-                HighlightMetaItem(systemImage: "calendar", text: highlight.createdAt.overlineShortDate)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
     }
 }
 
@@ -3496,6 +3476,7 @@ private struct HighlightMetaItem: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
+        .frame(height: 18, alignment: .center)
         .foregroundStyle(Color.overlineMutedInk)
     }
 }
