@@ -1356,72 +1356,171 @@ enum PageReferenceInference {
 
     nonisolated private static func candidate(from line: PageReferenceLine) -> PageReferenceCandidate? {
         let trimmedText = line.text.trimmed
-        guard let pageNumber = pageNumber(from: trimmedText) else { return nil }
+        guard let extraction = pageNumberExtraction(from: trimmedText) else { return nil }
 
         let edgeDistance = min(line.boundingBox.midY, 1 - line.boundingBox.midY)
-        let hasPageMarker = containsPageMarker(trimmedText)
-        guard hasPageMarker || edgeDistance <= 0.24 else { return nil }
-        guard line.boundingBox.width <= 0.30, line.boundingBox.height <= 0.10 else { return nil }
+        guard edgeDistance <= extraction.position.maximumEdgeDistance else { return nil }
+        guard line.boundingBox.height <= 0.12 else { return nil }
 
-        let pageReference = "p.\(pageNumber)"
+        let pageReference = "p.\(extraction.pageNumber)"
         let score = edgeDistance
-            + line.boundingBox.width * 0.45
+            + min(line.boundingBox.width, 1) * 0.22
             + line.boundingBox.height * 0.45
-            + (hasPageMarker ? -0.18 : 0)
+            + extraction.position.scoreAdjustment
+            + (extraction.hasPageMarker ? -0.18 : 0)
         return PageReferenceCandidate(pageReference: pageReference, score: score)
     }
 
-    nonisolated private static func pageNumber(from text: String) -> String? {
-        let patterns = [
-            #"(?i)^(?:p|pp|page)\.?\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?$"#,
-            #"^(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*(?:쪽|페이지)$"#,
-            #"^(\d{1,4})$"#
+    nonisolated private static func pageNumberExtraction(from text: String) -> PageNumberExtraction? {
+        let markedPatterns = [
+            #"(?i)(?:^|\b)(?:p|pp|page)\.?\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?(?:\b|$)"#,
+            #"(?<!\d)(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*(?:쪽|페이지)"#
         ]
 
-        for pattern in patterns {
-            guard
-                let regex = try? NSRegularExpression(pattern: pattern),
-                let match = regex.firstMatch(
-                    in: text,
-                    range: NSRange(text.startIndex..<text.endIndex, in: text)
-                ),
-                match.numberOfRanges > 1,
-                let firstRange = Range(match.range(at: 1), in: text)
-            else {
-                continue
+        for pattern in markedPatterns {
+            if let pageNumber = pageNumber(from: text, matching: pattern) {
+                return PageNumberExtraction(
+                    pageNumber: pageNumber,
+                    position: .marked,
+                    hasPageMarker: true
+                )
             }
+        }
 
-            let firstPage = String(text[firstRange])
-            guard let pageValue = Int(firstPage), (1...3000).contains(pageValue) else {
-                continue
-            }
+        if let pageNumber = pageNumber(from: text, matching: #"^\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*$"#) {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .standalone,
+                hasPageMarker: false
+            )
+        }
 
-            if
-                match.numberOfRanges > 2,
-                let secondRange = Range(match.range(at: 2), in: text)
-            {
-                let secondPage = String(text[secondRange])
-                if let secondValue = Int(secondPage), (1...3000).contains(secondValue) {
-                    return "\(pageValue)-\(secondValue)"
-                }
-            }
+        if
+            !hasLeadingPageNumberBlocker(text),
+            let pageNumber = pageNumber(from: text, matching: #"^\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?(?=\s+\S)"#),
+            !isLikelyYearPageNumber(pageNumber)
+        {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .leading,
+                hasPageMarker: false
+            )
+        }
 
-            return "\(pageValue)"
+        if
+            !hasTrailingPageNumberBlocker(text),
+            let pageNumber = pageNumber(from: text, matching: #"\s(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*$"#),
+            !isLikelyYearPageNumber(pageNumber)
+        {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .trailing,
+                hasPageMarker: false
+            )
         }
 
         return nil
     }
 
-    nonisolated private static func containsPageMarker(_ text: String) -> Bool {
-        text.range(of: #"(?i)\b(?:p|pp|page)\.?"#, options: .regularExpression) != nil
-            || text.contains("쪽")
-            || text.contains("페이지")
+    nonisolated private static func pageNumber(from text: String, matching pattern: String) -> String? {
+        guard
+            let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..<text.endIndex, in: text)
+            ),
+            match.numberOfRanges > 1,
+            let firstRange = Range(match.range(at: 1), in: text)
+        else {
+            return nil
+        }
+
+        let firstPage = String(text[firstRange])
+        guard let pageValue = Int(firstPage), (1...3000).contains(pageValue) else {
+            return nil
+        }
+
+        if
+            match.numberOfRanges > 2,
+            let secondRange = Range(match.range(at: 2), in: text)
+        {
+            let secondPage = String(text[secondRange])
+            if let secondValue = Int(secondPage), (1...3000).contains(secondValue) {
+                return "\(pageValue)-\(secondValue)"
+            }
+        }
+
+        return "\(pageValue)"
+    }
+
+    nonisolated private static func hasLeadingPageNumberBlocker(_ text: String) -> Bool {
+        text.range(
+            of: #"^\s*\d{1,4}(?:\s*[-–~]\s*\d{1,4})?\s*(?:년|월|일|장|챕터|부|억|만|개|명|배|%)"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    nonisolated private static func hasTrailingPageNumberBlocker(_ text: String) -> Bool {
+        text.range(
+            of: #"(?i)(?:chapter|chap\.?|ch\.|part)\s+\d{1,4}\s*$"#,
+            options: .regularExpression
+        ) != nil
+            || text.range(
+                of: #"\d{1,4}\s*(?:장|챕터|부)\s*$"#,
+                options: .regularExpression
+            ) != nil
+    }
+
+    nonisolated private static func isLikelyYearPageNumber(_ pageNumber: String) -> Bool {
+        guard
+            !pageNumber.contains("-"),
+            let value = Int(pageNumber)
+        else {
+            return false
+        }
+
+        return (1800...2100).contains(value)
     }
 }
 
 private struct PageReferenceCandidate {
     let pageReference: String
     let score: CGFloat
+}
+
+private struct PageNumberExtraction {
+    let pageNumber: String
+    let position: PageNumberPosition
+    let hasPageMarker: Bool
+}
+
+private enum PageNumberPosition {
+    case marked
+    case standalone
+    case leading
+    case trailing
+
+    var maximumEdgeDistance: CGFloat {
+        switch self {
+        case .marked:
+            return 0.30
+        case .standalone:
+            return 0.26
+        case .leading, .trailing:
+            return 0.22
+        }
+    }
+
+    var scoreAdjustment: CGFloat {
+        switch self {
+        case .marked:
+            return -0.12
+        case .standalone:
+            return -0.08
+        case .leading, .trailing:
+            return 0.08
+        }
+    }
 }
 
 @MainActor
