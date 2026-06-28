@@ -313,6 +313,7 @@ struct CaptureView: View {
         }
 
         var savedHighlightID: Highlight.ID?
+        var savedPageReference: String?
         withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
             let highlight = library.addCapturedHighlight(
                 text: refinedText,
@@ -326,6 +327,7 @@ struct CaptureView: View {
             lastSaved = highlight
             amendTargetHighlightID = highlight.id
             savedHighlightID = highlight.id
+            savedPageReference = highlight.pageReference
             composerTagsBaseline = tagsText
             prefillPageReferenceIfNeeded(from: highlight.pageReference)
             selectedLineIDs.removeAll()
@@ -348,7 +350,8 @@ struct CaptureView: View {
             brightness: frameBrightness,
             hasMemo: !memo.trimmed.isEmpty,
             durationMilliseconds: durationMilliseconds,
-            pathStepCount: pathStepCount
+            pathStepCount: pathStepCount,
+            pageReference: savedPageReference
         )
         resetCaptureTimer()
     }
@@ -520,6 +523,7 @@ struct CaptureView: View {
             let durationMilliseconds = captureElapsedMilliseconds()
 
             var savedHighlightID: Highlight.ID?
+            var savedPageReference: String?
             withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
                 let highlight = library.addCapturedHighlight(
                     text: refinedText,
@@ -533,6 +537,7 @@ struct CaptureView: View {
                 lastSaved = highlight
                 amendTargetHighlightID = highlight.id
                 savedHighlightID = highlight.id
+                savedPageReference = highlight.pageReference
                 composerTagsBaseline = tagsText
                 prefillPageReferenceIfNeeded(from: highlight.pageReference)
                 selectedLineIDs.removeAll()
@@ -554,7 +559,8 @@ struct CaptureView: View {
                 brightness: nil,
                 hasMemo: !memo.trimmed.isEmpty,
                 durationMilliseconds: durationMilliseconds,
-                pathStepCount: capturePathStepCount(for: "photo")
+                pathStepCount: capturePathStepCount(for: "photo"),
+                pageReference: savedPageReference
             )
             resetCaptureTimer()
         } catch {
@@ -729,13 +735,15 @@ struct CaptureView: View {
         brightness: Float?,
         hasMemo: Bool,
         durationMilliseconds: Int,
-        pathStepCount: Int
+        pathStepCount: Int,
+        pageReference: String? = nil
     ) {
         let confidencePercent = confidence.map { Int(($0 * 100).rounded()) } ?? -1
         let brightnessPercent = brightness.map { Int(($0 * 100).rounded()) } ?? -1
+        let loggedPageReference = pageReference?.trimmed.isEmpty == false ? pageReference?.trimmed ?? "-" : "-"
 
         captureMetricsLogger.info(
-            "capture_saved source=\(source, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public) path_steps=\(pathStepCount, privacy: .public) line_count=\(lineCount, privacy: .public) confidence_percent=\(confidencePercent, privacy: .public) brightness_percent=\(brightnessPercent, privacy: .public) has_memo=\(hasMemo, privacy: .public)"
+            "capture_saved source=\(source, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public) path_steps=\(pathStepCount, privacy: .public) line_count=\(lineCount, privacy: .public) confidence_percent=\(confidencePercent, privacy: .public) brightness_percent=\(brightnessPercent, privacy: .public) has_memo=\(hasMemo, privacy: .public) page_reference=\(loggedPageReference, privacy: .public)"
         )
 
         CapturePerformanceStore.add(

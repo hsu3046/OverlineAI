@@ -1346,19 +1346,29 @@ struct PageReferenceLine {
 }
 
 enum PageReferenceInference {
-    nonisolated static func inferredPageReference(from lines: [PageReferenceLine]) -> String? {
-        lines
-            .compactMap(candidate)
+    nonisolated static func inferredPageReference(
+        from lines: [PageReferenceLine],
+        pageBoundingBox: CGRect? = nil
+    ) -> String? {
+        let referenceBox = pageBoundingBox ?? inferredTextBlockBoundingBox(from: lines)
+        return lines
+            .compactMap { candidate(from: $0, referenceBox: referenceBox) }
             .sorted { $0.score < $1.score }
             .first?
             .pageReference
     }
 
-    nonisolated private static func candidate(from line: PageReferenceLine) -> PageReferenceCandidate? {
+    nonisolated private static func candidate(
+        from line: PageReferenceLine,
+        referenceBox: CGRect?
+    ) -> PageReferenceCandidate? {
         let trimmedText = line.text.trimmed
         guard let extraction = pageNumberExtraction(from: trimmedText) else { return nil }
 
-        let edgeDistance = min(line.boundingBox.midY, 1 - line.boundingBox.midY)
+        let edgeDistance = pageRelativeEdgeDistance(
+            for: line.boundingBox,
+            referenceBox: referenceBox
+        ) ?? min(line.boundingBox.midY, 1 - line.boundingBox.midY)
         guard edgeDistance <= extraction.position.maximumEdgeDistance else { return nil }
         guard line.boundingBox.height <= 0.12 else { return nil }
 
@@ -1420,6 +1430,43 @@ enum PageReferenceInference {
         }
 
         return nil
+    }
+
+    nonisolated private static func inferredTextBlockBoundingBox(from lines: [PageReferenceLine]) -> CGRect? {
+        let bodyBoxes = lines
+            .map(\.boundingBox)
+            .filter { box in
+                box.width >= 0.14 && box.height >= 0.004
+            }
+
+        guard let firstBox = bodyBoxes.first else { return nil }
+
+        return bodyBoxes.dropFirst().reduce(firstBox) { partialResult, box in
+            partialResult.union(box)
+        }
+    }
+
+    nonisolated private static func pageRelativeEdgeDistance(
+        for lineBox: CGRect,
+        referenceBox: CGRect?
+    ) -> CGFloat? {
+        guard
+            let referenceBox,
+            referenceBox.height > 0.001,
+            !referenceBox.isNull,
+            !referenceBox.isEmpty
+        else {
+            return nil
+        }
+
+        let relativeY = (lineBox.midY - referenceBox.minY) / referenceBox.height
+        if relativeY < 0 {
+            return abs(relativeY)
+        }
+        if relativeY > 1 {
+            return relativeY - 1
+        }
+        return min(relativeY, 1 - relativeY)
     }
 
     nonisolated private static func pageNumber(from text: String, matching pattern: String) -> String? {
@@ -1500,7 +1547,7 @@ private enum PageNumberPosition {
     case leading
     case trailing
 
-    var maximumEdgeDistance: CGFloat {
+    nonisolated var maximumEdgeDistance: CGFloat {
         switch self {
         case .marked:
             return 0.30
@@ -1511,7 +1558,7 @@ private enum PageNumberPosition {
         }
     }
 
-    var scoreAdjustment: CGFloat {
+    nonisolated var scoreAdjustment: CGFloat {
         switch self {
         case .marked:
             return -0.12

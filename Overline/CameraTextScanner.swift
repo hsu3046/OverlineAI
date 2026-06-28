@@ -1307,7 +1307,8 @@ final class CameraTextScanner {
         PageReferenceInference.inferredPageReference(
             from: lines.map {
                 PageReferenceLine(text: $0.text, boundingBox: $0.boundingBox)
-            }
+            },
+            pageBoundingBox: detectedPage?.boundingBox
         )
     }
 
