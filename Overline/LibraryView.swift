@@ -3074,11 +3074,18 @@ private struct ScrapbookHeader: View {
                         .accessibilityAddTraits(.isButton)
                         .accessibilityLabel("책 편집")
 
-                    HStack {
+                    HStack(alignment: .center, spacing: 10) {
+                        if !bookTagText.isEmpty {
+                            BookMetaLine(systemImage: "tag", text: bookTagText)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Spacer(minLength: 0)
+                        }
                         Spacer(minLength: 0)
                         OverlineShareButton(item: book.shareText, accessibilityLabel: "전체 메모 공유")
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .frame(maxWidth: .infinity, minHeight: 28, alignment: .center)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
@@ -3100,6 +3107,13 @@ private struct ScrapbookHeader: View {
     private var bookCover: some View {
         BookCoverArtwork(book: book, cornerRadius: 10)
             .frame(width: 88, height: 124)
+    }
+
+    private var bookTagText: String {
+        book.tags
+            .map(\.trimmed)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private var bookInfo: some View {
