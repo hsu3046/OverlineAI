@@ -1563,18 +1563,19 @@ final class ReadingLibrary {
         return CapturedHighlightMetadata.deduplicated(baseTags + recurringTags)
     }
 
-    func appendTags(_ tags: [String], to highlightID: Highlight.ID, limit: Int = 6) {
+    @discardableResult
+    func appendTags(_ tags: [String], to highlightID: Highlight.ID, limit: Int = 6) -> Bool {
         guard
             let bookIndex = books.firstIndex(where: { book in
                 book.highlights.contains { $0.id == highlightID }
             }),
             let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
         else {
-            return
+            return false
         }
 
         let existingTags = CapturedHighlightMetadata.deduplicated(books[bookIndex].highlights[highlightIndex].tags)
-        guard existingTags.count < limit else { return }
+        guard existingTags.count < limit else { return false }
 
         let normalizedTags = CapturedHighlightMetadata.deduplicated(
             CapturedHighlightMetadata.normalizedTags(from: tags.joined(separator: " "))
@@ -1583,10 +1584,11 @@ final class ReadingLibrary {
             .filter { !existingTags.contains($0) }
             .prefix(max(limit - existingTags.count, 0)))
 
-        guard !additions.isEmpty else { return }
+        guard !additions.isEmpty else { return false }
 
         books[bookIndex].highlights[highlightIndex].tags = existingTags + additions
         persist()
+        return true
     }
 
     func selectBook(_ bookID: ReadingBook.ID) {

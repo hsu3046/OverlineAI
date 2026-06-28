@@ -18,6 +18,7 @@ struct CaptureView: View {
     @State private var memo = ""
     @State private var pageReferenceText = ""
     @State private var tagsText = ""
+    @State private var composerTagsBaseline = ""
     @State private var memoBeforeSpeech = ""
     @State private var lastSaved: Highlight?
     @State private var amendTargetHighlightID: Highlight.ID?
@@ -325,6 +326,7 @@ struct CaptureView: View {
             lastSaved = highlight
             amendTargetHighlightID = highlight.id
             savedHighlightID = highlight.id
+            composerTagsBaseline = tagsText
             prefillPageReferenceIfNeeded(from: highlight.pageReference)
             selectedLineIDs.removeAll()
             selectedCameraLineIDs.removeAll()
@@ -388,6 +390,7 @@ struct CaptureView: View {
             )
             lastSaved = highlight
             savedHighlightID = highlight.id
+            composerTagsBaseline = tagsText
             clearComposerInputs()
             captureMessage = .saved(
                 lineCount: 1,
@@ -401,7 +404,7 @@ struct CaptureView: View {
     }
 
     private var canDeleteLastSavedHighlight: Bool {
-        guard case .saved = captureMessage else { return false }
+        guard captureMessage?.allowsLastSavedDeletion == true else { return false }
         return amendTargetHighlightID != nil || lastSaved != nil
     }
 
@@ -445,7 +448,9 @@ struct CaptureView: View {
         }
 
         let pageReference = amendedPageReference(existing: highlight.pageReference)
-        let tagsTextForUpdate = tagsText.trimmed.isEmpty ? highlight.tags.joined(separator: " ") : tagsText
+        let tagsTextForUpdate = composerTagsUnchangedFromBaseline
+            ? highlight.tags.joined(separator: " ")
+            : tagsText
         library.updateHighlight(
             amendTargetHighlightID,
             text: highlight.text,
@@ -467,6 +472,7 @@ struct CaptureView: View {
             if showConfirmation {
                 captureMessage = .memoSaved
             }
+            composerTagsBaseline = tagsText
         }
     }
 
@@ -527,6 +533,7 @@ struct CaptureView: View {
                 lastSaved = highlight
                 amendTargetHighlightID = highlight.id
                 savedHighlightID = highlight.id
+                composerTagsBaseline = tagsText
                 prefillPageReferenceIfNeeded(from: highlight.pageReference)
                 selectedLineIDs.removeAll()
                 selectedCameraLineIDs.removeAll()
@@ -568,11 +575,13 @@ struct CaptureView: View {
         memo.removeAll()
         pageReferenceText.removeAll()
         tagsText = defaultTagsTextForSelectedBook()
+        composerTagsBaseline = tagsText
     }
 
     private func prefillTagsFromSelectedBookIfNeeded() {
         guard tagsText.trimmed.isEmpty else { return }
         tagsText = defaultTagsTextForSelectedBook()
+        composerTagsBaseline = tagsText
     }
 
     private func defaultTagsTextForSelectedBook() -> String {
@@ -580,14 +589,23 @@ struct CaptureView: View {
     }
 
     private func scheduleAutomaticTagGeneration(for highlightID: Highlight.ID) {
+        guard let configuration = llmSettings.lightweightTagConfiguration else {
+            captureMetricsLogger.info("auto_tags_skipped reason=no_provider")
+            return
+        }
+
         guard
-            let configuration = llmSettings.lightweightTagConfiguration,
             let highlight = library.highlight(with: highlightID),
             let bookID = library.bookID(containing: highlightID),
             let book = library.book(with: bookID)
         else {
+            captureMetricsLogger.info("auto_tags_skipped reason=missing_highlight")
             return
         }
+
+        let originalText = highlight.text
+        let originalMemo = highlight.memo
+        let originalTags = highlight.tags
 
         let request = LLMTagRequest(
             provider: configuration.provider,
@@ -613,10 +631,41 @@ struct CaptureView: View {
                     return
                 }
 
-                library.appendTags(generatedTags, to: highlightID)
+                guard
+                    let currentHighlight = library.highlight(with: highlightID),
+                    library.bookID(containing: highlightID) == bookID
+                else {
+                    captureMetricsLogger.info("auto_tags_skipped reason=missing_before_apply")
+                    return
+                }
+
+                guard
+                    currentHighlight.text == originalText,
+                    currentHighlight.memo == originalMemo,
+                    currentHighlight.tags == originalTags
+                else {
+                    captureMetricsLogger.info("auto_tags_skipped reason=highlight_changed")
+                    return
+                }
+
+                guard library.appendTags(generatedTags, to: highlightID) else {
+                    captureMetricsLogger.info("auto_tags_skipped reason=no_new_tags")
+                    return
+                }
+
                 if lastSaved?.id == highlightID, let updatedHighlight = library.highlight(with: highlightID) {
                     lastSaved = updatedHighlight
                 }
+                if
+                    amendTargetHighlightID == highlightID,
+                    composerTagsUnchangedFromBaseline,
+                    let updatedHighlight = library.highlight(with: highlightID)
+                {
+                    let updatedTagsText = updatedHighlight.tags.joined(separator: " ")
+                    composerTagsBaseline = updatedTagsText
+                    tagsText = updatedTagsText
+                }
+                captureMessage = .tagsSuggested
                 captureMetricsLogger.info(
                     "auto_tags_applied provider=\(configuration.provider.rawValue, privacy: .public) count=\(generatedTags.count, privacy: .public)"
                 )
@@ -626,6 +675,10 @@ struct CaptureView: View {
                 )
             }
         }
+    }
+
+    private var composerTagsUnchangedFromBaseline: Bool {
+        tagsText.trimmed == composerTagsBaseline.trimmed
     }
 
     private func prefillPageReferenceIfNeeded(from pageReference: String) {
@@ -2548,6 +2601,7 @@ private enum CaptureMessage: Equatable {
     case captured(lineCount: Int)
     case saved(lineCount: Int, confidence: Float?, durationMilliseconds: Int?)
     case memoSaved
+    case tagsSuggested
     case guidance(String)
     case error(String)
 
@@ -2559,6 +2613,8 @@ private enum CaptureMessage: Equatable {
             return "square.and.pencil"
         case .saved, .memoSaved:
             return "checkmark.circle.fill"
+        case .tagsSuggested:
+            return "tag.fill"
         case .guidance:
             return "hand.draw"
         case .error:
@@ -2576,6 +2632,8 @@ private enum CaptureMessage: Equatable {
             return "글조각 저장됨"
         case .memoSaved:
             return "메모 반영됨"
+        case .tagsSuggested:
+            return "태그 추천됨"
         case .guidance(let message):
             return message
         case .error(let message):
@@ -2587,12 +2645,21 @@ private enum CaptureMessage: Equatable {
         switch self {
         case .processing, .captured:
             return Color.overlineAccent
-        case .saved, .memoSaved:
+        case .saved, .memoSaved, .tagsSuggested:
             return Color.overlineAccent
         case .guidance:
             return Color.overlineMutedInk
         case .error:
             return Color.overlineCoral
+        }
+    }
+
+    var allowsLastSavedDeletion: Bool {
+        switch self {
+        case .saved, .memoSaved, .tagsSuggested:
+            return true
+        case .processing, .captured, .guidance, .error:
+            return false
         }
     }
 }

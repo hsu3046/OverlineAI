@@ -11,6 +11,7 @@ struct HighlightEditorSheet: View {
     @State private var memo = ""
     @State private var pageReference = ""
     @State private var tagsText = ""
+    @State private var loadedTagsText = ""
     @State private var selectedBookID: ReadingBook.ID?
     @State private var selectedTone: StickyTone = .yellow
     @State private var isReviewed = false
@@ -228,18 +229,26 @@ struct HighlightEditorSheet: View {
         memo = highlight.memo
         pageReference = highlight.pageReference
         tagsText = highlight.tags.joined(separator: " ")
+        loadedTagsText = tagsText
         selectedTone = highlight.stickyTone
         selectedBookID = library.bookID(containing: highlightID) ?? library.selectedBookID ?? library.books.first?.id
         isReviewed = highlight.reviewedAt != nil
     }
 
     private func save() {
+        let tagsTextForSave: String
+        if tagsText.trimmed == loadedTagsText.trimmed, let currentHighlight = library.highlight(with: highlightID) {
+            tagsTextForSave = currentHighlight.tags.joined(separator: " ")
+        } else {
+            tagsTextForSave = tagsText
+        }
+
         library.updateHighlight(
             highlightID,
             text: text,
             memo: memo,
             pageReference: pageReference,
-            tagsText: tagsText,
+            tagsText: tagsTextForSave,
             bookID: selectedBookID,
             stickyTone: selectedTone,
             isReviewed: isReviewed
