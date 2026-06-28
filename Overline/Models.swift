@@ -200,6 +200,19 @@ struct LibraryInsight: Identifiable, Hashable, Codable {
     }
 }
 
+struct DeletedHighlightSnapshot: Identifiable, Hashable {
+    let id = UUID()
+    let highlight: Highlight
+    let bookID: ReadingBook.ID
+    let index: Int
+}
+
+struct DeletedInsightSnapshot: Identifiable, Hashable {
+    let id = UUID()
+    let insight: LibraryInsight
+    let index: Int
+}
+
 struct OCRValidationRecord: Identifiable, Hashable, Codable {
     var id: UUID
     var createdAt: Date
@@ -1904,7 +1917,23 @@ final class ReadingLibrary {
     }
 
     func deleteInsight(_ insightID: LibraryInsight.ID) {
-        savedInsights.removeAll { $0.id == insightID }
+        _ = deleteInsightForUndo(insightID)
+    }
+
+    @discardableResult
+    func deleteInsightForUndo(_ insightID: LibraryInsight.ID) -> DeletedInsightSnapshot? {
+        guard let index = savedInsights.firstIndex(where: { $0.id == insightID }) else { return nil }
+
+        let insight = savedInsights.remove(at: index)
+        persist()
+        return DeletedInsightSnapshot(insight: insight, index: index)
+    }
+
+    func restoreDeletedInsight(_ deletion: DeletedInsightSnapshot) {
+        guard !savedInsights.contains(where: { $0.id == deletion.insight.id }) else { return }
+
+        let index = min(max(deletion.index, 0), savedInsights.count)
+        savedInsights.insert(deletion.insight, at: index)
         persist()
     }
 
@@ -1997,15 +2026,34 @@ final class ReadingLibrary {
     }
 
     func deleteHighlight(_ highlightID: Highlight.ID) {
+        _ = deleteHighlightForUndo(highlightID)
+    }
+
+    @discardableResult
+    func deleteHighlightForUndo(_ highlightID: Highlight.ID) -> DeletedHighlightSnapshot? {
         guard
-            let bookIndex = books.firstIndex(where: { book in
-                book.highlights.contains { $0.id == highlightID }
-            })
+            let bookIndex = books.firstIndex(where: { $0.highlights.contains { $0.id == highlightID } }),
+            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
         else {
-            return
+            return nil
         }
 
-        books[bookIndex].highlights.removeAll { $0.id == highlightID }
+        let highlight = books[bookIndex].highlights.remove(at: highlightIndex)
+        persist()
+        return DeletedHighlightSnapshot(
+            highlight: highlight,
+            bookID: books[bookIndex].id,
+            index: highlightIndex
+        )
+    }
+
+    func restoreDeletedHighlight(_ deletion: DeletedHighlightSnapshot) {
+        guard !books.flatMap(\.highlights).contains(where: { $0.id == deletion.highlight.id }) else { return }
+        guard let bookIndex = books.firstIndex(where: { $0.id == deletion.bookID }) else { return }
+
+        let index = min(max(deletion.index, 0), books[bookIndex].highlights.count)
+        books[bookIndex].highlights.insert(deletion.highlight, at: index)
+        selectedBookID = books[bookIndex].id
         persist()
     }
 

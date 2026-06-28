@@ -7,7 +7,7 @@ private let insightMetricsLogger = Logger(subsystem: "aib.Overline", category: "
 struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
     @Environment(AppIntentRouter.self) private var intentRouter
-    @State private var question = "더 파고들 개념과 반론은?"
+    @State private var question = ""
     @State private var selectedPrompt: InsightPrompt = .expand
     @State private var selectedBookIDs: Set<ReadingBook.ID> = []
     @State private var selectedHighlightIDs: Set<Highlight.ID> = []
@@ -19,52 +19,90 @@ struct InsightsView: View {
     @State private var showsInsightSavedAlert = false
     @State private var presentedDetailInsight: LibraryInsight?
     @State private var presentedSourceInsight: LibraryInsight?
+    @State private var savedInsightSearchText = ""
+    @State private var pendingDeletedInsight: PendingInsightUndo?
+    @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                InsightWorkspaceHeader(
-                    settings: llmSettings,
-                    openSettings: { isLLMSettingsPresented = true }
+        List {
+            InsightWorkspaceHeader(
+                settings: llmSettings,
+                openSettings: { isLLMSettingsPresented = true }
+            )
+            .insightListRowChrome(top: 16, bottom: 12)
+
+            InsightComposer(
+                question: $question,
+                selectedPrompt: $selectedPrompt,
+                selectedCount: selectedSourceCount,
+                canSubmit: selectedSourceCount > 0 && !isGeneratingInsight,
+                isSubmitting: isGeneratingInsight,
+                errorMessage: insightErrorMessage,
+                openPicker: { isSourcePickerPresented = true },
+                submit: requestInsightGeneration
+            )
+            .insightListRowChrome(top: 0, bottom: 16)
+
+            if !library.savedInsights.isEmpty {
+                InsightSectionHeader(
+                    title: "저장됨",
+                    systemImage: "tray.full",
+                    trailingText: "\(library.savedInsights.count)"
                 )
+                .insightListRowChrome(top: 12, bottom: 8)
 
-                InsightComposer(
-                    question: $question,
-                    selectedPrompt: $selectedPrompt,
-                    selectedCount: selectedSourceCount,
-                    canSubmit: selectedSourceCount > 0 && !isGeneratingInsight,
-                    isSubmitting: isGeneratingInsight,
-                    errorMessage: insightErrorMessage,
-                    openPicker: { isSourcePickerPresented = true },
-                    submit: requestInsightGeneration
-                )
+                OverlinePillSearchField(text: $savedInsightSearchText, prompt: "인사이트, 질문 검색")
+                    .insightListRowChrome(top: 0, bottom: 10)
 
-                if !library.savedInsights.isEmpty {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        InsightSectionHeader(
-                            title: "저장됨",
-                            systemImage: "tray.full",
-                            trailingText: "\(library.savedInsights.count)"
-                        )
-
-                        ForEach(library.savedInsights) { insight in
-                            SavedInsightCard(
-                                insight: insight,
-                                canShowSources: !(insight.sourceHighlightIDs ?? []).isEmpty,
-                                openDetail: {
-                                    presentedDetailInsight = insight
-                                },
-                                showSources: {
-                                    presentedSourceInsight = insight
-                                }
-                            )
+                if filteredSavedInsights.isEmpty && pendingDeletedInsight == nil {
+                    ContentUnavailableView(
+                        "검색 결과 없음",
+                        systemImage: "magnifyingglass",
+                        description: Text("다른 질문이나 키워드로 찾아보세요.")
+                    )
+                    .font(.caption)
+                    .foregroundStyle(Color.overlineMutedInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .insightListRowChrome(top: 0, bottom: 16)
+                } else {
+                    ForEach(Array(filteredSavedInsights.enumerated()), id: \.element.id) { index, insight in
+                        if pendingDeletedInsight?.visibleIndex == index {
+                            OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
+                                .insightListRowChrome(top: 0, bottom: 12)
                         }
+
+                        SavedInsightCard(
+                            insight: insight,
+                            searchQuery: savedInsightSearchText,
+                            canShowSources: !(insight.sourceHighlightIDs ?? []).isEmpty,
+                            openDetail: {
+                                presentedDetailInsight = insight
+                            },
+                            showSources: {
+                                presentedSourceInsight = insight
+                            }
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteInsight(insight.id)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
+                        .insightListRowChrome(top: 0, bottom: 12)
                     }
-                    .padding(.top, 12)
+
+                    if let pendingDeletedInsight, pendingDeletedInsight.visibleIndex >= filteredSavedInsights.count {
+                        OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
+                            .insightListRowChrome(top: 0, bottom: 12)
+                    }
                 }
             }
-            .padding(16)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
         .background(OverlineCanvasBackground().ignoresSafeArea())
@@ -72,7 +110,11 @@ struct InsightsView: View {
             _ = applyInsightSeed(intentRouter.request)
         }
         .onChange(of: intentRouter.request) { _, request in
+            clearPendingUndo(animated: false)
             _ = applyInsightSeed(request)
+        }
+        .onDisappear {
+            clearPendingUndo(animated: false)
         }
         .sheet(isPresented: $isSourcePickerPresented) {
             HighlightPickerSheet(
@@ -93,7 +135,7 @@ struct InsightsView: View {
                 insight: insight,
                 sources: sourceEntries(for: insight),
                 delete: {
-                    library.deleteInsight(insight.id)
+                    deleteInsight(insight.id)
                     presentedDetailInsight = nil
                 }
             )
@@ -119,8 +161,72 @@ struct InsightsView: View {
         selectedSourceIDs.count
     }
 
+    private func deleteInsight(_ insightID: LibraryInsight.ID) {
+        let visibleIndex = filteredSavedInsights.firstIndex { $0.id == insightID } ?? 0
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            if let deletion = library.deleteInsightForUndo(insightID) {
+                let pendingUndo = PendingInsightUndo(deletion: deletion, visibleIndex: visibleIndex)
+                pendingDeletedInsight = pendingUndo
+                scheduleUndoDismiss(for: pendingUndo.id)
+            }
+        }
+    }
+
+    private func restoreDeletedInsight() {
+        guard let pendingDeletedInsight else { return }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.restoreDeletedInsight(pendingDeletedInsight.deletion)
+            clearPendingUndo(animated: false)
+        }
+    }
+
+    private func scheduleUndoDismiss(for undoID: UUID) {
+        undoDismissTask?.cancel()
+        undoDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard pendingDeletedInsight?.id == undoID else { return }
+                clearPendingUndo(animated: true)
+            }
+        }
+    }
+
+    private func clearPendingUndo(animated: Bool) {
+        undoDismissTask?.cancel()
+        undoDismissTask = nil
+
+        guard pendingDeletedInsight != nil else { return }
+
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+                pendingDeletedInsight = nil
+            }
+        } else {
+            pendingDeletedInsight = nil
+        }
+    }
+
     private var selectedSourceIDs: [Highlight.ID] {
         effectiveSelectedHighlightIDs(in: library.books)
+    }
+
+    private var filteredSavedInsights: [LibraryInsight] {
+        let query = savedInsightSearchText.trimmed
+        guard !query.isEmpty else { return library.savedInsights }
+
+        return library.savedInsights.filter { insightMatches($0, query: query) }
+    }
+
+    private func insightMatches(_ insight: LibraryInsight, query: String) -> Bool {
+        let categoryTitle = InsightPrompt(rawValue: insight.categoryRaw)?.title ?? ""
+        return insight.prompt.localizedCaseInsensitiveContains(query)
+            || insight.body.localizedCaseInsensitiveContains(query)
+            || categoryTitle.localizedCaseInsensitiveContains(query)
+            || insight.createdAt.overlineShortDate.localizedCaseInsensitiveContains(query)
     }
 
     private func selectedSourcePayload() -> (sources: [LLMInsightSource], ids: [Highlight.ID]) {
@@ -182,7 +288,7 @@ struct InsightsView: View {
         selectedBookIDs.removeAll()
         selectedHighlightIDs = seed.highlightIDs
         selectedPrompt = seed.prompt
-        question = seed.question?.trimmed.isEmpty == false ? seed.question ?? seed.prompt.seedQuestion : seed.prompt.seedQuestion
+        question = seed.question?.trimmed ?? ""
         insightErrorMessage = nil
         return true
     }
@@ -211,7 +317,8 @@ struct InsightsView: View {
         let payload = selectedSourcePayload()
         guard !payload.sources.isEmpty else { return }
 
-        let prompt = question.trimmed.isEmpty ? selectedPrompt.seedQuestion : question.trimmed
+        let prompt = question.trimmed
+        let savedPrompt = prompt.isEmpty ? selectedPrompt.title : prompt
 
         guard llmSettings.isReady(for: llmSettings.provider) else {
             insightErrorMessage = missingCredentialMessage(for: llmSettings.provider)
@@ -251,7 +358,7 @@ struct InsightsView: View {
             withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                 library.addInsight(
                     categoryRaw: selectedPrompt.rawValue,
-                    prompt: prompt,
+                    prompt: savedPrompt,
                     body: generatedBody,
                     sourceCount: sourceCount,
                     sourceHighlightIDs: payload.ids
@@ -337,6 +444,24 @@ struct InsightsView: View {
         insightMetricsLogger.error(
             "insight_generation_failed provider=\(provider.rawValue, privacy: .public) category=\(category, privacy: .public) source_count=\(sourceCount, privacy: .public) duration_ms=\(durationMilliseconds, privacy: .public) error_code=\(error.insightMetricsCode, privacy: .public)"
         )
+    }
+}
+
+private extension View {
+    func insightListRowChrome(top: CGFloat, bottom: CGFloat) -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: top, leading: 16, bottom: bottom, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
+}
+
+private struct PendingInsightUndo: Identifiable {
+    let deletion: DeletedInsightSnapshot
+    let visibleIndex: Int
+
+    var id: UUID {
+        deletion.id
     }
 }
 
@@ -1063,7 +1188,6 @@ private struct InsightComposer: View {
             ForEach(InsightPrompt.allCases) { prompt in
                 Button {
                     selectedPrompt = prompt
-                    question = prompt.seedQuestion
                 } label: {
                     PromptChip(prompt: prompt, isSelected: selectedPrompt == prompt)
                 }
@@ -1163,6 +1287,7 @@ private struct HighlightPickerSheet: View {
                                 } label: {
                                     HighlightPickerRow(
                                         highlight: highlight,
+                                        searchQuery: searchText,
                                         isSelected: selectedHighlightIDs.contains(highlight.id) || isIncludedByBook,
                                         isIncludedByBook: isIncludedByBook
                                     )
@@ -1312,7 +1437,11 @@ struct OverlinePillSearchField: View {
         .background(.thinMaterial, in: Capsule(style: .continuous))
         .overlay {
             Capsule(style: .continuous)
-                .stroke(Color.white.opacity(0.34), lineWidth: 1)
+                .stroke(Color.white.opacity(0.54), lineWidth: 1)
+        }
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(Color.overlineInk.opacity(0.11), lineWidth: 1)
         }
     }
 }
@@ -1355,6 +1484,7 @@ private struct BookPickerRow: View {
 
 private struct HighlightPickerRow: View {
     let highlight: Highlight
+    let searchQuery: String
     let isSelected: Bool
     let isIncludedByBook: Bool
 
@@ -1367,11 +1497,14 @@ private struct HighlightPickerRow: View {
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(highlight.text)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.overlineInk)
-                    .lineSpacing(3)
-                    .lineLimit(3)
+                SearchHighlightedText(
+                    text: highlight.text,
+                    query: searchQuery,
+                    font: .subheadline.weight(.medium),
+                    foregroundStyle: Color.overlineInk,
+                    lineSpacing: 3,
+                    lineLimit: 3
+                )
 
                 HStack(spacing: 8) {
                     Text(highlight.pageReference)
@@ -1513,6 +1646,7 @@ private struct InsightSourceRow: View {
 
 private struct InsightMarkdownText: View {
     let text: String
+    var searchQuery = ""
     var font: Font
     var foregroundStyle: Color
     var lineSpacing: CGFloat
@@ -1535,18 +1669,26 @@ private struct InsightMarkdownText: View {
     @ViewBuilder
     private func markdownText(_ value: String) -> some View {
         if let attributed = try? AttributedString(markdown: value) {
-            Text(attributed)
+            Text(highlighted(attributed))
                 .font(font)
                 .foregroundStyle(foregroundStyle)
                 .lineSpacing(lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text(value)
-                .font(font)
-                .foregroundStyle(foregroundStyle)
-                .lineSpacing(lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            SearchHighlightedText(
+                text: value,
+                query: searchQuery,
+                font: font,
+                foregroundStyle: foregroundStyle,
+                lineSpacing: lineSpacing
+            )
         }
+    }
+
+    private func highlighted(_ value: AttributedString) -> AttributedString {
+        var result = value
+        result.overlineApplySearchHighlight(query: searchQuery)
+        return result
     }
 
     private var segments: [InsightMarkdownSegment] {
@@ -1694,6 +1836,7 @@ private struct InsightDetailSheet: View {
 
 private struct SavedInsightCard: View {
     let insight: LibraryInsight
+    let searchQuery: String
     let canShowSources: Bool
     let openDetail: () -> Void
     let showSources: () -> Void
@@ -1704,10 +1847,13 @@ private struct SavedInsightCard: View {
                 InsightCategoryIcon(prompt: InsightPrompt(rawValue: insight.categoryRaw) ?? .connect)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(insight.prompt)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(Color.overlineInk)
-                        .lineLimit(2)
+                    SearchHighlightedText(
+                        text: insight.prompt,
+                        query: searchQuery,
+                        font: .headline.weight(.semibold),
+                        foregroundStyle: Color.overlineInk,
+                        lineLimit: 2
+                    )
 
                     Text(insight.createdAt.overlineShortDate)
                         .font(.caption.weight(.semibold))
@@ -1722,6 +1868,7 @@ private struct SavedInsightCard: View {
 
             InsightMarkdownText(
                 text: insight.body,
+                searchQuery: searchQuery,
                 font: .subheadline,
                 foregroundStyle: Color.overlineMutedInk,
                 lineSpacing: 4
@@ -1804,15 +1951,6 @@ enum InsightPrompt: String, CaseIterable, Identifiable, Sendable {
         case .connect: "point.topleft.down.curvedto.point.bottomright.up"
         case .expand: "arrow.up.left.and.arrow.down.right"
         case .digest: "text.badge.checkmark"
-        }
-    }
-
-    var seedQuestion: String {
-        switch self {
-        case .questions: "이 문장들이 나에게 던지는 질문은?"
-        case .connect: "서로 다른 문장 사이의 공통 패턴은?"
-        case .expand: "더 파고들 개념과 반론은?"
-        case .digest: "이번 주 저장한 글조각을 한 문단으로 정리해줘"
         }
     }
 

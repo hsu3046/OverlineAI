@@ -537,6 +537,7 @@ struct LLMInsightClient {
 
     private func userPrompt(for request: LLMInsightRequest) -> String {
         let bookContext = bookContextText(for: request.sources)
+        let userRequest = request.userPrompt.trimmed
 
         let sourceText = request.sources.enumerated().map { index, source in
             let memo = source.memo.trimmed.isEmpty ? "" : "\n메모: \(source.memo)"
@@ -547,19 +548,33 @@ struct LLMInsightClient {
         }
         .joined(separator: "\n\n")
 
-        return """
+        var sections = [
+            """
         작업 모드:
         \(request.category)
+        """,
 
+            """
         책 맥락:
         \(bookContext)
+        """,
 
+            """
         선택한 글조각:
         \(sourceText)
-
-        사용자 요청:
-        \(request.userPrompt)
         """
+        ]
+
+        if !userRequest.isEmpty {
+            sections.append(
+                """
+        사용자 요청:
+        \(userRequest)
+        """
+            )
+        }
+
+        return sections.joined(separator: "\n\n")
     }
 
     private func tagPrompt(for request: LLMTagRequest) -> String {

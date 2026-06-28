@@ -10,6 +10,8 @@ struct LibraryView: View {
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
     @State private var activeBookID: ReadingBook.ID?
+    @State private var pendingDeletedHighlight: PendingHighlightUndo?
+    @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
         List {
@@ -125,7 +127,12 @@ struct LibraryView: View {
             }
             .listRowChrome(top: 10, bottom: 8)
 
-            ForEach(displayedHighlights) { highlight in
+            ForEach(Array(displayedHighlights.enumerated()), id: \.element.id) { index, highlight in
+                if pendingDeletedHighlight?.visibleIndex == index {
+                    OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                        .listRowChrome(top: 0, bottom: 12)
+                }
+
                 ScrapbookCard(
                     highlight: highlight,
                     edit: {
@@ -143,7 +150,12 @@ struct LibraryView: View {
                 .listRowChrome(top: 0, bottom: 12)
             }
 
-            if library.recentHighlights.isEmpty {
+            if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= displayedHighlights.count {
+                OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                    .listRowChrome(top: 0, bottom: 12)
+            }
+
+            if library.recentHighlights.isEmpty && pendingDeletedHighlight == nil {
                 LibraryEmptyStateCard(
                     systemImage: "text.viewfinder",
                     title: "아직 글조각이 없습니다",
@@ -187,7 +199,11 @@ struct LibraryView: View {
             }
         }
         .onChange(of: rootResetToken) { _, _ in
+            clearPendingUndo(animated: false)
             activeBookID = nil
+        }
+        .onDisappear {
+            clearPendingUndo(animated: false)
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -200,7 +216,9 @@ struct LibraryView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             case .editHighlight(let highlightID):
-                HighlightEditorSheet(highlightID: highlightID)
+                HighlightEditorSheet(highlightID: highlightID) { highlightID in
+                    deleteHighlight(highlightID)
+                }
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             case .highlightBrowser:
@@ -238,8 +256,55 @@ struct LibraryView: View {
     }
 
     private func deleteHighlight(_ highlight: Highlight) {
+        deleteHighlight(highlight.id)
+    }
+
+    private func deleteHighlight(_ highlightID: Highlight.ID) {
+        let visibleIndex = displayedHighlights.firstIndex { $0.id == highlightID } ?? 0
+
         withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-            library.deleteHighlight(highlight.id)
+            if let deletion = library.deleteHighlightForUndo(highlightID) {
+                let pendingUndo = PendingHighlightUndo(deletion: deletion, visibleIndex: visibleIndex)
+                pendingDeletedHighlight = pendingUndo
+                scheduleUndoDismiss(for: pendingUndo.id)
+            }
+        }
+    }
+
+    private func restoreDeletedHighlight() {
+        guard let pendingDeletedHighlight else { return }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.restoreDeletedHighlight(pendingDeletedHighlight.deletion)
+            clearPendingUndo(animated: false)
+        }
+    }
+
+    private func scheduleUndoDismiss(for undoID: UUID) {
+        undoDismissTask?.cancel()
+        undoDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard pendingDeletedHighlight?.id == undoID else { return }
+                clearPendingUndo(animated: true)
+            }
+        }
+    }
+
+    private func clearPendingUndo(animated: Bool) {
+        undoDismissTask?.cancel()
+        undoDismissTask = nil
+
+        guard pendingDeletedHighlight != nil else { return }
+
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+                pendingDeletedHighlight = nil
+            }
+        } else {
+            pendingDeletedHighlight = nil
         }
     }
 }
@@ -322,6 +387,8 @@ private struct HighlightBrowserSheet: View {
     @State private var selectedBookID: ReadingBook.ID?
     @State private var isBookFilterPresented = false
     @State private var presentedHighlight: HighlightEditorPresentation?
+    @State private var pendingDeletedHighlight: PendingHighlightUndo?
+    @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -350,9 +417,15 @@ private struct HighlightBrowserSheet: View {
                 }
 
                 List {
-                    ForEach(filteredHighlights) { highlight in
+                    ForEach(Array(filteredHighlights.enumerated()), id: \.element.id) { index, highlight in
+                        if pendingDeletedHighlight?.visibleIndex == index {
+                            OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                                .listRowChrome(top: 0, bottom: 12)
+                        }
+
                         ScrapbookCard(
                             highlight: highlight,
+                            searchQuery: searchText,
                             edit: {
                                 presentedHighlight = HighlightEditorPresentation(id: highlight.id)
                             }
@@ -368,7 +441,12 @@ private struct HighlightBrowserSheet: View {
                         .listRowChrome(top: 0, bottom: 12)
                     }
 
-                    if filteredHighlights.isEmpty {
+                    if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= filteredHighlights.count {
+                        OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                            .listRowChrome(top: 0, bottom: 12)
+                    }
+
+                    if filteredHighlights.isEmpty && pendingDeletedHighlight == nil {
                         ContentUnavailableView(
                             searchText.trimmed.isEmpty ? "글조각 없음" : "검색 결과 없음",
                             systemImage: "text.viewfinder",
@@ -408,12 +486,17 @@ private struct HighlightBrowserSheet: View {
                 .presentationBackground(.thinMaterial)
             }
             .sheet(item: $presentedHighlight) { presentation in
-                HighlightEditorSheet(highlightID: presentation.id)
+                HighlightEditorSheet(highlightID: presentation.id) { highlightID in
+                    deleteHighlight(highlightID)
+                }
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
         }
         .presentationBackground(.thinMaterial)
+        .onDisappear {
+            clearPendingUndo(animated: false)
+        }
     }
 
     private var selectedBookFilterTitle: String {
@@ -449,9 +532,65 @@ private struct HighlightBrowserSheet: View {
     }
 
     private func deleteHighlight(_ highlight: Highlight) {
+        deleteHighlight(highlight.id)
+    }
+
+    private func deleteHighlight(_ highlightID: Highlight.ID) {
+        let visibleIndex = filteredHighlights.firstIndex { $0.id == highlightID } ?? 0
+
         withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-            library.deleteHighlight(highlight.id)
+            if let deletion = library.deleteHighlightForUndo(highlightID) {
+                let pendingUndo = PendingHighlightUndo(deletion: deletion, visibleIndex: visibleIndex)
+                pendingDeletedHighlight = pendingUndo
+                scheduleUndoDismiss(for: pendingUndo.id)
+            }
         }
+    }
+
+    private func restoreDeletedHighlight() {
+        guard let pendingDeletedHighlight else { return }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.restoreDeletedHighlight(pendingDeletedHighlight.deletion)
+            clearPendingUndo(animated: false)
+        }
+    }
+
+    private func scheduleUndoDismiss(for undoID: UUID) {
+        undoDismissTask?.cancel()
+        undoDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard pendingDeletedHighlight?.id == undoID else { return }
+                clearPendingUndo(animated: true)
+            }
+        }
+    }
+
+    private func clearPendingUndo(animated: Bool) {
+        undoDismissTask?.cancel()
+        undoDismissTask = nil
+
+        guard pendingDeletedHighlight != nil else { return }
+
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+                pendingDeletedHighlight = nil
+            }
+        } else {
+            pendingDeletedHighlight = nil
+        }
+    }
+}
+
+private struct PendingHighlightUndo: Identifiable {
+    let deletion: DeletedHighlightSnapshot
+    let visibleIndex: Int
+
+    var id: UUID {
+        deletion.id
     }
 }
 
@@ -2959,49 +3098,66 @@ struct ScrapbookView: View {
     let bookID: ReadingBook.ID
     @State private var presentedSheet: ScrapbookSheet?
     @State private var searchText = ""
-
-    private let columns = [
-        GridItem(.flexible(), spacing: 0)
-    ]
+    @State private var pendingDeletedHighlight: PendingHighlightUndo?
+    @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
         Group {
             if let book = library.book(with: bookID) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        ScrapbookHeader(book: book) {
-                            presentedSheet = .editBook(book.id)
-                        }
-
-                        if !book.highlights.isEmpty {
-                            OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
-                        }
-
-                        let highlights = filteredHighlights(in: book)
-                        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                            ForEach(highlights) { highlight in
-                                ScrapbookCard(
-                                    highlight: highlight,
-                                    edit: {
-                                        presentedSheet = .editHighlight(highlight.id)
-                                    }
-                                )
-                            }
-                        }
-
-                        if highlights.isEmpty {
-                            ContentUnavailableView(
-                                "검색 결과 없음",
-                                systemImage: "magnifyingglass",
-                                description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
-                            )
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                        }
-
+                List {
+                    ScrapbookHeader(book: book) {
+                        presentedSheet = .editBook(book.id)
                     }
-                    .padding(16)
+                    .listRowChrome(top: 16, bottom: 18)
+
+                    if !book.highlights.isEmpty {
+                        OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
+                            .listRowChrome(top: 0, bottom: 12)
+                    }
+
+                    let highlights = filteredHighlights(in: book)
+                    ForEach(Array(highlights.enumerated()), id: \.element.id) { index, highlight in
+                        if pendingDeletedHighlight?.visibleIndex == index {
+                            OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                                .listRowChrome(top: 0, bottom: 12)
+                        }
+
+                        ScrapbookCard(
+                            highlight: highlight,
+                            searchQuery: searchText,
+                            edit: {
+                                presentedSheet = .editHighlight(highlight.id)
+                            }
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteHighlight(highlight)
+                            } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
+                        .listRowChrome(top: 0, bottom: 12)
+                    }
+
+                    if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= highlights.count {
+                        OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                            .listRowChrome(top: 0, bottom: 12)
+                    }
+
+                    if highlights.isEmpty && pendingDeletedHighlight == nil {
+                        ContentUnavailableView(
+                            "검색 결과 없음",
+                            systemImage: "magnifyingglass",
+                            description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
+                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                        .listRowChrome(top: 0, bottom: 16)
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .scrollIndicators(.hidden)
                 .overlineBottomMenuCompaction()
                 .background(OverlineCanvasBackground().ignoresSafeArea())
@@ -3013,7 +3169,9 @@ struct ScrapbookView: View {
                             .presentationDetents([.medium, .large])
                             .presentationDragIndicator(.visible)
                     case .editHighlight(let highlightID):
-                        HighlightEditorSheet(highlightID: highlightID)
+                        HighlightEditorSheet(highlightID: highlightID) { highlightID in
+                            deleteHighlight(highlightID)
+                        }
                             .presentationDetents([.large])
                             .presentationDragIndicator(.visible)
                     }
@@ -3021,6 +3179,9 @@ struct ScrapbookView: View {
             } else {
                 ContentUnavailableView("책을 찾을 수 없음", systemImage: "books.vertical")
             }
+        }
+        .onDisappear {
+            clearPendingUndo(animated: false)
         }
     }
 
@@ -3037,6 +3198,61 @@ struct ScrapbookView: View {
             ]
             .joined(separator: " ")
             .range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    private func deleteHighlight(_ highlight: Highlight) {
+        deleteHighlight(highlight.id)
+    }
+
+    private func deleteHighlight(_ highlightID: Highlight.ID) {
+        let visibleIndex = library.book(with: bookID).map { book in
+            filteredHighlights(in: book).firstIndex { $0.id == highlightID } ?? 0
+        } ?? 0
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            if let deletion = library.deleteHighlightForUndo(highlightID) {
+                let pendingUndo = PendingHighlightUndo(deletion: deletion, visibleIndex: visibleIndex)
+                pendingDeletedHighlight = pendingUndo
+                scheduleUndoDismiss(for: pendingUndo.id)
+            }
+        }
+    }
+
+    private func restoreDeletedHighlight() {
+        guard let pendingDeletedHighlight else { return }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.restoreDeletedHighlight(pendingDeletedHighlight.deletion)
+            clearPendingUndo(animated: false)
+        }
+    }
+
+    private func scheduleUndoDismiss(for undoID: UUID) {
+        undoDismissTask?.cancel()
+        undoDismissTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard pendingDeletedHighlight?.id == undoID else { return }
+                clearPendingUndo(animated: true)
+            }
+        }
+    }
+
+    private func clearPendingUndo(animated: Bool) {
+        undoDismissTask?.cancel()
+        undoDismissTask = nil
+
+        guard pendingDeletedHighlight != nil else { return }
+
+        if animated {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.92)) {
+                pendingDeletedHighlight = nil
+            }
+        } else {
+            pendingDeletedHighlight = nil
         }
     }
 }
@@ -3164,6 +3380,7 @@ private struct BookCoverArtwork: View {
 private struct ScrapbookMemoNote: View {
     let memo: String
     let tone: StickyTone
+    var searchQuery = ""
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -3171,11 +3388,13 @@ private struct ScrapbookMemoNote: View {
                 .fill(tone.paper.opacity(0.92))
                 .frame(width: 4)
 
-            Text(memo)
-                .font(.subheadline)
-                .foregroundStyle(Color.overlineInk.opacity(0.82))
-                .lineSpacing(4)
-                .fixedSize(horizontal: false, vertical: true)
+            SearchHighlightedText(
+                text: memo,
+                query: searchQuery,
+                font: .subheadline,
+                foregroundStyle: Color.overlineInk.opacity(0.82),
+                lineSpacing: 4
+            )
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
@@ -3213,6 +3432,7 @@ private struct BookMetaLine: View {
 
 struct ScrapbookCard: View {
     let highlight: Highlight
+    var searchQuery = ""
     var edit: () -> Void = {}
 
     var body: some View {
@@ -3223,14 +3443,20 @@ struct ScrapbookCard: View {
                     .frame(width: 6)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(highlight.text)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Color.overlineInk)
-                        .lineSpacing(5)
-                        .fixedSize(horizontal: false, vertical: true)
+                    SearchHighlightedText(
+                        text: highlight.text,
+                        query: searchQuery,
+                        font: .body.weight(.semibold),
+                        foregroundStyle: Color.overlineInk,
+                        lineSpacing: 5
+                    )
 
                     if !highlight.memo.isEmpty {
-                        ScrapbookMemoNote(memo: highlight.memo, tone: highlight.stickyTone)
+                        ScrapbookMemoNote(
+                            memo: highlight.memo,
+                            tone: highlight.stickyTone,
+                            searchQuery: searchQuery
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

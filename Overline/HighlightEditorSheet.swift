@@ -6,6 +6,7 @@ struct HighlightEditorSheet: View {
     @Environment(ReadingLibrary.self) private var library
 
     let highlightID: Highlight.ID
+    var deleteHighlight: ((Highlight.ID) -> Void)? = nil
 
     @State private var text = ""
     @State private var memo = ""
@@ -67,7 +68,11 @@ struct HighlightEditorSheet: View {
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .confirmationDialog("글조각을 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
                 Button("삭제", role: .destructive) {
-                    library.deleteHighlight(highlightID)
+                    if let deleteHighlight {
+                        deleteHighlight(highlightID)
+                    } else {
+                        library.deleteHighlight(highlightID)
+                    }
                     dismiss()
                 }
                 Button("취소", role: .cancel) {}
