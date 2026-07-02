@@ -3383,20 +3383,14 @@ private struct ScrapbookMemoNote: View {
     var searchQuery = ""
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(tone.paper.opacity(0.92))
-                .frame(width: 4)
-
-            SearchHighlightedText(
-                text: memo,
-                query: searchQuery,
-                font: .subheadline,
-                foregroundStyle: Color.overlineInk.opacity(0.82),
-                lineSpacing: 4
-            )
-        }
-        .padding(.horizontal, 10)
+        SearchHighlightedText(
+            text: memo,
+            query: searchQuery,
+            font: .subheadline,
+            foregroundStyle: Color.overlineInk.opacity(0.82),
+            lineSpacing: 4
+        )
+        .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tone.paper.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
