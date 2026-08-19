@@ -798,6 +798,8 @@ private extension Error {
             return "network_unavailable"
         case .emptyResponse:
             return "empty_response"
+        case .unsafeCorrection:
+            return "unsafe_correction"
         case .requestFailed(let statusCode, _):
             return "request_failed_\(statusCode)"
         }

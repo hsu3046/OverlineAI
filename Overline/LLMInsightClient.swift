@@ -30,6 +30,21 @@ struct LLMTagRequest {
     let existingTags: [String]
 }
 
+struct LLMOCRCorrectionRequest {
+    let provider: LLMProvider
+    let modelID: String
+    let credential: LLMAuthCredential
+    let bookTitle: String
+    let bookAuthor: String
+    let text: String
+}
+
+struct LLMOCRCorrectionResult: Equatable {
+    let correctedText: String
+    let changes: [String]
+    let risk: String
+}
+
 private struct LLMGenerationProfile {
     let maxOutputTokens: Int
     let temperature: Double
@@ -45,6 +60,7 @@ enum LLMInsightError: LocalizedError {
     case timedOut
     case networkUnavailable
     case emptyResponse
+    case unsafeCorrection
     case requestFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
@@ -68,6 +84,8 @@ enum LLMInsightError: LocalizedError {
             "AI 서비스에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요."
         case .emptyResponse:
             "AI가 비어 있는 응답을 반환했습니다."
+        case .unsafeCorrection:
+            "AI 교정 결과가 원문과 너무 달라 적용하지 않았어요."
         case .requestFailed(let statusCode, let message):
             if message.isEmpty {
                 "AI 요청이 실패했습니다. (\(statusCode))"
@@ -135,6 +153,33 @@ struct LLMInsightClient {
         )
 
         return Self.normalizedTags(fromTagResponse: response)
+    }
+
+    func generateOCRCorrection(_ request: LLMOCRCorrectionRequest) async throws -> LLMOCRCorrectionResult {
+        let originalText = request.text.trimmed
+        guard !originalText.isEmpty else { throw LLMInsightError.emptyResponse }
+
+        let response = try await generateInsight(
+            LLMInsightRequest(
+                provider: request.provider,
+                modelID: request.modelID,
+                credential: request.credential,
+                category: "OCR교정",
+                instruction: "",
+                userPrompt: "",
+                sources: [
+                    LLMInsightSource(
+                        bookTitle: request.bookTitle,
+                        bookAuthor: request.bookAuthor,
+                        bookSummary: "",
+                        text: originalText,
+                        memo: ""
+                    )
+                ]
+            )
+        )
+
+        return try Self.normalizedOCRCorrection(from: response, originalText: originalText)
     }
 
     private func generateOpenAIResponsesInsight(_ request: LLMInsightRequest) async throws -> String {
@@ -349,6 +394,19 @@ struct LLMInsightClient {
     }
 
     private func generationProfile(for request: LLMInsightRequest) -> LLMGenerationProfile {
+        if request.category == "OCR교정" {
+            let characterCount = request.sources.reduce(0) { partialResult, source in
+                partialResult + source.text.count
+            }
+            let maxOutputTokens = min(max(Int(Double(characterCount) * 0.85) + 500, 900), 3200)
+            return LLMGenerationProfile(
+                maxOutputTokens: maxOutputTokens,
+                temperature: 0.0,
+                openAIReasoningEffort: "low",
+                openAITextVerbosity: "low"
+            )
+        }
+
         let base: (maxOutputTokens: Int, temperature: Double, effort: String, verbosity: String)
 
         switch request.category {
@@ -519,7 +577,26 @@ struct LLMInsightClient {
     }
 
     private func systemPrompt(for request: LLMInsightRequest) -> String {
-        """
+        if request.category == "OCR교정" {
+            return """
+            당신은 Overline의 OCR 교정 엔진입니다.
+            목적은 책에서 캡처한 원문 글조각의 OCR 실패만 보수적으로 고치는 것입니다.
+
+            절대 규칙:
+            - 의미, 문체, 어휘 선택, 문장 순서를 바꾸지 마세요.
+            - 요약, 번역, 윤문, 해석, 문장 추가를 하지 마세요.
+            - OCR 오탈자, 띄어쓰기, 명백한 문장부호, 따옴표 모양, 줄바꿈 오류만 고치세요.
+            - 확실하지 않은 단어와 고유명사는 원문을 유지하세요.
+            - 책 제목과 저자는 고유명사 판단 힌트로만 쓰고 내용을 추론하지 마세요.
+            - 입력에 없는 단어, 문장, 정보를 만들지 마세요.
+            - 반드시 JSON만 반환하세요. 마크다운, 설명 문장, 코드블록은 금지입니다.
+
+            반환 형식:
+            {"correctedText":"교정된 전체 글","changes":["짧은 변경 설명"],"risk":"low|medium|high"}
+            """
+        }
+
+        return """
         당신은 Overline의 한국어 독서 인사이트 엔진입니다.
         입력은 사용자가 책을 읽다가 직접 선택한 글조각과 그 글조각이 속한 책의 배경 정보입니다.
 
@@ -536,6 +613,10 @@ struct LLMInsightClient {
     }
 
     private func userPrompt(for request: LLMInsightRequest) -> String {
+        if request.category == "OCR교정" {
+            return ocrCorrectionPrompt(for: request)
+        }
+
         let bookContext = bookContextText(for: request.sources)
         let userRequest = request.userPrompt.trimmed
 
@@ -575,6 +656,24 @@ struct LLMInsightClient {
         }
 
         return sections.joined(separator: "\n\n")
+    }
+
+    private func ocrCorrectionPrompt(for request: LLMInsightRequest) -> String {
+        let source = request.sources.first
+        let bookTitle = source?.bookTitle.trimmed ?? ""
+        let bookAuthor = source?.bookAuthor.trimmed ?? ""
+        let titleHint = bookTitle.isEmpty ? "없음" : bookTitle
+        let authorHint = bookAuthor.isEmpty ? "없음" : bookAuthor
+        let text = source?.text ?? ""
+
+        return """
+        책 힌트:
+        제목: \(titleHint)
+        저자: \(authorHint)
+
+        원문 OCR:
+        \(text)
+        """
     }
 
     private func tagPrompt(for request: LLMTagRequest) -> String {
@@ -729,6 +828,146 @@ struct LLMInsightClient {
         return tags
     }
 
+    private static func normalizedOCRCorrection(
+        from response: String,
+        originalText: String
+    ) throws -> LLMOCRCorrectionResult {
+        let cleanedResponse = response
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmed
+
+        guard
+            let data = jsonObjectText(in: cleanedResponse).data(using: .utf8),
+            let payload = try? JSONDecoder().decode(OCRCorrectionPayload.self, from: data)
+        else {
+            throw LLMInsightError.invalidResponse
+        }
+
+        let correctedText = normalizedOCRCorrectionText(payload.correctedText)
+        guard !correctedText.isEmpty else { throw LLMInsightError.emptyResponse }
+
+        let risk = payload.risk?.lowercased().trimmed ?? "medium"
+        guard risk != "high" else { throw LLMInsightError.unsafeCorrection }
+        guard isSafeOCRCorrection(originalText: originalText, correctedText: correctedText) else {
+            throw LLMInsightError.unsafeCorrection
+        }
+
+        let changes = (payload.changes ?? [])
+            .map(\.trimmed)
+            .filter { !$0.isEmpty }
+            .prefix(5)
+
+        return LLMOCRCorrectionResult(
+            correctedText: correctedText,
+            changes: Array(changes),
+            risk: risk
+        )
+    }
+
+    private static func jsonObjectText(in text: String) -> String {
+        guard
+            let startIndex = text.firstIndex(of: "{"),
+            let endIndex = text.lastIndex(of: "}"),
+            startIndex <= endIndex
+        else {
+            return text
+        }
+
+        return String(text[startIndex...endIndex])
+    }
+
+    private static func normalizedOCRCorrectionText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: .newlines)
+            .map {
+                $0.replacingOccurrences(of: #"[ \t\u{00A0}]+"#, with: " ", options: .regularExpression)
+                    .trimmed
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+            .normalizedQuotesForStorage
+            .trimmed
+    }
+
+    private static func isSafeOCRCorrection(originalText: String, correctedText: String) -> Bool {
+        let original = normalizedOCRCorrectionText(originalText)
+        let corrected = normalizedOCRCorrectionText(correctedText)
+        guard !original.isEmpty, !corrected.isEmpty else { return false }
+
+        let lengthRatio = Double(corrected.count) / Double(max(original.count, 1))
+        guard (0.65...1.35).contains(lengthRatio) else { return false }
+
+        let originalComparable = comparableOCRText(original)
+        let correctedComparable = comparableOCRText(corrected)
+        guard !originalComparable.isEmpty, !correctedComparable.isEmpty else {
+            return original == corrected
+        }
+
+        let comparableRatio = Double(correctedComparable.count) / Double(max(originalComparable.count, 1))
+        guard (0.78...1.22).contains(comparableRatio) else { return false }
+
+        let maxComparableCount = max(originalComparable.count, correctedComparable.count)
+        let maximumDistance = max(6, Int(Double(maxComparableCount) * 0.16))
+        let distance = boundedEditDistance(
+            Array(originalComparable),
+            Array(correctedComparable),
+            limit: maximumDistance
+        )
+        guard distance <= maximumDistance else { return false }
+
+        let sentenceDelta = abs(sentenceBoundaryCount(in: original) - sentenceBoundaryCount(in: corrected))
+        guard sentenceDelta <= max(2, sentenceBoundaryCount(in: original) / 3) else { return false }
+
+        let lineDelta = abs(original.components(separatedBy: .newlines).count - corrected.components(separatedBy: .newlines).count)
+        return lineDelta <= 4
+    }
+
+    private static func comparableOCRText(_ text: String) -> String {
+        text
+            .lowercased()
+            .replacingOccurrences(of: #"[\s\p{P}\p{S}]"#, with: "", options: .regularExpression)
+    }
+
+    private static func sentenceBoundaryCount(in text: String) -> Int {
+        text.filter { ".!?。！？".contains($0) }.count
+    }
+
+    private static func boundedEditDistance(
+        _ lhs: [Character],
+        _ rhs: [Character],
+        limit: Int
+    ) -> Int {
+        guard abs(lhs.count - rhs.count) <= limit else { return limit + 1 }
+        guard !lhs.isEmpty else { return rhs.count }
+        guard !rhs.isEmpty else { return lhs.count }
+
+        var previous = Array(0...rhs.count)
+
+        for lhsIndex in lhs.indices {
+            var current = Array(repeating: 0, count: rhs.count + 1)
+            current[0] = lhsIndex + 1
+            var rowMinimum = current[0]
+
+            for rhsOffset in rhs.indices {
+                let substitutionCost = lhs[lhsIndex] == rhs[rhsOffset] ? 0 : 1
+                let insertion = current[rhsOffset] + 1
+                let deletion = previous[rhsOffset + 1] + 1
+                let substitution = previous[rhsOffset] + substitutionCost
+                let value = min(insertion, deletion, substitution)
+                current[rhsOffset + 1] = value
+                rowMinimum = min(rowMinimum, value)
+            }
+
+            if rowMinimum > limit { return limit + 1 }
+            previous = current
+        }
+
+        return previous[rhs.count]
+    }
+
     private func errorMessage(from data: Data) -> String {
         guard
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -763,6 +1002,12 @@ private struct OpenAICompatibleResponse: Decodable {
     }
 
     let choices: [Choice]
+}
+
+private struct OCRCorrectionPayload: Decodable {
+    let correctedText: String
+    let changes: [String]?
+    let risk: String?
 }
 
 private struct OpenAIResponsesResponse: Decodable {

@@ -267,6 +267,10 @@ final class LLMSettingsStore {
         return nil
     }
 
+    var lightweightCorrectionConfiguration: LLMTagProviderConfiguration? {
+        lightweightTagConfiguration
+    }
+
     func setSelectedModelID(_ modelID: String) {
         let trimmedModelID = modelID.trimmed
         guard !trimmedModelID.isEmpty else {
