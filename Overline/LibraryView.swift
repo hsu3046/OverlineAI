@@ -135,6 +135,7 @@ struct LibraryView: View {
 
                 ScrapbookCard(
                     highlight: highlight,
+                    bookTitle: bookTitle(for: highlight),
                     edit: {
                         presentedSheet = .editHighlight(highlight.id)
                     }
@@ -242,6 +243,16 @@ struct LibraryView: View {
 
     private var displayedHighlights: [Highlight] {
         return Array(library.recentHighlights.prefix(10))
+    }
+
+    private func bookTitle(for highlight: Highlight) -> String? {
+        guard
+            let bookID = library.bookID(containing: highlight.id),
+            let book = library.book(with: bookID)
+        else {
+            return nil
+        }
+        return book.title.trimmed.isEmpty ? nil : book.title
     }
 
     private var isBookNavigationPresented: Binding<Bool> {
@@ -425,6 +436,7 @@ private struct HighlightBrowserSheet: View {
 
                         ScrapbookCard(
                             highlight: highlight,
+                            bookTitle: bookTitle(for: highlight),
                             searchQuery: searchText,
                             edit: {
                                 presentedHighlight = HighlightEditorPresentation(id: highlight.id)
@@ -502,6 +514,16 @@ private struct HighlightBrowserSheet: View {
     private var selectedBookFilterTitle: String {
         guard let selectedBookID else { return "전체" }
         return library.book(with: selectedBookID)?.title ?? "전체"
+    }
+
+    private func bookTitle(for highlight: Highlight) -> String? {
+        guard
+            let bookID = library.bookID(containing: highlight.id),
+            let book = library.book(with: bookID)
+        else {
+            return nil
+        }
+        return book.title.trimmed.isEmpty ? nil : book.title
     }
 
     private var bookFilterSheetHeight: CGFloat {
@@ -3426,6 +3448,7 @@ private struct BookMetaLine: View {
 
 struct ScrapbookCard: View {
     let highlight: Highlight
+    var bookTitle: String? = nil
     var searchQuery = ""
     var edit: () -> Void = {}
 
@@ -3437,6 +3460,25 @@ struct ScrapbookCard: View {
                     .frame(width: 6)
 
                 VStack(alignment: .leading, spacing: 10) {
+                    if let bookTitle = visibleBookTitle {
+                        HStack(alignment: .center, spacing: 6) {
+                            Image(systemName: "book.closed")
+                                .font(.caption.weight(.bold))
+                                .symbolRenderingMode(.hierarchical)
+
+                            SearchHighlightedText(
+                                text: bookTitle,
+                                query: searchQuery,
+                                font: .caption.weight(.semibold),
+                                foregroundStyle: Color.overlineMutedInk.opacity(0.76),
+                                lineSpacing: 0
+                            )
+                            .lineLimit(1)
+                        }
+                        .foregroundStyle(Color.overlineMutedInk.opacity(0.76))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     SearchHighlightedText(
                         text: highlight.text,
                         query: searchQuery,
@@ -3481,6 +3523,13 @@ struct ScrapbookCard: View {
             shadowOpacity: 0.05,
             shadowRadius: 16
         )
+    }
+
+    private var visibleBookTitle: String? {
+        guard let title = bookTitle?.trimmed, !title.isEmpty else {
+            return nil
+        }
+        return title
     }
 }
 
