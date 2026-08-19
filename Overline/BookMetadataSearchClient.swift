@@ -6,6 +6,7 @@ struct BookMetadataCandidate: Identifiable, Hashable {
     let author: String
     let summary: String
     let publisher: String
+    let publishedDate: String
     let isbn: String
     let coverURLString: String
     let source: BookMetadataSource
@@ -16,6 +17,8 @@ struct BookMetadataCandidate: Identifiable, Hashable {
             "Manual"
         case .kakao:
             "Kakao"
+        case .aladin:
+            "Aladin"
         case .google:
             "Google"
         }
@@ -28,19 +31,25 @@ struct BookMetadataSearchResult {
 }
 
 enum BookMetadataAPIKeyStore {
-    private static let keychain = KeychainStringStore(service: "aib.Overline.book-metadata")
-    private static let kakaoRESTAPIKeyAccount = "kakao-rest-api-key"
+    private static let kakaoRESTAPIKeyInfoKey = "KakaoRESTAPIKey"
+    private static let aladinTTBKeyInfoKey = "AladinTTBKey"
 
     static func kakaoRESTAPIKey() -> String {
-        let storedKey = keychain.string(account: kakaoRESTAPIKeyAccount) ?? ""
-        if !storedKey.trimmed.isEmpty {
-            keychain.set(storedKey, account: kakaoRESTAPIKeyAccount)
-        }
-        return storedKey
+        bundledAPIKey(infoDictionaryKey: kakaoRESTAPIKeyInfoKey)
     }
 
-    static func setKakaoRESTAPIKey(_ key: String) {
-        keychain.set(key.trimmed, account: kakaoRESTAPIKeyAccount)
+    static func aladinTTBKey() -> String {
+        bundledAPIKey(infoDictionaryKey: aladinTTBKeyInfoKey)
+    }
+
+    private static func bundledAPIKey(infoDictionaryKey: String) -> String {
+        guard let key = Bundle.main.object(forInfoDictionaryKey: infoDictionaryKey) as? String else {
+            return ""
+        }
+
+        let trimmedKey = key.trimmed
+        guard !trimmedKey.hasPrefix("$(") else { return "" }
+        return trimmedKey
     }
 }
 
@@ -53,129 +62,214 @@ struct BookMetadataSearchClient {
         self.session = session
     }
 
-    func search(query: String, kakaoRESTAPIKey: String) async throws -> BookMetadataSearchResult {
+    func search(query: String) async throws -> BookMetadataSearchResult {
         let trimmedQuery = query.trimmed
         guard !trimmedQuery.isEmpty else {
             return BookMetadataSearchResult(candidates: [], infoMessage: nil)
         }
 
-        if !kakaoRESTAPIKey.trimmed.isEmpty {
+        let kakaoKey = BookMetadataAPIKeyStore.kakaoRESTAPIKey()
+        let aladinKey = BookMetadataAPIKeyStore.aladinTTBKey()
+
+        guard !kakaoKey.isEmpty || !aladinKey.isEmpty else {
+            throw BookMetadataSearchError.missingMetadataAPIKeys
+        }
+
+        var aladinFailure: Error?
+
+        if !aladinKey.isEmpty {
             do {
-                let kakaoResults = try await searchKakao(query: trimmedQuery, apiKey: kakaoRESTAPIKey)
-                if !kakaoResults.isEmpty {
+                let aladinResults = try await searchAladin(query: trimmedQuery, apiKey: aladinKey)
+                if !aladinResults.isEmpty {
                     return BookMetadataSearchResult(
-                        candidates: kakaoResults,
-                        infoMessage: "Kakao 도서 API 결과입니다."
+                        candidates: aladinResults,
+                        infoMessage: "Aladin 도서 API 결과입니다."
                     )
                 }
 
-                let googleResults = try await searchGoogle(query: trimmedQuery)
-                return BookMetadataSearchResult(
-                    candidates: googleResults,
-                    infoMessage: "Kakao 결과가 없어 Google Books fallback 결과를 표시합니다."
-                )
-            } catch let kakaoError {
-                do {
-                    let googleResults = try await searchGoogle(query: trimmedQuery)
+                if kakaoKey.isEmpty {
                     return BookMetadataSearchResult(
-                        candidates: googleResults,
-                        infoMessage: "Kakao 연결에 실패해 Google Books fallback 결과를 표시합니다. \(kakaoError.localizedDescription)"
+                        candidates: [],
+                        infoMessage: "Aladin 검색 결과가 없습니다."
                     )
-                } catch let googleError {
-                    throw BookMetadataSearchError.fallbackFailed(
-                        kakaoMessage: kakaoError.localizedDescription,
-                        googleMessage: googleError.localizedDescription
-                    )
+                }
+            } catch {
+                aladinFailure = error
+                if kakaoKey.isEmpty {
+                    throw error
                 }
             }
         }
 
-        let googleResults = try await searchGoogle(query: trimmedQuery)
-        return BookMetadataSearchResult(
-            candidates: googleResults,
-            infoMessage: "Google Books 결과입니다. Kakao 키를 입력하면 국내 도서를 우선 검색합니다."
-        )
-    }
+        do {
+            let kakaoResults = try await searchKakao(query: trimmedQuery, apiKey: kakaoKey)
+            let message: String
+            if let aladinFailure {
+                message = kakaoResults.isEmpty
+                    ? "Aladin 연결에 실패했고 Kakao 검색 결과도 없습니다."
+                    : "Aladin 연결에 실패해 Kakao 결과를 표시합니다. \(aladinFailure.localizedDescription)"
+            } else if !aladinKey.isEmpty {
+                message = kakaoResults.isEmpty
+                    ? "Aladin과 Kakao 검색 결과가 없습니다."
+                    : "Aladin 결과가 없어 Kakao 결과를 표시합니다."
+            } else {
+                message = "Kakao 도서 API 결과입니다."
+            }
+            return BookMetadataSearchResult(candidates: kakaoResults, infoMessage: message)
+        } catch {
+            if let aladinFailure {
+                throw BookMetadataSearchError.fallbackFailed(
+                    aladinMessage: aladinFailure.localizedDescription,
+                    kakaoMessage: error.localizedDescription
+                )
+            }
 
-    func testKakaoRESTAPIKey(_ apiKey: String) async throws {
-        guard !apiKey.trimmed.isEmpty else {
-            throw BookMetadataSearchError.missingKakaoAPIKey
+            throw error
         }
-
-        _ = try await searchKakao(query: "책", apiKey: apiKey)
     }
 
     private func searchKakao(query: String, apiKey: String) async throws -> [BookMetadataCandidate] {
+        let primaryTarget = kakaoPrimaryTarget(for: query)
+        let primaryQuery = primaryTarget == "isbn" ? query.filter(\.isNumber) : query
+        let primaryResults = try await searchKakao(query: primaryQuery, apiKey: apiKey, target: primaryTarget)
+
+        if !primaryResults.isEmpty || primaryTarget == nil {
+            return primaryResults
+        }
+
+        return try await searchKakao(query: query, apiKey: apiKey, target: nil)
+    }
+
+    private func searchKakao(query: String, apiKey: String, target: String?) async throws -> [BookMetadataCandidate] {
         var components = URLComponents(string: "https://dapi.kakao.com/v3/search/book")
-        components?.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "sort", value: "accuracy"),
+            URLQueryItem(name: "page", value: "1"),
             URLQueryItem(name: "size", value: "10")
         ]
+        if let target {
+            queryItems.append(URLQueryItem(name: "target", value: target))
+        }
+        components?.queryItems = queryItems
 
         guard let url = components?.url else { throw BookMetadataSearchError.invalidURL }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = timeoutInterval
-        request.setValue("KakaoAK \(apiKey.trimmed)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("KakaoAK \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        let data = try await responseData(for: request)
+        let data = try await responseData(for: request, serviceName: "Kakao 도서 API")
         let response = try decoder.decode(KakaoBookSearchResponse.self, from: data)
 
-        return response.documents.map { document in
-            BookMetadataCandidate(
-                id: "kakao-\(document.isbn)-\(document.title)",
-                title: document.title.strippingHTML.trimmed,
-                author: document.authors.joined(separator: ", ").trimmed,
-                summary: document.contents.strippingHTML.trimmed,
-                publisher: document.publisher.trimmed,
-                isbn: document.isbn.trimmed,
-                coverURLString: document.thumbnail.normalizedHTTPSURLString,
+        return response.documents.compactMap { document in
+            let title = (document.title ?? "").strippingHTML.trimmed
+            guard !title.isEmpty else { return nil }
+
+            return BookMetadataCandidate(
+                id: "kakao-\(document.isbn ?? "")-\(title)",
+                title: title,
+                author: (document.authors ?? []).joined(separator: ", ").trimmed,
+                summary: (document.contents ?? "").strippingHTML.trimmed,
+                publisher: (document.publisher ?? "").trimmed,
+                publishedDate: (document.datetime ?? "").normalizedPublicationDate,
+                isbn: (document.isbn ?? "").trimmed,
+                coverURLString: (document.thumbnail ?? "").normalizedHTTPSURLString,
                 source: .kakao
             )
         }
     }
 
-    private func searchGoogle(query: String) async throws -> [BookMetadataCandidate] {
-        var components = URLComponents(string: "https://www.googleapis.com/books/v1/volumes")
+    private func searchAladin(query: String, apiKey: String) async throws -> [BookMetadataCandidate] {
+        let digits = query.filter(\.isNumber)
+        if digits.count == 10 || digits.count == 13 {
+            let lookupResults = try await searchAladinLookup(isbn: digits, apiKey: apiKey)
+            if !lookupResults.isEmpty {
+                return lookupResults
+            }
+        }
+
+        let titleResults = try await searchAladinSearch(query: query, queryType: "Title", apiKey: apiKey)
+        if !titleResults.isEmpty || digits.count == 10 || digits.count == 13 {
+            return titleResults
+        }
+
+        return try await searchAladinSearch(query: query, queryType: "Keyword", apiKey: apiKey)
+    }
+
+    private func searchAladinLookup(isbn: String, apiKey: String) async throws -> [BookMetadataCandidate] {
+        var components = URLComponents(string: "https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx")
         components?.queryItems = [
-            URLQueryItem(name: "q", value: googleQuery(from: query)),
-            URLQueryItem(name: "maxResults", value: "10"),
-            URLQueryItem(name: "printType", value: "books"),
-            URLQueryItem(name: "projection", value: "lite")
+            URLQueryItem(name: "TTBKey", value: apiKey),
+            URLQueryItem(name: "ItemId", value: isbn),
+            URLQueryItem(name: "ItemIdType", value: isbn.count == 13 ? "ISBN13" : "ISBN"),
+            URLQueryItem(name: "Cover", value: "Big"),
+            URLQueryItem(name: "Output", value: "JS"),
+            URLQueryItem(name: "Version", value: "20131101")
         ]
 
         guard let url = components?.url else { throw BookMetadataSearchError.invalidURL }
+        return try await aladinCandidates(for: url)
+    }
 
+    private func searchAladinSearch(query: String, queryType: String, apiKey: String) async throws -> [BookMetadataCandidate] {
+        var components = URLComponents(string: "https://www.aladin.co.kr/ttb/api/ItemSearch.aspx")
+        components?.queryItems = [
+            URLQueryItem(name: "TTBKey", value: apiKey),
+            URLQueryItem(name: "Query", value: query),
+            URLQueryItem(name: "QueryType", value: queryType),
+            URLQueryItem(name: "MaxResults", value: "10"),
+            URLQueryItem(name: "Start", value: "1"),
+            URLQueryItem(name: "SearchTarget", value: "Book"),
+            URLQueryItem(name: "Sort", value: "Accuracy"),
+            URLQueryItem(name: "Cover", value: "Big"),
+            URLQueryItem(name: "Output", value: "JS"),
+            URLQueryItem(name: "Version", value: "20131101")
+        ]
+
+        guard let url = components?.url else { throw BookMetadataSearchError.invalidURL }
+        return try await aladinCandidates(for: url)
+    }
+
+    private func aladinCandidates(for url: URL) async throws -> [BookMetadataCandidate] {
         var request = URLRequest(url: url)
         request.timeoutInterval = timeoutInterval
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let data = try await responseData(for: request)
-        let response = try decoder.decode(GoogleBooksResponse.self, from: data)
+        let data = try await responseData(for: request, serviceName: "Aladin 도서 API")
+        let response = try decoder.decode(AladinBookSearchResponse.self, from: data)
 
-        return (response.items ?? []).compactMap { item in
-            guard let title = item.volumeInfo.title?.trimmed, !title.isEmpty else { return nil }
+        if let errorCode = response.errorCode {
+            let detail = response.errorMessage?.trimmed ?? ""
+            let message = detail.isEmpty ? "오류 코드 \(errorCode)" : detail
+            throw BookMetadataSearchError.apiError(serviceName: "Aladin 도서 API", message: message)
+        }
 
-            let isbn = item.volumeInfo.industryIdentifiers?
-                .map(\.identifier)
-                .filter { !$0.trimmed.isEmpty }
-                .joined(separator: " ")
-                ?? ""
+        return (response.item ?? []).compactMap { item in
+            let title = (item.title ?? "").strippingHTML.trimmed
+            guard !title.isEmpty else { return nil }
+
+            let isbnValues = [item.isbn, item.isbn13]
+                .compactMap { $0?.trimmed }
+                .filter { !$0.isEmpty }
+                .uniqued()
 
             return BookMetadataCandidate(
-                id: "google-\(item.id)",
+                id: "aladin-\(isbnValues.joined(separator: "-"))-\(title)",
                 title: title,
-                author: item.volumeInfo.authors?.joined(separator: ", ").trimmed ?? "",
-                summary: item.volumeInfo.description?.strippingHTML.trimmed ?? "",
-                publisher: item.volumeInfo.publisher?.trimmed ?? "",
-                isbn: isbn,
-                coverURLString: (item.volumeInfo.imageLinks?.thumbnail ?? item.volumeInfo.imageLinks?.smallThumbnail ?? "").normalizedHTTPSURLString,
-                source: .google
+                author: (item.author ?? "").strippingHTML.trimmed,
+                summary: (item.description ?? "").strippingHTML.trimmed,
+                publisher: (item.publisher ?? "").trimmed,
+                publishedDate: (item.pubDate ?? "").normalizedPublicationDate,
+                isbn: isbnValues.joined(separator: " "),
+                coverURLString: (item.cover ?? "").normalizedHTTPSURLString,
+                source: .aladin
             )
         }
     }
 
-    private func responseData(for request: URLRequest) async throws -> Data {
+    private func responseData(for request: URLRequest, serviceName: String) async throws -> Data {
         let data: Data
         let response: URLResponse
 
@@ -199,6 +293,7 @@ struct BookMetadataSearchClient {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw BookMetadataSearchError.requestFailed(
+                serviceName: serviceName,
                 statusCode: httpResponse.statusCode,
                 message: errorMessage(from: data)
             )
@@ -218,6 +313,10 @@ struct BookMetadataSearchClient {
             return message
         }
 
+        if let message = object["errorMessage"] as? String {
+            return message
+        }
+
         if let error = object["error"] as? [String: Any] {
             if let message = error["message"] as? String {
                 return message
@@ -230,29 +329,30 @@ struct BookMetadataSearchClient {
         return ""
     }
 
-    private func googleQuery(from query: String) -> String {
+    private func kakaoPrimaryTarget(for query: String) -> String? {
         let digits = query.filter(\.isNumber)
         if digits.count == 10 || digits.count == 13 {
-            return "isbn:\(digits)"
+            return "isbn"
         }
 
-        return query
+        return "title"
     }
 }
 
 enum BookMetadataSearchError: LocalizedError {
-    case missingKakaoAPIKey
+    case missingMetadataAPIKeys
     case invalidURL
     case invalidResponse
     case timedOut
     case networkUnavailable
-    case requestFailed(statusCode: Int, message: String)
-    case fallbackFailed(kakaoMessage: String, googleMessage: String)
+    case apiError(serviceName: String, message: String)
+    case requestFailed(serviceName: String, statusCode: Int, message: String)
+    case fallbackFailed(aladinMessage: String, kakaoMessage: String)
 
     var errorDescription: String? {
         switch self {
-        case .missingKakaoAPIKey:
-            return "Kakao REST API 키를 입력해 주세요."
+        case .missingMetadataAPIKeys:
+            return "앱에 도서 검색 API 키가 포함되지 않았습니다."
         case .invalidURL:
             return "도서 검색 주소를 만들 수 없습니다."
         case .invalidResponse:
@@ -261,16 +361,18 @@ enum BookMetadataSearchError: LocalizedError {
             return "도서 검색 응답이 지연되고 있습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요."
         case .networkUnavailable:
             return "도서 검색 서비스에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요."
-        case .requestFailed(let statusCode, let message):
+        case .apiError(let serviceName, let message):
+            return "\(serviceName) 검색에 실패했습니다. \(message)"
+        case .requestFailed(let serviceName, let statusCode, let message):
             if statusCode == 429 {
-                return "도서 검색 요청이 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요."
+                return "\(serviceName) 요청이 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요."
             }
             if message.isEmpty {
-                return "도서 검색에 실패했습니다. (\(statusCode))"
+                return "\(serviceName) 검색에 실패했습니다. (\(statusCode))"
             }
-            return "도서 검색에 실패했습니다. (\(statusCode)) \(message)"
-        case .fallbackFailed(let kakaoMessage, let googleMessage):
-            return "Kakao와 Google Books 검색이 모두 실패했습니다. Kakao: \(kakaoMessage) Google: \(googleMessage)"
+            return "\(serviceName) 검색에 실패했습니다. (\(statusCode)) \(message)"
+        case .fallbackFailed(let aladinMessage, let kakaoMessage):
+            return "Aladin과 Kakao 검색이 모두 실패했습니다. Aladin: \(aladinMessage) Kakao: \(kakaoMessage)"
         }
     }
 }
@@ -280,39 +382,75 @@ private struct KakaoBookSearchResponse: Decodable {
 }
 
 private struct KakaoBookDocument: Decodable {
-    let title: String
-    let contents: String
-    let isbn: String
-    let publisher: String
-    let authors: [String]
-    let thumbnail: String
+    let title: String?
+    let contents: String?
+    let isbn: String?
+    let publisher: String?
+    let datetime: String?
+    let authors: [String]?
+    let thumbnail: String?
 }
 
-private struct GoogleBooksResponse: Decodable {
-    struct Item: Decodable {
-        let id: String
-        let volumeInfo: VolumeInfo
+private struct AladinBookSearchResponse: Decodable {
+    let item: [AladinBookItem]?
+    let errorCode: String?
+    let errorMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case item
+        case errorCode
+        case errorMessage
     }
 
-    struct VolumeInfo: Decodable {
-        let title: String?
-        let authors: [String]?
-        let publisher: String?
-        let description: String?
-        let industryIdentifiers: [IndustryIdentifier]?
-        let imageLinks: ImageLinks?
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        item = try container.decodeIfPresent([AladinBookItem].self, forKey: .item)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+
+        if let value = try? container.decodeIfPresent(String.self, forKey: .errorCode) {
+            errorCode = value
+        } else if let value = try? container.decodeIfPresent(Int.self, forKey: .errorCode) {
+            errorCode = String(value)
+        } else {
+            errorCode = nil
+        }
+    }
+}
+
+private struct AladinBookItem: Decodable {
+    let title: String?
+    let author: String?
+    let description: String?
+    let isbn: String?
+    let isbn13: String?
+    let publisher: String?
+    let pubDate: String?
+    let cover: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case author
+        case description
+        case isbn
+        case isbn13
+        case publisher
+        case pubDate
+        case pubdate
+        case cover
     }
 
-    struct IndustryIdentifier: Decodable {
-        let identifier: String
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        author = try container.decodeIfPresent(String.self, forKey: .author)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        isbn = try container.decodeIfPresent(String.self, forKey: .isbn)
+        isbn13 = try container.decodeIfPresent(String.self, forKey: .isbn13)
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate)
+            ?? container.decodeIfPresent(String.self, forKey: .pubdate)
+        cover = try container.decodeIfPresent(String.self, forKey: .cover)
     }
-
-    struct ImageLinks: Decodable {
-        let smallThumbnail: String?
-        let thumbnail: String?
-    }
-
-    let items: [Item]?
 }
 
 private extension String {
@@ -330,5 +468,23 @@ private extension String {
             return replacingOccurrences(of: "http://", with: "https://")
         }
         return self
+    }
+
+    var normalizedPublicationDate: String {
+        let trimmedValue = trimmed
+        guard !trimmedValue.isEmpty else { return "" }
+
+        if let dateOnly = trimmedValue.split(separator: "T").first, dateOnly.count == 10 {
+            return String(dateOnly)
+        }
+
+        return trimmedValue
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
     }
 }

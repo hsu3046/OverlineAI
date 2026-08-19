@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import CoreImage
 import Observation
+import OSLog
 import SwiftUI
 import UIKit
 @preconcurrency import Vision
@@ -11,19 +12,22 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
     let boundingBox: CGRect
     let quadrilateral: CameraTextQuadrilateral?
     let confidence: VNConfidence
+    let readingIndex: Int
 
     nonisolated init(
         id: String? = nil,
         text: String,
         boundingBox: CGRect,
         quadrilateral: CameraTextQuadrilateral? = nil,
-        confidence: VNConfidence
+        confidence: VNConfidence,
+        readingIndex: Int = .max
     ) {
         self.id = id ?? Self.stableID(text: text, boundingBox: boundingBox)
         self.text = text
         self.boundingBox = boundingBox
         self.quadrilateral = quadrilateral
         self.confidence = confidence
+        self.readingIndex = readingIndex
     }
 
     private nonisolated static func stableID(text: String, boundingBox: CGRect) -> String {
@@ -69,6 +73,17 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
         CGPoint(
             x: (firstPoint.x + secondPoint.x) / 2,
             y: (firstPoint.y + secondPoint.y) / 2
+        )
+    }
+
+    fileprivate nonisolated func applying(_ transform: CameraVisionCoordinateTransform) -> CameraRecognizedTextLine {
+        CameraRecognizedTextLine(
+            id: id,
+            text: text,
+            boundingBox: transform.rect(boundingBox),
+            quadrilateral: quadrilateral.map(transform.quadrilateral),
+            confidence: confidence,
+            readingIndex: readingIndex
         )
     }
 }
@@ -225,6 +240,93 @@ private enum CameraVisionGeometry {
     }
 }
 
+fileprivate nonisolated enum CameraPageDetection {
+    static func bestCandidate(
+        from observations: [VNRectangleObservation],
+        coordinateTransform: CameraVisionCoordinateTransform
+    ) -> CameraDetectedPage? {
+        observations
+            .map {
+                coordinateTransform.page(CameraDetectedPage(
+                    boundingBox: $0.boundingBox,
+                    topLeft: $0.topLeft,
+                    topRight: $0.topRight,
+                    bottomRight: $0.bottomRight,
+                    bottomLeft: $0.bottomLeft
+                ))
+            }
+            .filter(isUsableBookPage)
+            .max { pageScore($0) < pageScore($1) }
+    }
+
+    static func inferredPage(from lines: [CameraRecognizedTextLine]) -> CameraDetectedPage? {
+        let bodyRects = lines
+            .map(\.boundingBox)
+            .filter { rect in
+                rect.width >= 0.16 && rect.height >= 0.006
+            }
+
+        guard bodyRects.count >= 4 else {
+            return nil
+        }
+
+        let unionRect = bodyRects.dropFirst().reduce(bodyRects[0]) { partialResult, rect in
+            partialResult.union(rect)
+        }
+        let medianHeight = median(bodyRects.map(\.height))
+        let expandedBox = CGRect(
+            x: unionRect.minX - max(0.055, medianHeight * 2.0),
+            y: unionRect.minY - max(0.070, medianHeight * 2.5),
+            width: unionRect.width + max(0.110, medianHeight * 4.0),
+            height: unionRect.height + max(0.140, medianHeight * 5.0)
+        )
+        .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        .standardized
+
+        guard expandedBox.width >= 0.24, expandedBox.height >= 0.18 else {
+            return nil
+        }
+
+        return CameraDetectedPage(
+            boundingBox: expandedBox,
+            topLeft: CGPoint(x: expandedBox.minX, y: expandedBox.maxY),
+            topRight: CGPoint(x: expandedBox.maxX, y: expandedBox.maxY),
+            bottomRight: CGPoint(x: expandedBox.maxX, y: expandedBox.minY),
+            bottomLeft: CGPoint(x: expandedBox.minX, y: expandedBox.minY)
+        )
+    }
+
+    private static func isUsableBookPage(_ page: CameraDetectedPage) -> Bool {
+        let box = page.boundingBox.standardized
+        let area = box.width * box.height
+        let aspectRatio = box.width / max(box.height, 0.001)
+
+        guard area >= 0.10, area <= 0.98 else { return false }
+        guard box.width >= 0.26, box.height >= 0.24 else { return false }
+        guard aspectRatio >= 0.32, aspectRatio <= 2.15 else { return false }
+        guard abs(box.midX - 0.5) <= 0.48, abs(box.midY - 0.5) <= 0.48 else { return false }
+        return true
+    }
+
+    private static func pageScore(_ page: CameraDetectedPage) -> CGFloat {
+        let box = page.boundingBox.standardized
+        let centerPenalty = abs(box.midX - 0.5) * 0.18 + abs(box.midY - 0.5) * 0.12
+        let aspectPenalty = abs((box.width / max(box.height, 0.001)) - 0.72) * 0.05
+        return page.area - centerPenalty - aspectPenalty
+    }
+
+    private static func median(_ values: [CGFloat]) -> CGFloat {
+        let sortedValues = values.sorted()
+        guard !sortedValues.isEmpty else { return 0 }
+        let middle = sortedValues.count / 2
+        if sortedValues.count.isMultiple(of: 2) {
+            return (sortedValues[middle - 1] + sortedValues[middle]) / 2
+        }
+
+        return sortedValues[middle]
+    }
+}
+
 private extension CGRect {
     var samplePoints: [CGPoint] {
         [
@@ -238,6 +340,725 @@ private extension CGRect {
             CGPoint(x: midX, y: maxY),
             CGPoint(x: maxX, y: maxY)
         ]
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    nonisolated var debugName: String {
+        switch self {
+        case .up:
+            return "up"
+        case .upMirrored:
+            return "upMirrored"
+        case .down:
+            return "down"
+        case .downMirrored:
+            return "downMirrored"
+        case .left:
+            return "left"
+        case .leftMirrored:
+            return "leftMirrored"
+        case .right:
+            return "right"
+        case .rightMirrored:
+            return "rightMirrored"
+        @unknown default:
+            return "unknown"
+        }
+    }
+}
+
+private struct OCRTextAssembler {
+    private struct LayoutMetrics {
+        let bodyLeft: CGFloat
+        let bodyRight: CGFloat
+        let medianHeight: CGFloat
+        let medianWidth: CGFloat
+        let medianGap: CGFloat
+    }
+
+    private struct Document {
+        let text: String
+        let lineSpans: [LineSpan]
+    }
+
+    private struct LineSpan {
+        let line: CameraRecognizedTextLine
+        let start: Int
+        let end: Int
+    }
+
+    private struct SentenceSpan {
+        let start: Int
+        let end: Int
+        let isClosed: Bool
+    }
+
+    let pageLines: [CameraRecognizedTextLine]
+    let selectedLines: [CameraRecognizedTextLine]
+
+    func assembledText() -> String {
+        let selectedLines = sortedUnique(selectedLines)
+        guard !selectedLines.isEmpty else { return "" }
+
+        let selectedIDs = Set(selectedLines.map(\.id))
+        let sourceLines = sortedUnique(pageLines).isEmpty ? selectedLines : sortedUnique(pageLines)
+        let document = document(from: sourceLines)
+        let selectedRanges = document.lineSpans
+            .filter { selectedIDs.contains($0.line.id) }
+            .map { $0.start..<$0.end }
+
+        guard
+            !document.text.isEmpty,
+            !selectedRanges.isEmpty,
+            let selectedStart = selectedRanges.map(\.lowerBound).min(),
+            let selectedEnd = selectedRanges.map(\.upperBound).max()
+        else {
+            return fallbackText(from: selectedLines)
+        }
+
+        let sentenceSpans = sentenceSpans(in: document.text)
+        var includedSpans = sentenceSpans.filter {
+            shouldInclude(
+                sentence: $0,
+                selectedRanges: selectedRanges,
+                selectedStart: selectedStart,
+                selectedEnd: selectedEnd
+            )
+        }
+        includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
+
+        guard !includedSpans.isEmpty else {
+            return fallbackText(from: selectedLines)
+        }
+
+        return joinedText(for: includedSpans, in: document.text)
+    }
+
+    private func fallbackText(from lines: [CameraRecognizedTextLine]) -> String {
+        cleanedOutput(document(from: lines).text)
+    }
+
+    private func document(from lines: [CameraRecognizedTextLine]) -> Document {
+        let lines = sortedUnique(lines)
+        guard !lines.isEmpty else {
+            return Document(text: "", lineSpans: [])
+        }
+
+        let metrics = layoutMetrics(for: lines)
+        var text = ""
+        var offset = 0
+        var spans: [LineSpan] = []
+
+        for (index, line) in lines.enumerated() {
+            let lineText = normalizedLineText(line.text)
+            guard !lineText.isEmpty else { continue }
+
+            if index > 0 {
+                let separator = separator(
+                    between: lines[index - 1],
+                    and: line,
+                    metrics: metrics
+                )
+                text += separator
+                offset += separator.count
+            }
+
+            let start = offset
+            text += lineText
+            offset += lineText.count
+            spans.append(LineSpan(line: line, start: start, end: offset))
+        }
+
+        return Document(text: text, lineSpans: spans)
+    }
+
+    private func separator(
+        between previousLine: CameraRecognizedTextLine,
+        and currentLine: CameraRecognizedTextLine,
+        metrics: LayoutMetrics
+    ) -> String {
+        if shouldPreserveLineBreak(
+            between: previousLine,
+            and: currentLine,
+            metrics: metrics
+        ) {
+            return "\n"
+        }
+
+        return OCRLineJoiner.inlineSeparator(
+            between: normalizedLineText(previousLine.text),
+            and: normalizedLineText(currentLine.text)
+        )
+    }
+
+    private func shouldPreserveLineBreak(
+        between previousLine: CameraRecognizedTextLine,
+        and currentLine: CameraRecognizedTextLine,
+        metrics: LayoutMetrics
+    ) -> Bool {
+        let verticalGap = max(previousLine.boundingBox.minY - currentLine.boundingBox.maxY, 0)
+        let trailingRoom = metrics.bodyRight - previousLine.boundingBox.maxX
+        let previousLineIsShort = trailingRoom > max(metrics.medianHeight * 2.4, 0.08)
+            || previousLine.boundingBox.width < metrics.medianWidth * 0.72
+        let currentLineIsIndented = currentLine.boundingBox.minX - metrics.bodyLeft > max(metrics.medianHeight * 1.35, 0.035)
+        let gapIsLarge = verticalGap > max(metrics.medianHeight * 0.90, metrics.medianGap * 1.65)
+        let previousLineIsClosed = Self.endsAtSentenceBoundary(previousLine.text)
+
+        if gapIsLarge {
+            return true
+        }
+
+        if currentLineIsIndented && (previousLineIsClosed || previousLineIsShort) {
+            return true
+        }
+
+        if previousLineIsClosed && previousLineIsShort {
+            return true
+        }
+
+        return false
+    }
+
+    private func shouldInclude(
+        sentence: SentenceSpan,
+        selectedRanges: [Range<Int>],
+        selectedStart: Int,
+        selectedEnd: Int
+    ) -> Bool {
+        let overlap = overlapLength(of: sentence.start..<sentence.end, with: selectedRanges)
+        guard overlap > 0 else { return false }
+
+        if sentence.start >= selectedStart && sentence.end <= selectedEnd {
+            return true
+        }
+
+        let sentenceLength = max(sentence.end - sentence.start, 1)
+        let overlapRatio = Double(overlap) / Double(sentenceLength)
+        return overlapRatio >= 0.32
+    }
+
+    private func trimmingBoundaryFragments(_ spans: [SentenceSpan], documentText: String) -> [SentenceSpan] {
+        var spans = spans
+
+        if
+            spans.count > 1,
+            let firstSpan = spans.first,
+            isLeadingTailFragment(substring(in: documentText, from: firstSpan.start, to: firstSpan.end))
+        {
+            spans.removeFirst()
+        }
+
+        if
+            spans.count > 1,
+            let lastSpan = spans.last,
+            !lastSpan.isClosed,
+            isTrailingOpenFragment(substring(in: documentText, from: lastSpan.start, to: lastSpan.end))
+        {
+            spans.removeLast()
+        }
+
+        return spans
+    }
+
+    private func isLeadingTailFragment(_ text: String) -> Bool {
+        normalizedLineText(text)
+            .range(
+                of: #"^["“”‘’']?(?:거야|거지|거다|말이다|것이다|것이었다)[.!?。！？]["”’']?$"#,
+                options: .regularExpression
+            ) != nil
+    }
+
+    private func isTrailingOpenFragment(_ text: String) -> Bool {
+        let trimmedText = normalizedLineText(text)
+        guard !trimmedText.isEmpty else { return false }
+        let comparableLength = comparable(trimmedText).count
+        let startsWithQuote = trimmedText.first.map { "\"“‘'".contains($0) } ?? false
+        return startsWithQuote || comparableLength <= 10
+    }
+
+    private func joinedText(for spans: [SentenceSpan], in documentText: String) -> String {
+        var output = ""
+        var previousEnd: Int?
+
+        for span in spans {
+            if let previousEnd {
+                let gap = substring(in: documentText, from: previousEnd, to: span.start)
+                output += gap.contains("\n") ? "\n" : " "
+            }
+
+            output += substring(in: documentText, from: span.start, to: span.end)
+            previousEnd = span.end
+        }
+
+        return cleanedOutput(output)
+    }
+
+    private func sentenceSpans(in text: String) -> [SentenceSpan] {
+        let characters = Array(text)
+        var spans: [SentenceSpan] = []
+        var sentenceStart = 0
+        var index = 0
+
+        while index < characters.count {
+            if Self.isSentenceClosingPunctuation(characters[index]) {
+                var sentenceEnd = index + 1
+                while sentenceEnd < characters.count, Self.isClosingQuote(characters[sentenceEnd]) {
+                    sentenceEnd += 1
+                }
+
+                let trimmedStart = firstNonWhitespaceIndex(in: characters, from: sentenceStart, to: sentenceEnd)
+                if trimmedStart < sentenceEnd {
+                    spans.append(SentenceSpan(start: trimmedStart, end: sentenceEnd, isClosed: true))
+                }
+
+                sentenceStart = firstNonWhitespaceIndex(in: characters, from: sentenceEnd, to: characters.count)
+                index = sentenceStart
+                continue
+            }
+
+            index += 1
+        }
+
+        let trimmedStart = firstNonWhitespaceIndex(in: characters, from: sentenceStart, to: characters.count)
+        if trimmedStart < characters.count {
+            spans.append(SentenceSpan(start: trimmedStart, end: characters.count, isClosed: false))
+        }
+
+        return spans
+    }
+
+    private func firstNonWhitespaceIndex(in characters: [Character], from start: Int, to end: Int) -> Int {
+        var index = start
+        while index < end, characters[index].isWhitespace {
+            index += 1
+        }
+        return index
+    }
+
+    private func overlapLength(of range: Range<Int>, with selectedRanges: [Range<Int>]) -> Int {
+        selectedRanges.reduce(0) { partial, selectedRange in
+            let lowerBound = max(range.lowerBound, selectedRange.lowerBound)
+            let upperBound = min(range.upperBound, selectedRange.upperBound)
+            return upperBound > lowerBound ? partial + (upperBound - lowerBound) : partial
+        }
+    }
+
+    private func layoutMetrics(for lines: [CameraRecognizedTextLine]) -> LayoutMetrics {
+        let minXs = lines.map(\.boundingBox.minX).sorted()
+        let maxXs = lines.map(\.boundingBox.maxX).sorted()
+        let heights = lines.map(\.boundingBox.height).sorted()
+        let widths = lines.map(\.boundingBox.width).sorted()
+        let gaps = zip(lines, lines.dropFirst())
+            .map { previousLine, currentLine in
+                max(previousLine.boundingBox.minY - currentLine.boundingBox.maxY, 0)
+            }
+            .sorted()
+
+        return LayoutMetrics(
+            bodyLeft: quantile(minXs, 0.18),
+            bodyRight: quantile(maxXs, 0.82),
+            medianHeight: max(quantile(heights, 0.50), 0.01),
+            medianWidth: max(quantile(widths, 0.50), 0.01),
+            medianGap: max(quantile(gaps, 0.50), 0.004)
+        )
+    }
+
+    private func sortedUnique(_ lines: [CameraRecognizedTextLine]) -> [CameraRecognizedTextLine] {
+        var seenIDs: Set<String> = []
+        return lines
+            .filter { !$0.text.trimmed.isEmpty }
+            .filter { line in
+                guard !seenIDs.contains(line.id) else { return false }
+                seenIDs.insert(line.id)
+                return true
+            }
+            .sorted(by: readingOrder)
+    }
+
+    private func readingOrder(_ lhs: CameraRecognizedTextLine, _ rhs: CameraRecognizedTextLine) -> Bool {
+        if lhs.readingIndex != rhs.readingIndex {
+            return lhs.readingIndex < rhs.readingIndex
+        }
+
+        let yDelta = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
+        if yDelta > 0.025 {
+            return lhs.boundingBox.midY > rhs.boundingBox.midY
+        }
+        return lhs.boundingBox.minX < rhs.boundingBox.minX
+    }
+
+    private func quantile(_ values: [CGFloat], _ fraction: CGFloat) -> CGFloat {
+        guard !values.isEmpty else { return 0 }
+        let clampedFraction = min(max(fraction, 0), 1)
+        let index = Int((CGFloat(values.count - 1) * clampedFraction).rounded())
+        return values[index]
+    }
+
+    private func normalizedLineText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"[ \t\u{00A0}]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s*\n\s*"#, with: " ", options: .regularExpression)
+            .trimmed
+    }
+
+    private func cleanedOutput(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: #"[ \t\u{00A0}]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #" *\n *"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmed
+    }
+
+    private func substring(in text: String, from start: Int, to end: Int) -> String {
+        guard start < end, start >= 0, end <= text.count else { return "" }
+        let startIndex = text.index(text.startIndex, offsetBy: start)
+        let endIndex = text.index(text.startIndex, offsetBy: end)
+        return String(text[startIndex..<endIndex])
+    }
+
+    private func comparable(_ text: String) -> String {
+        text
+            .lowercased()
+            .replacingOccurrences(of: #"[\s\p{P}\p{S}]"#, with: "", options: .regularExpression)
+    }
+
+    private static func endsAtSentenceBoundary(_ text: String) -> Bool {
+        let trimmedText = text.trimmed
+        guard let lastCharacter = trimmedText.last else { return false }
+
+        if isSentenceClosingPunctuation(lastCharacter) {
+            return true
+        }
+
+        guard isClosingQuote(lastCharacter) else { return false }
+        let withoutClosingQuotes = trimmedText
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"”’'").union(.whitespacesAndNewlines))
+        guard let previousCharacter = withoutClosingQuotes.last else { return false }
+        return isSentenceClosingPunctuation(previousCharacter)
+    }
+
+    private static func isSentenceClosingPunctuation(_ character: Character) -> Bool {
+        ".!?。！？".contains(character)
+    }
+
+    private static func isClosingQuote(_ character: Character) -> Bool {
+        "\"”’'」』".contains(character)
+    }
+}
+
+fileprivate enum CameraVisionCoordinateTransform: CaseIterable {
+    case identity
+    case rotateClockwise
+    case rotateCounterClockwise
+
+    nonisolated static func bestTransform(for lines: [CameraRecognizedTextLine]) -> CameraVisionCoordinateTransform {
+        guard lines.count >= 2 else { return .identity }
+
+        return allCases.max { lhs, rhs in
+            score(lhs, for: lines) < score(rhs, for: lines)
+        } ?? .identity
+    }
+
+    nonisolated var snapshotOrientation: CGImagePropertyOrientation {
+        switch self {
+        case .identity:
+            return .up
+        case .rotateClockwise:
+            return .right
+        case .rotateCounterClockwise:
+            return .left
+        }
+    }
+
+    nonisolated func point(_ point: CGPoint) -> CGPoint {
+        let transformedPoint: CGPoint
+        switch self {
+        case .identity:
+            transformedPoint = point
+        case .rotateClockwise:
+            transformedPoint = CGPoint(x: point.y, y: 1 - point.x)
+        case .rotateCounterClockwise:
+            transformedPoint = CGPoint(x: 1 - point.y, y: point.x)
+        }
+
+        return CGPoint(
+            x: min(max(transformedPoint.x, 0), 1),
+            y: min(max(transformedPoint.y, 0), 1)
+        )
+    }
+
+    nonisolated func rect(_ rect: CGRect) -> CGRect {
+        boundingBox(for: rect.normalizedCorners.map(point))
+    }
+
+    nonisolated func quadrilateral(_ quadrilateral: CameraTextQuadrilateral) -> CameraTextQuadrilateral {
+        let orderedCorners = orderedCorners([
+            point(quadrilateral.topLeft),
+            point(quadrilateral.topRight),
+            point(quadrilateral.bottomRight),
+            point(quadrilateral.bottomLeft)
+        ])
+
+        return CameraTextQuadrilateral(
+            topLeft: orderedCorners[0],
+            topRight: orderedCorners[1],
+            bottomRight: orderedCorners[2],
+            bottomLeft: orderedCorners[3]
+        )
+    }
+
+    nonisolated func page(_ page: CameraDetectedPage) -> CameraDetectedPage {
+        let transformedCorners = [
+            point(page.topLeft),
+            point(page.topRight),
+            point(page.bottomRight),
+            point(page.bottomLeft)
+        ]
+        let orderedCorners = orderedCorners(transformedCorners)
+
+        return CameraDetectedPage(
+            boundingBox: boundingBox(for: transformedCorners),
+            topLeft: orderedCorners[0],
+            topRight: orderedCorners[1],
+            bottomRight: orderedCorners[2],
+            bottomLeft: orderedCorners[3]
+        )
+    }
+
+    private nonisolated static func score(_ transform: CameraVisionCoordinateTransform, for lines: [CameraRecognizedTextLine]) -> CGFloat {
+        let rects = lines.map { transform.rect($0.boundingBox) }
+        let aspectScore = rects
+            .map { rect in
+                let aspectRatio = rect.width / max(rect.height, 0.0001)
+                return min(max((aspectRatio - 0.8) / 3.2, 0), 1)
+            }
+            .reduce(CGFloat.zero, +) / CGFloat(max(rects.count, 1))
+
+        let orderedRects = zip(lines, rects)
+            .sorted { $0.0.readingIndex < $1.0.readingIndex }
+            .map(\.1)
+        let yCenters = orderedRects.map(\.midY)
+        let topToBottomPairs = zip(yCenters, yCenters.dropFirst())
+            .filter { previousY, nextY in
+                previousY >= nextY - 0.015
+            }
+            .count
+        let orderScore = yCenters.count > 1
+            ? CGFloat(topToBottomPairs) / CGFloat(yCenters.count - 1)
+            : 0.5
+
+        return aspectScore * 0.72 + orderScore * 0.28
+    }
+
+    private nonisolated func orderedCorners(_ points: [CGPoint]) -> [CGPoint] {
+        guard points.count == 4 else {
+            return [CGPoint.zero, CGPoint.zero, CGPoint.zero, CGPoint.zero]
+        }
+
+        let sortedByY = points.sorted {
+            if abs($0.y - $1.y) > 0.001 {
+                return $0.y > $1.y
+            }
+            return $0.x < $1.x
+        }
+        let top = sortedByY.prefix(2).sorted { $0.x < $1.x }
+        let bottom = sortedByY.suffix(2).sorted { $0.x < $1.x }
+
+        return [
+            top[0],
+            top[1],
+            bottom[1],
+            bottom[0]
+        ]
+    }
+
+    private nonisolated func boundingBox(for points: [CGPoint]) -> CGRect {
+        guard let firstPoint = points.first else { return .zero }
+
+        return points.dropFirst()
+            .reduce(CGRect(origin: firstPoint, size: .zero)) { rect, point in
+                rect.union(CGRect(origin: point, size: .zero))
+            }
+            .standardized
+    }
+}
+
+private extension CGRect {
+    nonisolated var normalizedCorners: [CGPoint] {
+        [
+            CGPoint(x: minX, y: maxY),
+            CGPoint(x: maxX, y: maxY),
+            CGPoint(x: maxX, y: minY),
+            CGPoint(x: minX, y: minY)
+        ]
+    }
+}
+
+nonisolated enum CameraDeviceSelection {
+    static let preferredDisplayedZoomFactor: CGFloat = 1.5
+
+    static let preferredDeviceTypes: [AVCaptureDevice.DeviceType] = [
+        .builtInWideAngleCamera,
+        .builtInTripleCamera,
+        .builtInDualWideCamera
+    ]
+
+    static func preferredBackCamera() -> AVCaptureDevice? {
+        for deviceType in preferredDeviceTypes {
+            let discoverySession = AVCaptureDevice.DiscoverySession(
+                deviceTypes: [deviceType],
+                mediaType: .video,
+                position: .back
+            )
+
+            if let device = discoverySession.devices.first {
+                return device
+            }
+        }
+
+        return AVCaptureDevice.default(for: .video)
+    }
+
+    static func logSelectedCamera(_ camera: AVCaptureDevice) {
+        let constituentTypes = camera.constituentDevices
+            .map(\.deviceType.rawValue)
+            .joined(separator: ",")
+        let switchFactors = camera.virtualDeviceSwitchOverVideoZoomFactors
+            .map { String(format: "%.2f", $0.doubleValue) }
+            .joined(separator: ",")
+        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+
+        logger.info(
+            "camera_selected type=\(camera.deviceType.rawValue, privacy: .public) name=\(camera.localizedName, privacy: .public) virtual=\(camera.isVirtualDevice, privacy: .public) constituents=\(constituentTypes, privacy: .public) switch_factors=\(switchFactors, privacy: .public)"
+        )
+    }
+
+    static func configureMacroFallbackBehavior(for camera: AVCaptureDevice) {
+        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+
+        guard camera.isVirtualDevice, !camera.constituentDevices.isEmpty else {
+            logger.info(
+                "camera_macro_switching_skipped reason=non_virtual type=\(camera.deviceType.rawValue, privacy: .public)"
+            )
+            return
+        }
+
+        do {
+            try camera.lockForConfiguration()
+            defer {
+                camera.unlockForConfiguration()
+            }
+
+            let fallbackDevices = camera.supportedFallbackPrimaryConstituentDevices
+            if !fallbackDevices.isEmpty {
+                camera.fallbackPrimaryConstituentDevices = fallbackDevices
+            }
+
+            camera.setPrimaryConstituentDeviceSwitchingBehavior(
+                .auto,
+                restrictedSwitchingBehaviorConditions: []
+            )
+
+            let fallbackTypes = fallbackDevices
+                .map(\.deviceType.rawValue)
+                .joined(separator: ",")
+            logger.info(
+                "camera_macro_switching_enabled behavior=auto fallback_constituents=\(fallbackTypes, privacy: .public)"
+            )
+        } catch {
+            logger.error(
+                "camera_macro_switching_failed type=\(camera.deviceType.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    static func logActivePrimaryConstituent(_ camera: AVCaptureDevice) {
+        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+
+        guard camera.isVirtualDevice else {
+            logger.info(
+                "camera_active_constituent_skipped reason=non_virtual type=\(camera.deviceType.rawValue, privacy: .public)"
+            )
+            return
+        }
+
+        let activeDevice = camera.activePrimaryConstituent
+        logger.info(
+            "camera_active_constituent type=\(activeDevice?.deviceType.rawValue ?? "nil", privacy: .public) name=\(activeDevice?.localizedName ?? "nil", privacy: .public) behavior=\(camera.activePrimaryConstituentDeviceSwitchingBehavior.rawValue, privacy: .public) restricted=\(camera.activePrimaryConstituentDeviceRestrictedSwitchingBehaviorConditions.rawValue, privacy: .public) zoom=\(camera.videoZoomFactor, privacy: .public)"
+        )
+    }
+
+    static func observeActivePrimaryConstituent(_ camera: AVCaptureDevice) -> NSKeyValueObservation? {
+        guard camera.isVirtualDevice else { return nil }
+
+        return camera.observe(\.activePrimaryConstituent, options: [.initial, .new]) { observedCamera, _ in
+            Self.logActivePrimaryConstituent(observedCamera)
+        }
+    }
+
+    static func applyPreferredCenterCropZoom(to camera: AVCaptureDevice) {
+        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+        let minimumZoomFactor = camera.minAvailableVideoZoomFactor
+        let maximumZoomFactor = camera.maxAvailableVideoZoomFactor
+        let targetZoomFactor = preferredVideoZoomFactor(for: camera)
+        let displayMultiplier = displayZoomFactorMultiplier(for: camera)
+        let appliedZoomFactor = min(
+            max(targetZoomFactor, minimumZoomFactor),
+            maximumZoomFactor
+        )
+
+        guard appliedZoomFactor > minimumZoomFactor else {
+            logger.info(
+                "camera_zoom_skipped display_target=\(preferredDisplayedZoomFactor, privacy: .public) display_multiplier=\(displayMultiplier, privacy: .public) target_video=\(targetZoomFactor, privacy: .public) min=\(minimumZoomFactor, privacy: .public) max=\(maximumZoomFactor, privacy: .public)"
+            )
+            return
+        }
+
+        do {
+            try camera.lockForConfiguration()
+            camera.videoZoomFactor = appliedZoomFactor
+            camera.unlockForConfiguration()
+
+            logger.info(
+                "camera_zoom_applied display_target=\(preferredDisplayedZoomFactor, privacy: .public) display_multiplier=\(displayMultiplier, privacy: .public) target_video=\(targetZoomFactor, privacy: .public) applied=\(appliedZoomFactor, privacy: .public) min=\(minimumZoomFactor, privacy: .public) max=\(maximumZoomFactor, privacy: .public)"
+            )
+        } catch {
+            logger.error(
+                "camera_zoom_failed display_target=\(preferredDisplayedZoomFactor, privacy: .public) display_multiplier=\(displayMultiplier, privacy: .public) target_video=\(targetZoomFactor, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private static func preferredVideoZoomFactor(for camera: AVCaptureDevice) -> CGFloat {
+        guard camera.isVirtualDevice else {
+            return preferredDisplayedZoomFactor
+        }
+
+        if #available(iOS 18.0, *) {
+            let displayMultiplier = camera.displayVideoZoomFactorMultiplier
+            if displayMultiplier > 0 {
+                return preferredDisplayedZoomFactor / displayMultiplier
+            }
+        }
+
+        if
+            camera.isVirtualDevice,
+            let firstSwitchOverFactor = camera.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue,
+            firstSwitchOverFactor > 1
+        {
+            return CGFloat(firstSwitchOverFactor)
+        }
+
+        return preferredDisplayedZoomFactor
+    }
+
+    private static func displayZoomFactorMultiplier(for camera: AVCaptureDevice) -> CGFloat {
+        if #available(iOS 18.0, *) {
+            return camera.displayVideoZoomFactorMultiplier
+        }
+
+        return 1
     }
 }
 
@@ -262,6 +1083,7 @@ final class CameraTextScanner {
     var isTorchOn = false
     var isAnalyzingText = false
     var recognitionUpdateCount = 0
+    var frozenFrameImage: UIImage?
 
     var session: AVCaptureSession {
         core.session
@@ -285,6 +1107,11 @@ final class CameraTextScanner {
                 self?.frameBrightness = brightness
             }
         }
+        core.onFrozenFrame = { [weak self] image in
+            Task { @MainActor in
+                self?.frozenFrameImage = image
+            }
+        }
         core.onFailure = { [weak self] message in
             Task { @MainActor in
                 self?.status = .unavailable(message)
@@ -300,7 +1127,7 @@ final class CameraTextScanner {
         case .running, .requestingPermission:
             true
         case .idle:
-            AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) != nil
+            CameraDeviceSelection.preferredBackCamera() != nil
         case .unavailable:
             false
         }
@@ -347,22 +1174,31 @@ final class CameraTextScanner {
         #endif
     }
 
-    func stop() {
-        stopSwipeRecognition()
+    func stop(clearRecognitionResults: Bool = true) {
+        stopSwipeRecognition(clearResults: clearRecognitionResults)
         core.stop()
         if isTorchOn {
             setTorch(false)
         }
     }
 
-    func beginSwipeRecognition(duration: TimeInterval = 3.2, resetResults: Bool = true) {
+    func beginSwipeRecognition(
+        duration: TimeInterval = 3.2,
+        resetResults: Bool = true,
+        maxFrames: Int = 4,
+        minimumFrameInterval: TimeInterval = 0.22
+    ) {
         if resetResults || !isAnalyzingText {
             lines.removeAll()
             recognitionUpdateCount = 0
             selectedLineCache.removeAll()
         }
 
-        core.activateRecognition(for: duration)
+        core.activateRecognition(
+            for: duration,
+            maxFrames: maxFrames,
+            minimumFrameInterval: minimumFrameInterval
+        )
         isAnalyzingText = true
 
         recognitionWindowTask?.cancel()
@@ -372,6 +1208,44 @@ final class CameraTextScanner {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 self?.stopSwipeRecognition()
+            }
+        }
+    }
+
+    func beginFrozenFrameRecognition() {
+        guard let frozenFrameImage else {
+            beginSwipeRecognition()
+            return
+        }
+
+        stopSwipeRecognition(clearResults: false)
+        lines.removeAll()
+        recognitionUpdateCount = 0
+        selectedLineCache.removeAll()
+        isAnalyzingText = true
+
+        recognitionWindowTask = Task { [weak self, frozenFrameImage] in
+            let result = try? await CameraFrozenFrameRecognizer.recognize(in: frozenFrameImage)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard let self else { return }
+
+                if let result {
+                    self.lines = result.lines
+                    self.detectedPage = result.page
+                    self.recognitionUpdateCount += 1
+                    self.core.storeDetectedPage(result.page)
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: 520_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard let self else { return }
+                self.isAnalyzingText = false
+                self.recognitionWindowTask = nil
             }
         }
     }
@@ -386,6 +1260,17 @@ final class CameraTextScanner {
             lines.removeAll()
             selectedLineCache.removeAll()
         }
+    }
+
+    func freezeNextFrame() {
+        frozenFrameImage = nil
+        core.requestFreezeFrame()
+    }
+
+    func clearFrozenFrame() {
+        core.cancelFreezeFrameRequest()
+        core.clearSnapshot()
+        frozenFrameImage = nil
     }
 
     func cacheSelectedLines(for selectedIDs: Set<CameraRecognizedTextLine.ID>) {
@@ -403,10 +1288,11 @@ final class CameraTextScanner {
     }
 
     func text(for selectedIDs: Set<CameraRecognizedTextLine.ID>) -> String {
-        selectedLines(for: selectedIDs)
-            .map(\.text)
-            .joined(separator: " ")
-            .trimmed
+        OCRTextAssembler(
+            pageLines: lines,
+            selectedLines: selectedLines(for: selectedIDs)
+        )
+        .assembledText()
     }
 
     func averageConfidence(for selectedIDs: Set<CameraRecognizedTextLine.ID>) -> Float? {
@@ -421,19 +1307,9 @@ final class CameraTextScanner {
         PageReferenceInference.inferredPageReference(
             from: lines.map {
                 PageReferenceLine(text: $0.text, boundingBox: $0.boundingBox)
-            }
+            },
+            pageBoundingBox: detectedPage?.boundingBox
         )
-    }
-
-    func currentSnapshotJPEGData() -> Data? {
-        core.currentSnapshotJPEGData()
-    }
-
-    func currentSnapshotJPEGData(for selectedIDs: Set<CameraRecognizedTextLine.ID>) -> Data? {
-        let selectedBoxes = selectedLines(for: selectedIDs)
-            .map(\.boundingBox)
-
-        return core.currentSnapshotJPEGData(croppedTo: selectedBoxes)
     }
 
     func toggleTorch() {
@@ -472,6 +1348,11 @@ final class CameraTextScanner {
     }
 
     private func readingOrder(_ lhs: CameraRecognizedTextLine, _ rhs: CameraRecognizedTextLine) -> Bool {
+        // Prefer Vision's reading order; coordinate sorting is only a fallback for legacy cached lines.
+        if lhs.readingIndex != rhs.readingIndex {
+            return lhs.readingIndex < rhs.readingIndex
+        }
+
         let yDelta = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
         if yDelta > 0.025 {
             return lhs.boundingBox.midY > rhs.boundingBox.midY
@@ -491,6 +1372,74 @@ final class CameraTextScanner {
                 result.append(line)
             }
         }
+    }
+}
+
+private enum CameraFrozenFrameRecognizer {
+    static func recognize(in image: UIImage) async throws -> CameraFrozenFrameRecognitionResult {
+        guard let cgImage = image.cgImage else {
+            throw CameraScannerError.cameraUnavailable
+        }
+
+        return try await Task.detached(priority: .userInitiated) {
+            let documentRequest = VNDetectDocumentSegmentationRequest()
+            let textRequest = VNRecognizeTextRequest()
+            textRequest.recognitionLevel = .accurate
+            textRequest.usesLanguageCorrection = true
+            textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+            textRequest.automaticallyDetectsLanguage = true
+
+            let handler = VNImageRequestHandler(
+                cgImage: cgImage,
+                orientation: .up,
+                options: [:]
+            )
+
+            try handler.perform([documentRequest, textRequest])
+
+            let rawRecognizedLines = (textRequest.results ?? [])
+                .enumerated()
+                .compactMap { index, observation -> CameraRecognizedTextLine? in
+                    guard
+                        let candidate = observation.topCandidates(1).first,
+                        !candidate.string.trimmed.isEmpty
+                    else {
+                        return nil
+                    }
+
+                    let textRange = candidate.string.startIndex..<candidate.string.endIndex
+                    let recognizedTextBox = (try? candidate.boundingBox(for: textRange)) ?? nil
+
+                    return CameraRecognizedTextLine(
+                        text: candidate.string.trimmed,
+                        boundingBox: recognizedTextBox?.boundingBox ?? observation.boundingBox,
+                        quadrilateral: recognizedTextBox.map(CameraTextQuadrilateral.init(rectangle:)),
+                        confidence: candidate.confidence,
+                        readingIndex: index
+                    )
+                }
+
+            let coordinateTransform = CameraVisionCoordinateTransform.bestTransform(for: rawRecognizedLines)
+            let recognizedLines = rawRecognizedLines.map { $0.applying(coordinateTransform) }
+            let visionPage = CameraPageDetection.bestCandidate(
+                from: documentRequest.results ?? [],
+                coordinateTransform: coordinateTransform
+            )
+            let fallbackPage = CameraPageDetection.inferredPage(from: recognizedLines)
+            let detectedPage = visionPage ?? fallbackPage
+            let detectionSource = visionPage != nil ? "vision" : (fallbackPage != nil ? "text_fallback" : "none")
+            let detectedArea = Double(detectedPage?.area ?? 0)
+
+            Logger(subsystem: "aib.Overline", category: "CameraScanner").info(
+                "camera_page_detection_frozen source=\(detectionSource, privacy: .public) candidates=\((documentRequest.results ?? []).count, privacy: .public) line_count=\(recognizedLines.count, privacy: .public) area=\(detectedArea, format: .fixed(precision: 3), privacy: .public)"
+            )
+
+            return CameraFrozenFrameRecognitionResult(
+                lines: recognizedLines,
+                page: detectedPage
+            )
+        }
+        .value
     }
 }
 
@@ -521,46 +1470,113 @@ final class CameraPreviewView: UIView {
     }
 }
 
+private struct CameraFrozenFrameRecognitionResult {
+    let lines: [CameraRecognizedTextLine]
+    let page: CameraDetectedPage?
+}
+
+private nonisolated final class CameraCIContextProvider: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cachedContext: CIContext?
+
+    func createCGImage(_ image: CIImage, from rect: CGRect) -> CGImage? {
+        context().createCGImage(image, from: rect)
+    }
+
+    func warmUp() {
+        _ = context()
+    }
+
+    private func context() -> CIContext {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cachedContext {
+            return cachedContext
+        }
+
+        let context = CIContext()
+        cachedContext = context
+        return context
+    }
+}
+
 nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     let session = AVCaptureSession()
     var onLines: (([CameraRecognizedTextLine]) -> Void)?
     var onPage: ((CameraDetectedPage?) -> Void)?
     var onBrightness: ((Float?) -> Void)?
+    var onFrozenFrame: ((UIImage) -> Void)?
     var onFailure: ((String) -> Void)?
 
     private let sessionQueue = DispatchQueue(label: "aib.overline.camera.session")
-    private let visionQueue = DispatchQueue(label: "aib.overline.camera.vision", qos: .userInitiated)
+    private let visionQueue = DispatchQueue(label: "aib.overline.camera.vision", qos: .utility)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sampleBufferDelegate = CameraSampleBufferDelegate()
-    private let ciContext = CIContext()
+    private let ciContextProvider = CameraCIContextProvider()
     private let snapshotLock = NSLock()
+    private let freezeLock = NSLock()
 
     private var isConfigured = false
     private var isRecognizingFrame = false
-    private var lastRecognitionTime = Date.distantPast
     private var lastPageDetectionTime = Date.distantPast
     private var cameraDevice: AVCaptureDevice?
-    private var latestSnapshotData: Data?
-    private var latestSnapshotImage: UIImage?
+    private var activePrimaryConstituentObservation: NSKeyValueObservation?
     private var latestDetectedPage: CameraDetectedPage?
     private var pageMissCount = 0
     private let recognitionLock = NSLock()
     private var recognitionDeadline = Date.distantPast
+    private var recognitionGeneration = 0
+    private var recognitionFrameCount = 0
+    private var recognitionMaxFrameCount = 4
+    private var recognitionMinimumFrameInterval: TimeInterval = 0.22
+    private var lastRecognitionTime = Date.distantPast
+    private var shouldFreezeNextFrame = false
 
     init() {
         sampleBufferDelegate.owner = self
     }
 
-    func activateRecognition(for duration: TimeInterval) {
+    func requestFreezeFrame() {
+        freezeLock.lock()
+        shouldFreezeNextFrame = true
+        freezeLock.unlock()
+    }
+
+    func cancelFreezeFrameRequest() {
+        freezeLock.lock()
+        shouldFreezeNextFrame = false
+        freezeLock.unlock()
+    }
+
+    func clearSnapshot() {
+        snapshotLock.lock()
+        latestDetectedPage = nil
+        pageMissCount = 0
+        snapshotLock.unlock()
+    }
+
+    func activateRecognition(
+        for duration: TimeInterval,
+        maxFrames: Int,
+        minimumFrameInterval: TimeInterval
+    ) {
         recognitionLock.lock()
+        recognitionGeneration += 1
+        recognitionFrameCount = 0
+        recognitionMaxFrameCount = max(maxFrames, 1)
+        recognitionMinimumFrameInterval = max(minimumFrameInterval, 0.05)
+        lastRecognitionTime = .distantPast
         recognitionDeadline = max(recognitionDeadline, Date().addingTimeInterval(duration))
         recognitionLock.unlock()
     }
 
     func deactivateRecognition() {
         recognitionLock.lock()
+        recognitionGeneration += 1
         recognitionDeadline = .distantPast
         recognitionLock.unlock()
+        clearSnapshot()
     }
 
     func start() {
@@ -575,6 +1591,18 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
 
                 if !session.isRunning {
                     session.startRunning()
+                }
+
+                if let cameraDevice {
+                    CameraDeviceSelection.applyPreferredCenterCropZoom(to: cameraDevice)
+                    CameraDeviceSelection.logActivePrimaryConstituent(cameraDevice)
+                }
+
+                let warmupDate = Date()
+                visionQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.lastPageDetectionTime = warmupDate
+                    self.ciContextProvider.warmUp()
                 }
             } catch {
                 onFailure?(error.localizedDescription)
@@ -599,12 +1627,14 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             session.commitConfiguration()
         }
 
-        guard
-            let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
-        else {
+        guard let camera = CameraDeviceSelection.preferredBackCamera() else {
             throw CameraScannerError.cameraUnavailable
         }
         cameraDevice = camera
+        activePrimaryConstituentObservation = CameraDeviceSelection.observeActivePrimaryConstituent(camera)
+        CameraDeviceSelection.logSelectedCamera(camera)
+        CameraDeviceSelection.configureMacroFallbackBehavior(for: camera)
+        CameraDeviceSelection.applyPreferredCenterCropZoom(to: camera)
 
         let input = try AVCaptureDeviceInput(device: camera)
         guard session.canAddInput(input) else {
@@ -635,23 +1665,29 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             return
         }
 
-        if !isRecognitionActive(at: now) {
-            detectPageIfNeeded(in: pixelBuffer, at: now)
+        captureFrozenFrameIfNeeded(from: pixelBuffer)
+
+        guard let recognitionToken = activeRecognitionToken(at: now) else {
             return
         }
 
-        guard now.timeIntervalSince(lastRecognitionTime) > 0.65 else {
+        guard claimRecognitionFrame(for: recognitionToken, at: now) else {
             return
         }
-
-        onBrightness?(averageBrightness(from: pixelBuffer))
-        storeSnapshotData(from: pixelBuffer)
 
         isRecognizingFrame = true
-        lastRecognitionTime = now
 
         let textRequest = VNRecognizeTextRequest()
-        let documentRequest = VNDetectDocumentSegmentationRequest()
+        let shouldRefreshPage = now.timeIntervalSince(lastPageDetectionTime) > 1.8
+        let documentRequest = shouldRefreshPage ? VNDetectDocumentSegmentationRequest() : nil
+        if shouldRefreshPage {
+            lastPageDetectionTime = now
+        }
+        var requests: [VNRequest] = []
+        if let documentRequest {
+            requests.append(documentRequest)
+        }
+        requests.append(textRequest)
 
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
@@ -664,10 +1700,12 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
                 orientation: .right,
                 options: [:]
             )
-            .perform([documentRequest, textRequest])
+            .perform(requests)
 
-            let recognizedLines = (textRequest.results ?? [])
-                .compactMap { observation -> CameraRecognizedTextLine? in
+            // Preserve Vision's reading order. Fixed y/x sorting breaks on rotated or strongly skewed pages.
+            let rawRecognizedLines = (textRequest.results ?? [])
+                .enumerated()
+                .compactMap { index, observation -> CameraRecognizedTextLine? in
                     guard
                         let candidate = observation.topCandidates(1).first,
                         !candidate.string.trimmed.isEmpty
@@ -682,22 +1720,30 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
                         text: candidate.string.trimmed,
                         boundingBox: recognizedTextBox?.boundingBox ?? observation.boundingBox,
                         quadrilateral: recognizedTextBox.map(CameraTextQuadrilateral.init(rectangle:)),
-                        confidence: candidate.confidence
+                        confidence: candidate.confidence,
+                        readingIndex: index
                     )
                 }
-                .sorted { lhs, rhs in
-                    let yDelta = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
-                    if yDelta > 0.025 {
-                        return lhs.boundingBox.midY > rhs.boundingBox.midY
-                    }
-                    return lhs.boundingBox.minX < rhs.boundingBox.minX
-                }
+            let coordinateTransform = CameraVisionCoordinateTransform.bestTransform(for: rawRecognizedLines)
+            let recognizedLines = rawRecognizedLines.map { $0.applying(coordinateTransform) }
 
-            let detectedPage = bestPageCandidate(from: documentRequest.results ?? [])
-            let displayPage = resolvedDisplayPage(for: detectedPage)
+            guard isRecognitionTokenCurrent(recognitionToken) else {
+                isRecognizingFrame = false
+                return
+            }
+
+            onBrightness?(averageBrightness(from: pixelBuffer))
+
+            if let documentRequest {
+                let detectedPage = CameraPageDetection.bestCandidate(
+                    from: documentRequest.results ?? [],
+                    coordinateTransform: coordinateTransform
+                )
+                let displayPage = resolvedDisplayPage(for: detectedPage)
+                onPage?(displayPage)
+            }
 
             onLines?(recognizedLines)
-            onPage?(displayPage)
         } catch {
             snapshotLock.lock()
             latestDetectedPage = nil
@@ -709,39 +1755,41 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         isRecognizingFrame = false
     }
 
-    private func detectPageIfNeeded(in pixelBuffer: CVPixelBuffer, at date: Date) {
-        guard date.timeIntervalSince(lastPageDetectionTime) > 1.2 else {
-            return
-        }
-
-        isRecognizingFrame = true
-        lastPageDetectionTime = date
-
-        let documentRequest = VNDetectDocumentSegmentationRequest()
-
-        do {
-            try VNImageRequestHandler(
-                cvPixelBuffer: pixelBuffer,
-                orientation: .right,
-                options: [:]
-            )
-            .perform([documentRequest])
-
-            let detectedPage = bestPageCandidate(from: documentRequest.results ?? [])
-            let displayPage = resolvedDisplayPage(for: detectedPage)
-            onPage?(displayPage)
-        } catch {
-            onPage?(nil)
-        }
-
-        isRecognizingFrame = false
+    private func activeRecognitionToken(at date: Date) -> Int? {
+        recognitionLock.lock()
+        let token = recognitionDeadline > date ? recognitionGeneration : nil
+        recognitionLock.unlock()
+        return token
     }
 
-    private func isRecognitionActive(at date: Date) -> Bool {
+    private func isRecognitionTokenCurrent(_ token: Int) -> Bool {
         recognitionLock.lock()
-        let isActive = recognitionDeadline > date
+        let isCurrent = recognitionGeneration == token
         recognitionLock.unlock()
-        return isActive
+        return isCurrent
+    }
+
+    private func claimRecognitionFrame(for token: Int, at date: Date) -> Bool {
+        recognitionLock.lock()
+        defer {
+            recognitionLock.unlock()
+        }
+
+        guard recognitionGeneration == token else {
+            return false
+        }
+
+        guard recognitionFrameCount < recognitionMaxFrameCount else {
+            return false
+        }
+
+        guard date.timeIntervalSince(lastRecognitionTime) >= recognitionMinimumFrameInterval else {
+            return false
+        }
+
+        recognitionFrameCount += 1
+        lastRecognitionTime = date
+        return true
     }
 
     private func averageBrightness(from pixelBuffer: CVPixelBuffer) -> Float? {
@@ -782,187 +1830,58 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         return min(max(total / sampleCount, 0), 1)
     }
 
-    func currentSnapshotJPEGData() -> Data? {
-        snapshotLock.lock()
-        defer { snapshotLock.unlock() }
-        return latestSnapshotData
-    }
+    private func captureFrozenFrameIfNeeded(from pixelBuffer: CVPixelBuffer) {
+        freezeLock.lock()
+        let shouldFreeze = shouldFreezeNextFrame
+        shouldFreezeNextFrame = false
+        freezeLock.unlock()
 
-    func currentSnapshotJPEGData(croppedTo boundingBoxes: [CGRect]) -> Data? {
-        snapshotLock.lock()
-        let image = latestSnapshotImage
-        let fallbackData = latestSnapshotData
-        let detectedPage = latestDetectedPage
-        snapshotLock.unlock()
+        guard shouldFreeze else { return }
+        let orientation = frozenFrameDisplayOrientation(for: pixelBuffer)
+        guard let image = image(from: pixelBuffer, orientation: orientation) else { return }
 
-        if
-            let image,
-            let detectedPage,
-            let correctedData = perspectiveCorrectedJPEGData(
-                croppedTo: boundingBoxes,
-                in: image,
-                page: detectedPage
-            )
-        {
-            return correctedData
-        }
-
-        guard
-            !boundingBoxes.isEmpty,
-            let image,
-            let cgImage = image.cgImage,
-            let cropRect = cropRect(
-                for: boundingBoxes,
-                pageBoundingBox: detectedPage?.boundingBox,
-                in: CGSize(width: cgImage.width, height: cgImage.height)
-            ),
-            let croppedCGImage = cgImage.cropping(to: cropRect)
-        else {
-            return fallbackData
-        }
-
-        return UIImage(cgImage: croppedCGImage, scale: image.scale, orientation: image.imageOrientation)
-            .jpegData(compressionQuality: 0.78)
-            ?? fallbackData
-    }
-
-    private func storeSnapshotData(from pixelBuffer: CVPixelBuffer) {
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(.right)
-        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
-            return
-        }
-
-        let image = UIImage(cgImage: cgImage)
-        guard let data = image.jpegData(compressionQuality: 0.72) else {
-            return
-        }
-
-        snapshotLock.lock()
-        latestSnapshotData = data
-        latestSnapshotImage = image
-        snapshotLock.unlock()
-    }
-
-    private func perspectiveCorrectedJPEGData(
-        croppedTo boundingBoxes: [CGRect],
-        in image: UIImage,
-        page: CameraDetectedPage
-    ) -> Data? {
-        guard
-            !boundingBoxes.isEmpty,
-            page.area > 0.08,
-            let correctedImage = perspectiveCorrectedPageImage(from: image, page: page),
-            let correctedCGImage = correctedImage.cgImage
-        else {
-            return nil
-        }
-
-        let correctedSize = CGSize(width: correctedCGImage.width, height: correctedCGImage.height)
-        let correctedBoxes = boundingBoxes.compactMap { box -> CGRect? in
-            let clippedBox = box.intersection(page.boundingBox)
-            guard
-                !clippedBox.isNull,
-                clippedBox.width > 0,
-                clippedBox.height > 0,
-                page.boundingBox.width > 0,
-                page.boundingBox.height > 0
-            else {
-                return nil
-            }
-
-            let x = normalized((clippedBox.minX - page.boundingBox.minX) / page.boundingBox.width)
-            let y = normalized((clippedBox.minY - page.boundingBox.minY) / page.boundingBox.height)
-            let maxX = normalized((clippedBox.maxX - page.boundingBox.minX) / page.boundingBox.width)
-            let maxY = normalized((clippedBox.maxY - page.boundingBox.minY) / page.boundingBox.height)
-
-            return CGRect(
-                x: x,
-                y: y,
-                width: max(maxX - x, 0),
-                height: max(maxY - y, 0)
-            )
-        }
-
-        guard
-            let cropRect = cropRect(for: correctedBoxes, pageBoundingBox: nil, in: correctedSize),
-            let croppedCGImage = correctedCGImage.cropping(to: cropRect)
-        else {
-            return correctedImage.jpegData(compressionQuality: 0.78)
-        }
-
-        return UIImage(cgImage: croppedCGImage, scale: correctedImage.scale, orientation: .up)
-            .jpegData(compressionQuality: 0.78)
-    }
-
-    private func perspectiveCorrectedPageImage(from image: UIImage, page: CameraDetectedPage) -> UIImage? {
-        guard
-            let cgImage = image.cgImage,
-            let filter = CIFilter(name: "CIPerspectiveCorrection")
-        else {
-            return nil
-        }
-
-        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
-        let ciImage = CIImage(cgImage: cgImage)
-        filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(cgPoint: ciPoint(for: page.topLeft, in: imageSize)), forKey: "inputTopLeft")
-        filter.setValue(CIVector(cgPoint: ciPoint(for: page.topRight, in: imageSize)), forKey: "inputTopRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(for: page.bottomRight, in: imageSize)), forKey: "inputBottomRight")
-        filter.setValue(CIVector(cgPoint: ciPoint(for: page.bottomLeft, in: imageSize)), forKey: "inputBottomLeft")
-
-        guard
-            let outputImage = filter.outputImage,
-            let correctedCGImage = ciContext.createCGImage(outputImage, from: outputImage.extent)
-        else {
-            return nil
-        }
-
-        return UIImage(cgImage: correctedCGImage, scale: image.scale, orientation: .up)
-    }
-
-    private func ciPoint(for normalizedPoint: CGPoint, in imageSize: CGSize) -> CGPoint {
-        CGPoint(
-            x: normalized(normalizedPoint.x) * imageSize.width,
-            y: normalized(normalizedPoint.y) * imageSize.height
+        #if DEBUG
+        let pixelWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let pixelHeight = CVPixelBufferGetHeight(pixelBuffer)
+        let imageWidth = image.cgImage?.width ?? 0
+        let imageHeight = image.cgImage?.height ?? 0
+        Logger(subsystem: "aib.Overline", category: "CameraScanner").info(
+            "camera_freeze_frame pixel=\(pixelWidth, privacy: .public)x\(pixelHeight, privacy: .public) orientation=\(orientation.debugName, privacy: .public) image=\(imageWidth, privacy: .public)x\(imageHeight, privacy: .public)"
         )
+        #endif
+
+        onFrozenFrame?(image)
     }
 
-    private func normalized(_ value: CGFloat) -> CGFloat {
-        min(max(value, 0), 1)
+    private func frozenFrameDisplayOrientation(for pixelBuffer: CVPixelBuffer) -> CGImagePropertyOrientation {
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+
+        // AVCaptureVideoDataOutput can deliver either portrait buffers after videoRotationAngle
+        // or raw landscape buffers, depending on the active connection/device path. The freeze
+        // overlay must be physically portrait to match AVCaptureVideoPreviewLayer's aspect fill.
+        return height >= width ? .up : .right
     }
 
-    private func bestPageCandidate(from observations: [VNRectangleObservation]) -> CameraDetectedPage? {
-        observations
-            .map {
-                CameraDetectedPage(
-                    boundingBox: $0.boundingBox,
-                    topLeft: $0.topLeft,
-                    topRight: $0.topRight,
-                    bottomRight: $0.bottomRight,
-                    bottomLeft: $0.bottomLeft
-                )
-            }
-            .filter(isUsableBookPage)
-            .max { pageScore($0) < pageScore($1) }
+    private func image(from pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) -> UIImage? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).oriented(orientation)
+        guard let cgImage = ciContextProvider.createCGImage(ciImage, from: ciImage.extent) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage)
     }
 
-    private func isUsableBookPage(_ page: CameraDetectedPage) -> Bool {
-        let box = page.boundingBox.standardized
-        let area = box.width * box.height
-        let aspectRatio = box.width / max(box.height, 0.001)
-
-        guard area >= 0.16, area <= 0.96 else { return false }
-        guard box.width >= 0.36, box.height >= 0.34 else { return false }
-        guard aspectRatio >= 0.42, aspectRatio <= 1.65 else { return false }
-        guard abs(box.midX - 0.5) <= 0.42, abs(box.midY - 0.5) <= 0.44 else { return false }
-        return true
-    }
-
-    private func pageScore(_ page: CameraDetectedPage) -> CGFloat {
-        let box = page.boundingBox.standardized
-        let centerPenalty = abs(box.midX - 0.5) * 0.18 + abs(box.midY - 0.5) * 0.12
-        let aspectPenalty = abs((box.width / max(box.height, 0.001)) - 0.72) * 0.08
-        return page.area - centerPenalty - aspectPenalty
+    func storeDetectedPage(_ detectedPage: CameraDetectedPage?) {
+        snapshotLock.lock()
+        if let detectedPage {
+            latestDetectedPage = detectedPage
+            pageMissCount = 0
+        } else {
+            latestDetectedPage = nil
+            pageMissCount = 0
+        }
+        snapshotLock.unlock()
     }
 
     private func resolvedDisplayPage(for detectedPage: CameraDetectedPage?) -> CameraDetectedPage? {
@@ -1042,7 +1961,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             return cameraDevice.hasTorch
         }
 
-        return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)?.hasTorch == true
+        return CameraDeviceSelection.preferredBackCamera()?.hasTorch == true
     }
 
     func setTorchEnabled(_ enabled: Bool, completion: @escaping (Result<Bool, Error>) -> Void) {
@@ -1050,7 +1969,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             guard let self else { return }
 
             guard
-                let camera = cameraDevice ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                let camera = cameraDevice ?? CameraDeviceSelection.preferredBackCamera(),
                 camera.hasTorch,
                 camera.isTorchAvailable
             else {
@@ -1110,5 +2029,11 @@ private enum CameraScannerError: LocalizedError {
         case .cannotSetTorch:
             "플래시를 전환할 수 없습니다."
         }
+    }
+}
+
+private extension CGFloat {
+    nonisolated func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), range.upperBound)
     }
 }

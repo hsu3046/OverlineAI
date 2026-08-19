@@ -26,6 +26,15 @@ enum StickyTone: String, Codable, CaseIterable {
         case .mint: Color(red: 0.08, green: 0.24, blue: 0.15)
         }
     }
+
+    var accessibilityName: String {
+        switch self {
+        case .yellow: "노랑"
+        case .rose: "핑크"
+        case .blue: "파랑"
+        case .mint: "녹색"
+        }
+    }
 }
 
 enum CoverTheme: String, Codable, CaseIterable {
@@ -122,6 +131,7 @@ enum HighlightSource: String, Codable {
 enum BookMetadataSource: String, Codable, CaseIterable {
     case manual
     case kakao
+    case aladin
     case google
 }
 
@@ -135,7 +145,6 @@ struct Highlight: Identifiable, Hashable, Codable {
     var tags: [String]
     var stickyTone: StickyTone
     var source: HighlightSource
-    var snapshotFileName: String?
     var reviewedAt: Date?
 
     init(
@@ -148,7 +157,6 @@ struct Highlight: Identifiable, Hashable, Codable {
         tags: [String],
         stickyTone: StickyTone,
         source: HighlightSource,
-        snapshotFileName: String? = nil,
         reviewedAt: Date? = nil
     ) {
         self.id = id
@@ -160,7 +168,6 @@ struct Highlight: Identifiable, Hashable, Codable {
         self.tags = tags
         self.stickyTone = stickyTone
         self.source = source
-        self.snapshotFileName = snapshotFileName
         self.reviewedAt = reviewedAt
     }
 }
@@ -191,6 +198,19 @@ struct LibraryInsight: Identifiable, Hashable, Codable {
         self.sourceHighlightIDs = sourceHighlightIDs
         self.createdAt = createdAt
     }
+}
+
+struct DeletedHighlightSnapshot: Identifiable, Hashable {
+    let id = UUID()
+    let highlight: Highlight
+    let bookID: ReadingBook.ID
+    let index: Int
+}
+
+struct DeletedInsightSnapshot: Identifiable, Hashable {
+    let id = UUID()
+    let insight: LibraryInsight
+    let index: Int
 }
 
 struct OCRValidationRecord: Identifiable, Hashable, Codable {
@@ -662,7 +682,7 @@ enum MVPReadinessItem: String, Codable, CaseIterable, Identifiable {
         case .pageBoundary:
             "페이지 경계 감지"
         case .snapshotCrop:
-            "캡처 스냅샷 저장"
+            "원문 사진 미저장"
         case .lowLight:
             "저조도 캡처"
         case .isbnScan:
@@ -670,7 +690,7 @@ enum MVPReadinessItem: String, Codable, CaseIterable, Identifiable {
         case .speechMemo:
             "음성 메모"
         case .kakaoSearch:
-            "Kakao 도서 API"
+            "도서 API"
         case .llmInsight:
             "LLM 인사이트"
         }
@@ -1042,7 +1062,9 @@ struct ReadingBook: Identifiable, Hashable, Codable {
     var title: String
     var author: String
     var summary: String
+    var tags: [String]
     var publisher: String?
+    var publishedDate: String?
     var isbn: String?
     var coverURLString: String?
     var metadataSource: BookMetadataSource?
@@ -1054,7 +1076,9 @@ struct ReadingBook: Identifiable, Hashable, Codable {
         title: String,
         author: String,
         summary: String,
+        tags: [String] = [],
         publisher: String? = nil,
+        publishedDate: String? = nil,
         isbn: String? = nil,
         coverURLString: String? = nil,
         metadataSource: BookMetadataSource? = .manual,
@@ -1065,12 +1089,45 @@ struct ReadingBook: Identifiable, Hashable, Codable {
         self.title = title
         self.author = author
         self.summary = summary
+        self.tags = tags
         self.publisher = publisher
+        self.publishedDate = publishedDate
         self.isbn = isbn
         self.coverURLString = coverURLString
         self.metadataSource = metadataSource
         self.coverTheme = coverTheme
         self.highlights = highlights
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case author
+        case summary
+        case tags
+        case publisher
+        case publishedDate
+        case isbn
+        case coverURLString
+        case metadataSource
+        case coverTheme
+        case highlights
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        author = try container.decode(String.self, forKey: .author)
+        summary = try container.decode(String.self, forKey: .summary)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        publishedDate = try container.decodeIfPresent(String.self, forKey: .publishedDate)
+        isbn = try container.decodeIfPresent(String.self, forKey: .isbn)
+        coverURLString = try container.decodeIfPresent(String.self, forKey: .coverURLString)
+        metadataSource = try container.decodeIfPresent(BookMetadataSource.self, forKey: .metadataSource)
+        coverTheme = try container.decode(CoverTheme.self, forKey: .coverTheme)
+        highlights = try container.decode([Highlight].self, forKey: .highlights)
     }
 }
 
@@ -1083,14 +1140,6 @@ struct LibraryStateSnapshot: Codable, Equatable {
         books.isEmpty && insights.isEmpty
     }
 
-    var snapshotFileNames: Set<String> {
-        Set(
-            books
-                .flatMap(\.highlights)
-                .compactMap(\.snapshotFileName)
-                .filter { !$0.trimmed.isEmpty }
-        )
-    }
 }
 
 struct LibraryStorageStatus: Equatable {
@@ -1221,10 +1270,8 @@ private struct CapturedHighlightMetadata {
             ?? Self.extractedPageReference(from: memo)
             ?? fallbackPageReference
 
-        let defaultTags = [detectedLanguage.tag, "#인용"]
         tags = Self.deduplicated(
-            defaultTags
-            + Self.extractedTags(from: memo)
+            Self.extractedTags(from: memo)
             + Self.normalizedTags(from: tagsText)
         )
     }
@@ -1272,7 +1319,7 @@ private struct CapturedHighlightMetadata {
         return normalizedPageReference(trimmedValue)
     }
 
-    private static func normalizedTags(from text: String) -> [String] {
+    static func normalizedTags(from text: String) -> [String] {
         text
             .split(whereSeparator: { $0.isWhitespace || $0 == "," })
             .compactMap { token -> String? in
@@ -1292,7 +1339,7 @@ private struct CapturedHighlightMetadata {
             .trimmed
 
         guard !digitsAndRange.isEmpty else { return value.trimmed }
-        return "p. \(digitsAndRange)"
+        return "p.\(digitsAndRange)"
     }
 
     static func deduplicated(_ tags: [String]) -> [String] {
@@ -1312,82 +1359,228 @@ struct PageReferenceLine {
 }
 
 enum PageReferenceInference {
-    nonisolated static func inferredPageReference(from lines: [PageReferenceLine]) -> String? {
-        lines
-            .compactMap(candidate)
+    nonisolated static func inferredPageReference(
+        from lines: [PageReferenceLine],
+        pageBoundingBox: CGRect? = nil
+    ) -> String? {
+        let referenceBox = pageBoundingBox ?? inferredTextBlockBoundingBox(from: lines)
+        return lines
+            .compactMap { candidate(from: $0, referenceBox: referenceBox) }
             .sorted { $0.score < $1.score }
             .first?
             .pageReference
     }
 
-    nonisolated private static func candidate(from line: PageReferenceLine) -> PageReferenceCandidate? {
+    nonisolated private static func candidate(
+        from line: PageReferenceLine,
+        referenceBox: CGRect?
+    ) -> PageReferenceCandidate? {
         let trimmedText = line.text.trimmed
-        guard let pageNumber = pageNumber(from: trimmedText) else { return nil }
+        guard let extraction = pageNumberExtraction(from: trimmedText) else { return nil }
 
-        let edgeDistance = min(line.boundingBox.midY, 1 - line.boundingBox.midY)
-        let hasPageMarker = containsPageMarker(trimmedText)
-        guard hasPageMarker || edgeDistance <= 0.24 else { return nil }
-        guard line.boundingBox.width <= 0.30, line.boundingBox.height <= 0.10 else { return nil }
+        let edgeDistance = pageRelativeEdgeDistance(
+            for: line.boundingBox,
+            referenceBox: referenceBox
+        ) ?? min(line.boundingBox.midY, 1 - line.boundingBox.midY)
+        guard edgeDistance <= extraction.position.maximumEdgeDistance else { return nil }
+        guard line.boundingBox.height <= 0.12 else { return nil }
 
-        let pageReference = "p. \(pageNumber)"
+        let pageReference = "p.\(extraction.pageNumber)"
         let score = edgeDistance
-            + line.boundingBox.width * 0.45
+            + min(line.boundingBox.width, 1) * 0.22
             + line.boundingBox.height * 0.45
-            + (hasPageMarker ? -0.18 : 0)
+            + extraction.position.scoreAdjustment
+            + (extraction.hasPageMarker ? -0.18 : 0)
         return PageReferenceCandidate(pageReference: pageReference, score: score)
     }
 
-    nonisolated private static func pageNumber(from text: String) -> String? {
-        let patterns = [
-            #"(?i)^(?:p|pp|page)\.?\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?$"#,
-            #"^(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*(?:쪽|페이지)$"#,
-            #"^(\d{1,4})$"#
+    nonisolated private static func pageNumberExtraction(from text: String) -> PageNumberExtraction? {
+        let markedPatterns = [
+            #"(?i)(?:^|\b)(?:p|pp|page)\.?\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?(?:\b|$)"#,
+            #"(?<!\d)(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*(?:쪽|페이지)"#
         ]
 
-        for pattern in patterns {
-            guard
-                let regex = try? NSRegularExpression(pattern: pattern),
-                let match = regex.firstMatch(
-                    in: text,
-                    range: NSRange(text.startIndex..<text.endIndex, in: text)
-                ),
-                match.numberOfRanges > 1,
-                let firstRange = Range(match.range(at: 1), in: text)
-            else {
-                continue
+        for pattern in markedPatterns {
+            if let pageNumber = pageNumber(from: text, matching: pattern) {
+                return PageNumberExtraction(
+                    pageNumber: pageNumber,
+                    position: .marked,
+                    hasPageMarker: true
+                )
             }
+        }
 
-            let firstPage = String(text[firstRange])
-            guard let pageValue = Int(firstPage), (1...3000).contains(pageValue) else {
-                continue
-            }
+        if let pageNumber = pageNumber(from: text, matching: #"^\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*$"#) {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .standalone,
+                hasPageMarker: false
+            )
+        }
 
-            if
-                match.numberOfRanges > 2,
-                let secondRange = Range(match.range(at: 2), in: text)
-            {
-                let secondPage = String(text[secondRange])
-                if let secondValue = Int(secondPage), (1...3000).contains(secondValue) {
-                    return "\(pageValue)-\(secondValue)"
-                }
-            }
+        if
+            !hasLeadingPageNumberBlocker(text),
+            let pageNumber = pageNumber(from: text, matching: #"^\s*(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?(?=\s+\S)"#),
+            !isLikelyYearPageNumber(pageNumber)
+        {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .leading,
+                hasPageMarker: false
+            )
+        }
 
-            return "\(pageValue)"
+        if
+            !hasTrailingPageNumberBlocker(text),
+            let pageNumber = pageNumber(from: text, matching: #"\s(\d{1,4})(?:\s*[-–~]\s*(\d{1,4}))?\s*$"#),
+            !isLikelyYearPageNumber(pageNumber)
+        {
+            return PageNumberExtraction(
+                pageNumber: pageNumber,
+                position: .trailing,
+                hasPageMarker: false
+            )
         }
 
         return nil
     }
 
-    nonisolated private static func containsPageMarker(_ text: String) -> Bool {
-        text.range(of: #"(?i)\b(?:p|pp|page)\.?"#, options: .regularExpression) != nil
-            || text.contains("쪽")
-            || text.contains("페이지")
+    nonisolated private static func inferredTextBlockBoundingBox(from lines: [PageReferenceLine]) -> CGRect? {
+        let bodyBoxes = lines
+            .map(\.boundingBox)
+            .filter { box in
+                box.width >= 0.14 && box.height >= 0.004
+            }
+
+        guard let firstBox = bodyBoxes.first else { return nil }
+
+        return bodyBoxes.dropFirst().reduce(firstBox) { partialResult, box in
+            partialResult.union(box)
+        }
+    }
+
+    nonisolated private static func pageRelativeEdgeDistance(
+        for lineBox: CGRect,
+        referenceBox: CGRect?
+    ) -> CGFloat? {
+        guard
+            let referenceBox,
+            referenceBox.height > 0.001,
+            !referenceBox.isNull,
+            !referenceBox.isEmpty
+        else {
+            return nil
+        }
+
+        let relativeY = (lineBox.midY - referenceBox.minY) / referenceBox.height
+        if relativeY < 0 {
+            return abs(relativeY)
+        }
+        if relativeY > 1 {
+            return relativeY - 1
+        }
+        return min(relativeY, 1 - relativeY)
+    }
+
+    nonisolated private static func pageNumber(from text: String, matching pattern: String) -> String? {
+        guard
+            let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..<text.endIndex, in: text)
+            ),
+            match.numberOfRanges > 1,
+            let firstRange = Range(match.range(at: 1), in: text)
+        else {
+            return nil
+        }
+
+        let firstPage = String(text[firstRange])
+        guard let pageValue = Int(firstPage), (1...3000).contains(pageValue) else {
+            return nil
+        }
+
+        if
+            match.numberOfRanges > 2,
+            let secondRange = Range(match.range(at: 2), in: text)
+        {
+            let secondPage = String(text[secondRange])
+            if let secondValue = Int(secondPage), (1...3000).contains(secondValue) {
+                return "\(pageValue)-\(secondValue)"
+            }
+        }
+
+        return "\(pageValue)"
+    }
+
+    nonisolated private static func hasLeadingPageNumberBlocker(_ text: String) -> Bool {
+        text.range(
+            of: #"^\s*\d{1,4}(?:\s*[-–~]\s*\d{1,4})?\s*(?:년|월|일|장|챕터|부|억|만|개|명|배|%)"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    nonisolated private static func hasTrailingPageNumberBlocker(_ text: String) -> Bool {
+        text.range(
+            of: #"(?i)(?:chapter|chap\.?|ch\.|part)\s+\d{1,4}\s*$"#,
+            options: .regularExpression
+        ) != nil
+            || text.range(
+                of: #"\d{1,4}\s*(?:장|챕터|부)\s*$"#,
+                options: .regularExpression
+            ) != nil
+    }
+
+    nonisolated private static func isLikelyYearPageNumber(_ pageNumber: String) -> Bool {
+        guard
+            !pageNumber.contains("-"),
+            let value = Int(pageNumber)
+        else {
+            return false
+        }
+
+        return (1800...2100).contains(value)
     }
 }
 
 private struct PageReferenceCandidate {
     let pageReference: String
     let score: CGFloat
+}
+
+private struct PageNumberExtraction {
+    let pageNumber: String
+    let position: PageNumberPosition
+    let hasPageMarker: Bool
+}
+
+private enum PageNumberPosition {
+    case marked
+    case standalone
+    case leading
+    case trailing
+
+    nonisolated var maximumEdgeDistance: CGFloat {
+        switch self {
+        case .marked:
+            return 0.30
+        case .standalone:
+            return 0.26
+        case .leading, .trailing:
+            return 0.22
+        }
+    }
+
+    nonisolated var scoreAdjustment: CGFloat {
+        switch self {
+        case .marked:
+            return -0.12
+        case .standalone:
+            return -0.08
+        case .leading, .trailing:
+            return 0.08
+        }
+    }
 }
 
 @MainActor
@@ -1488,6 +1681,75 @@ final class ReadingLibrary {
         }?.id
     }
 
+    func suggestedTagsForSelectedBook() -> [String] {
+        suggestedTags(for: selectedBookID)
+    }
+
+    func suggestedTags(for bookID: ReadingBook.ID?, recurringLimit: Int = 4) -> [String] {
+        guard
+            let bookID,
+            let book = books.first(where: { $0.id == bookID })
+        else {
+            return []
+        }
+
+        let baseTags = CapturedHighlightMetadata.deduplicated(book.tags)
+        let baseTagSet = Set(baseTags)
+        var usage: [String: (count: Int, latest: Date)] = [:]
+
+        for highlight in book.highlights {
+            for tag in CapturedHighlightMetadata.deduplicated(highlight.tags) {
+                let normalizedTag = CapturedHighlightMetadata.normalizedTags(from: tag).first ?? tag.trimmed
+                guard !normalizedTag.isEmpty, !baseTagSet.contains(normalizedTag) else { continue }
+
+                let current = usage[normalizedTag] ?? (count: 0, latest: .distantPast)
+                let latest = current.latest > highlight.createdAt ? current.latest : highlight.createdAt
+                usage[normalizedTag] = (count: current.count + 1, latest: latest)
+            }
+        }
+
+        let recurringTags = usage
+            .filter { $0.value.count >= 2 }
+            .sorted { lhs, rhs in
+                if lhs.value.count != rhs.value.count {
+                    return lhs.value.count > rhs.value.count
+                }
+                return lhs.value.latest > rhs.value.latest
+            }
+            .prefix(recurringLimit)
+            .map(\.key)
+
+        return CapturedHighlightMetadata.deduplicated(baseTags + recurringTags)
+    }
+
+    @discardableResult
+    func appendTags(_ tags: [String], to highlightID: Highlight.ID, limit: Int = 6) -> Bool {
+        guard
+            let bookIndex = books.firstIndex(where: { book in
+                book.highlights.contains { $0.id == highlightID }
+            }),
+            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
+        else {
+            return false
+        }
+
+        let existingTags = CapturedHighlightMetadata.deduplicated(books[bookIndex].highlights[highlightIndex].tags)
+        guard existingTags.count < limit else { return false }
+
+        let normalizedTags = CapturedHighlightMetadata.deduplicated(
+            CapturedHighlightMetadata.normalizedTags(from: tags.joined(separator: " "))
+        )
+        let additions = Array(normalizedTags
+            .filter { !existingTags.contains($0) }
+            .prefix(max(limit - existingTags.count, 0)))
+
+        guard !additions.isEmpty else { return false }
+
+        books[bookIndex].highlights[highlightIndex].tags = existingTags + additions
+        persist()
+        return true
+    }
+
     func selectBook(_ bookID: ReadingBook.ID) {
         guard books.contains(where: { $0.id == bookID }) else { return }
         selectedBookID = bookID
@@ -1499,7 +1761,9 @@ final class ReadingLibrary {
         title: String,
         author: String,
         summary: String,
+        tagsText: String = "",
         publisher: String = "",
+        publishedDate: String = "",
         isbn: String = "",
         coverURLString: String = "",
         metadataSource: BookMetadataSource = .manual
@@ -1508,7 +1772,9 @@ final class ReadingLibrary {
             title: title.trimmed.isEmpty ? "새 책" : title.trimmed,
             author: author.trimmed.isEmpty ? "Unknown" : author.trimmed,
             summary: summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed,
+            tags: CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText)),
             publisher: publisher.trimmed.nilIfEmpty,
+            publishedDate: publishedDate.trimmed.nilIfEmpty,
             isbn: isbn.trimmed.nilIfEmpty,
             coverURLString: coverURLString.trimmed.nilIfEmpty,
             metadataSource: metadataSource,
@@ -1527,7 +1793,9 @@ final class ReadingLibrary {
         title: String,
         author: String,
         summary: String,
+        tagsText: String = "",
         publisher: String = "",
+        publishedDate: String = "",
         isbn: String = "",
         coverURLString: String = "",
         metadataSource: BookMetadataSource = .manual
@@ -1537,7 +1805,9 @@ final class ReadingLibrary {
         books[index].title = title.trimmed.isEmpty ? books[index].title : title.trimmed
         books[index].author = author.trimmed.isEmpty ? "Unknown" : author.trimmed
         books[index].summary = summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed
+        books[index].tags = CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText))
         books[index].publisher = publisher.trimmed.nilIfEmpty
+        books[index].publishedDate = publishedDate.trimmed.nilIfEmpty
         books[index].isbn = isbn.trimmed.nilIfEmpty
         books[index].coverURLString = coverURLString.trimmed.nilIfEmpty
         books[index].metadataSource = metadataSource
@@ -1545,11 +1815,6 @@ final class ReadingLibrary {
     }
 
     func deleteBook(_ bookID: ReadingBook.ID) {
-        guard let book = books.first(where: { $0.id == bookID }) else { return }
-
-        book.highlights.forEach { highlight in
-            HighlightSnapshotStore.delete(highlight.snapshotFileName)
-        }
         books.removeAll { $0.id == bookID }
 
         if selectedBookID == bookID {
@@ -1564,11 +1829,11 @@ final class ReadingLibrary {
         text: String,
         memo: String,
         language: CaptureLanguage,
-        pageReference: String = "p. 42",
+        pageReference: String = "p.42",
         explicitPageReference: String = "",
         tagsText: String = "",
         bookID: ReadingBook.ID? = nil,
-        snapshotData: Data? = nil
+        stickyTone: StickyTone? = nil
     ) -> Highlight {
         let metadata = CapturedHighlightMetadata(
             memo: memo,
@@ -1578,21 +1843,22 @@ final class ReadingLibrary {
             tagsText: tagsText
         )
 
-        var highlight = Highlight(
-            text: text.trimmed,
-            memo: memo.trimmed,
+        let targetBookID = bookID ?? selectedBookID
+        let normalizedText = text.normalizedQuotesForStorage.trimmed
+        let normalizedMemo = memo.normalizedQuotesForStorage.trimmed
+        let highlightTags = CapturedHighlightMetadata.deduplicated(defaultTags(for: targetBookID) + metadata.tags)
+
+        let highlight = Highlight(
+            text: normalizedText,
+            memo: normalizedMemo,
             pageReference: metadata.pageReference,
             language: language,
-            tags: metadata.tags,
-            stickyTone: StickyTone.allCases[recentHighlights.count % StickyTone.allCases.count],
+            tags: highlightTags,
+            stickyTone: stickyTone ?? StickyTone.allCases[recentHighlights.count % StickyTone.allCases.count],
             source: .capture
         )
 
-        if let snapshotData {
-            highlight.snapshotFileName = HighlightSnapshotStore.save(snapshotData, for: highlight.id)
-        }
-
-        append(highlight, to: bookID ?? selectedBookID)
+        append(highlight, to: targetBookID)
         persist()
         return highlight
     }
@@ -1602,26 +1868,30 @@ final class ReadingLibrary {
         _ thought: String,
         pageReference: String = "",
         tagsText: String = "",
-        bookID: ReadingBook.ID? = nil
+        bookID: ReadingBook.ID? = nil,
+        stickyTone: StickyTone = .mint
     ) -> Highlight {
-        let detectedLanguage = CaptureLanguage.detect(from: thought)
+        let normalizedThought = thought.normalizedQuotesForStorage
+        let detectedLanguage = CaptureLanguage.detect(from: normalizedThought)
         let metadata = CapturedHighlightMetadata(
-            memo: thought,
+            memo: normalizedThought,
             detectedLanguage: detectedLanguage,
             fallbackPageReference: "Inbox",
             explicitPageReference: pageReference,
             tagsText: tagsText
         )
+        let targetBookID = bookID ?? selectedBookID
+        let highlightTags = CapturedHighlightMetadata.deduplicated(defaultTags(for: targetBookID) + metadata.tags)
         let highlight = Highlight(
-            text: thought.trimmed,
+            text: normalizedThought.trimmed,
             memo: "Shortcut",
             pageReference: metadata.pageReference,
             language: detectedLanguage,
-            tags: CapturedHighlightMetadata.deduplicated(["#아이디어"] + metadata.tags),
-            stickyTone: .mint,
+            tags: highlightTags,
+            stickyTone: stickyTone,
             source: .shortcut
         )
-        append(highlight, to: bookID ?? selectedBookID)
+        append(highlight, to: targetBookID)
         persist()
         return highlight
     }
@@ -1647,7 +1917,23 @@ final class ReadingLibrary {
     }
 
     func deleteInsight(_ insightID: LibraryInsight.ID) {
-        savedInsights.removeAll { $0.id == insightID }
+        _ = deleteInsightForUndo(insightID)
+    }
+
+    @discardableResult
+    func deleteInsightForUndo(_ insightID: LibraryInsight.ID) -> DeletedInsightSnapshot? {
+        guard let index = savedInsights.firstIndex(where: { $0.id == insightID }) else { return nil }
+
+        let insight = savedInsights.remove(at: index)
+        persist()
+        return DeletedInsightSnapshot(insight: insight, index: index)
+    }
+
+    func restoreDeletedInsight(_ deletion: DeletedInsightSnapshot) {
+        guard !savedInsights.contains(where: { $0.id == deletion.insight.id }) else { return }
+
+        let index = min(max(deletion.index, 0), savedInsights.count)
+        savedInsights.insert(deletion.insight, at: index)
         persist()
     }
 
@@ -1655,12 +1941,7 @@ final class ReadingLibrary {
         let snapshot = currentSnapshot
         if !snapshot.isEmpty {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
-            HighlightSnapshotStore.backupForReset(fileNames: snapshot.snapshotFileNames)
         }
-
-        books
-            .flatMap(\.highlights)
-            .forEach { HighlightSnapshotStore.delete($0.snapshotFileName) }
 
         books = []
         savedInsights = []
@@ -1679,7 +1960,6 @@ final class ReadingLibrary {
             return false
         }
 
-        HighlightSnapshotStore.restoreResetBackup(fileNames: snapshot.snapshotFileNames)
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
@@ -1700,6 +1980,7 @@ final class ReadingLibrary {
         pageReference: String,
         tagsText: String,
         bookID: ReadingBook.ID? = nil,
+        stickyTone: StickyTone? = nil,
         isReviewed: Bool = false
     ) {
         guard
@@ -1711,13 +1992,14 @@ final class ReadingLibrary {
             return
         }
 
-        let trimmedText = text.trimmed
+        let trimmedText = text.normalizedQuotesForStorage.trimmed
         guard !trimmedText.isEmpty else { return }
 
         let tags = tagsText
             .split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" })
             .map { String($0).trimmed }
             .filter { !$0.isEmpty }
+            .map { $0.hasPrefix("#") ? $0 : "#\($0)" }
 
         let detectedLanguage = CaptureLanguage.detect(from: trimmedText)
         let targetBookID = bookID ?? books[bookIndex].id
@@ -1725,10 +2007,11 @@ final class ReadingLibrary {
 
         var updatedHighlight = books[bookIndex].highlights[highlightIndex]
         updatedHighlight.text = trimmedText
-        updatedHighlight.memo = memo.trimmed
-        updatedHighlight.pageReference = pageReference.trimmed.isEmpty ? "p. ?" : pageReference.trimmed
+        updatedHighlight.memo = memo.normalizedQuotesForStorage.trimmed
+        updatedHighlight.pageReference = pageReference.trimmed.isEmpty ? "p.?" : pageReference.trimmed
         updatedHighlight.language = detectedLanguage
-        updatedHighlight.tags = tags.isEmpty ? [detectedLanguage.tag] : tags
+        updatedHighlight.tags = CapturedHighlightMetadata.deduplicated(tags)
+        updatedHighlight.stickyTone = stickyTone ?? updatedHighlight.stickyTone
         updatedHighlight.reviewedAt = isReviewed ? (updatedHighlight.reviewedAt ?? .now) : nil
 
         if targetBookIndex == bookIndex {
@@ -1743,17 +2026,34 @@ final class ReadingLibrary {
     }
 
     func deleteHighlight(_ highlightID: Highlight.ID) {
+        _ = deleteHighlightForUndo(highlightID)
+    }
+
+    @discardableResult
+    func deleteHighlightForUndo(_ highlightID: Highlight.ID) -> DeletedHighlightSnapshot? {
         guard
-            let bookIndex = books.firstIndex(where: { book in
-                book.highlights.contains { $0.id == highlightID }
-            }),
-            let highlight = books[bookIndex].highlights.first(where: { $0.id == highlightID })
+            let bookIndex = books.firstIndex(where: { $0.highlights.contains { $0.id == highlightID } }),
+            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
         else {
-            return
+            return nil
         }
 
-        HighlightSnapshotStore.delete(highlight.snapshotFileName)
-        books[bookIndex].highlights.removeAll { $0.id == highlightID }
+        let highlight = books[bookIndex].highlights.remove(at: highlightIndex)
+        persist()
+        return DeletedHighlightSnapshot(
+            highlight: highlight,
+            bookID: books[bookIndex].id,
+            index: highlightIndex
+        )
+    }
+
+    func restoreDeletedHighlight(_ deletion: DeletedHighlightSnapshot) {
+        guard !books.flatMap(\.highlights).contains(where: { $0.id == deletion.highlight.id }) else { return }
+        guard let bookIndex = books.firstIndex(where: { $0.id == deletion.bookID }) else { return }
+
+        let index = min(max(deletion.index, 0), books[bookIndex].highlights.count)
+        books[bookIndex].highlights.insert(deletion.highlight, at: index)
+        selectedBookID = books[bookIndex].id
         persist()
     }
 
@@ -1777,6 +2077,10 @@ final class ReadingLibrary {
         let targetIndex = books.firstIndex { $0.id == targetID } ?? 0
         books[targetIndex].highlights.insert(highlight, at: 0)
         selectedBookID = books[targetIndex].id
+    }
+
+    private func defaultTags(for bookID: ReadingBook.ID?) -> [String] {
+        suggestedTags(for: bookID)
     }
 
     private func persist() {
@@ -1803,9 +2107,8 @@ final class ReadingLibrary {
     }
 
     private func cleanupSnapshotFilesIfNeeded() {
-        guard persistence != nil else { return }
-
-        HighlightSnapshotStore.cleanup(keeping: currentSnapshot.snapshotFileNames)
+        HighlightSnapshotStore.cleanup()
+        HighlightSnapshotStore.clearResetBackup()
     }
 
     private var currentSnapshot: LibraryStateSnapshot {
@@ -1921,7 +2224,7 @@ enum SampleData {
                 Highlight(
                     text: "책에 직접 선을 긋지 않아도, 문장은 이미 나를 통과하고 있었다.",
                     memo: "빌린 책이라는 제약이 오히려 기록 방식을 바꾼다.",
-                    pageReference: "p. 18",
+                    pageReference: "p.18",
                     createdAt: .now.addingTimeInterval(-1800),
                     language: .korean,
                     tags: ["#철학", "#인용"],
@@ -1931,7 +2234,7 @@ enum SampleData {
                 Highlight(
                     text: "A note is not a copy of reading. It is the shape reading leaves behind.",
                     memo: "Socratic Mode 첫 질문 후보.",
-                    pageReference: "p. 31",
+                    pageReference: "p.31",
                     createdAt: .now.addingTimeInterval(-3600),
                     language: .english,
                     tags: ["#아이디어"],
@@ -1949,7 +2252,7 @@ enum SampleData {
                 Highlight(
                     text: "Every underline is a coordinate for returning.",
                     memo: "Cross-book 연결: 회귀, 좌표, 기억.",
-                    pageReference: "p. 7",
+                    pageReference: "p.7",
                     createdAt: .now.addingTimeInterval(-86400),
                     language: .english,
                     tags: ["#theme"],
@@ -1980,13 +2283,21 @@ enum SampleData {
 
 extension Date {
     var overlineShortDate: String {
-        formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "M월d일(E) HH:mm"
+        return formatter.string(from: self)
     }
 }
 
 extension String {
     nonisolated var trimmed: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated var normalizedQuotesForStorage: String {
+        replacingOccurrences(of: "[“”„‟«»＂]", with: "\"", options: .regularExpression)
     }
 
     nonisolated var nilIfEmpty: String? {

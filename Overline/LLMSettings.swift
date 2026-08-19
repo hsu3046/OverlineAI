@@ -51,8 +51,30 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    var supportsSubscriptionAuth: Bool {
+        switch self {
+        case .anthropic, .openai:
+            return true
+        case .openrouter, .gemini:
+            return false
+        }
+    }
+
     var defaultModelID: String {
         modelOptions.first?.id ?? ""
+    }
+
+    var lightweightTagModelID: String? {
+        switch self {
+        case .anthropic:
+            return "claude-haiku-4-5-20251001"
+        case .openai:
+            return "gpt-5.4-mini"
+        case .gemini:
+            return "gemini-3.1-flash-lite"
+        case .openrouter:
+            return nil
+        }
     }
 
     var modelOptions: [LLMModelOption] {
@@ -87,6 +109,69 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
     }
 }
 
+enum LLMAuthMode: String, CaseIterable, Codable, Identifiable {
+    case apiKey
+    case subscription
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .apiKey:
+            return "API 키"
+        case .subscription:
+            return "구독"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .apiKey:
+            return "key"
+        case .subscription:
+            return "person.crop.circle.badge.checkmark"
+        }
+    }
+}
+
+struct LLMSubscriptionToken: Codable, Equatable {
+    var accessToken: String
+    var refreshToken: String
+    var accountID: String
+    var expiresAt: Date?
+
+    static let empty = LLMSubscriptionToken(
+        accessToken: "",
+        refreshToken: "",
+        accountID: "",
+        expiresAt: nil
+    )
+
+    var hasAccessToken: Bool {
+        !accessToken.trimmed.isEmpty
+    }
+}
+
+enum LLMAuthCredential {
+    case apiKey(String)
+    case subscription(LLMSubscriptionToken)
+
+    var mode: LLMAuthMode {
+        switch self {
+        case .apiKey:
+            return .apiKey
+        case .subscription:
+            return .subscription
+        }
+    }
+}
+
+struct LLMTagProviderConfiguration {
+    let provider: LLMProvider
+    let modelID: String
+    let credential: LLMAuthCredential
+}
+
 @MainActor
 @Observable
 final class LLMSettingsStore {
@@ -98,6 +183,8 @@ final class LLMSettingsStore {
     }
 
     private(set) var apiKeys: [LLMProvider: String]
+    private(set) var subscriptionTokens: [LLMProvider: LLMSubscriptionToken]
+    private var authModes: [LLMProvider: LLMAuthMode]
     private var selectedModelIDs: [LLMProvider: String]
 
     init() {
@@ -118,6 +205,29 @@ final class LLMSettingsStore {
                     Self.keychain.set(storedKey, account: provider.rawValue)
                 }
                 return (provider, storedKey)
+            }
+        )
+
+        let subscriptionDecoder = JSONDecoder()
+        subscriptionTokens = Dictionary(
+            uniqueKeysWithValues: LLMProvider.allCases.map { provider in
+                guard
+                    let storedToken = Self.subscriptionKeychain.string(account: provider.rawValue),
+                    let tokenData = storedToken.data(using: .utf8),
+                    let token = try? subscriptionDecoder.decode(LLMSubscriptionToken.self, from: tokenData)
+                else {
+                    return (provider, LLMSubscriptionToken.empty)
+                }
+
+                return (provider, token)
+            }
+        )
+
+        authModes = Dictionary(
+            uniqueKeysWithValues: LLMProvider.allCases.map { provider in
+                let stored = defaults.string(forKey: Self.authModeKey(for: provider))
+                let mode = stored.flatMap(LLMAuthMode.init(rawValue:)) ?? .apiKey
+                return (provider, provider.supportsSubscriptionAuth ? mode : .apiKey)
             }
         )
 
@@ -142,6 +252,23 @@ final class LLMSettingsStore {
 
     var selectedModelTitle: String {
         provider.modelOptions.first { $0.id == selectedModelID }?.title ?? selectedModelID
+    }
+
+    var lightweightTagConfiguration: LLMTagProviderConfiguration? {
+        for provider in [LLMProvider.anthropic, .openai, .gemini] {
+            guard let modelID = provider.lightweightTagModelID, isReady(for: provider) else { continue }
+            return LLMTagProviderConfiguration(
+                provider: provider,
+                modelID: modelID,
+                credential: credential(for: provider)
+            )
+        }
+
+        return nil
+    }
+
+    var lightweightCorrectionConfiguration: LLMTagProviderConfiguration? {
+        lightweightTagConfiguration
     }
 
     func setSelectedModelID(_ modelID: String) {
@@ -169,6 +296,55 @@ final class LLMSettingsStore {
         !apiKey(for: provider).trimmed.isEmpty
     }
 
+    func authMode(for provider: LLMProvider) -> LLMAuthMode {
+        guard provider.supportsSubscriptionAuth else { return .apiKey }
+        return authModes[provider] ?? .apiKey
+    }
+
+    func setAuthMode(_ mode: LLMAuthMode, for provider: LLMProvider) {
+        let normalizedMode: LLMAuthMode = provider.supportsSubscriptionAuth ? mode : .apiKey
+        authModes[provider] = normalizedMode
+        UserDefaults.standard.set(normalizedMode.rawValue, forKey: Self.authModeKey(for: provider))
+    }
+
+    func subscriptionToken(for provider: LLMProvider) -> LLMSubscriptionToken {
+        subscriptionTokens[provider] ?? .empty
+    }
+
+    func setSubscriptionToken(_ token: LLMSubscriptionToken, for provider: LLMProvider) {
+        subscriptionTokens[provider] = token
+
+        guard token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty else {
+            Self.subscriptionKeychain.delete(account: provider.rawValue)
+            return
+        }
+
+        guard let data = try? JSONEncoder().encode(token) else { return }
+        Self.subscriptionKeychain.set(String(decoding: data, as: UTF8.self), account: provider.rawValue)
+    }
+
+    func hasSubscriptionToken(for provider: LLMProvider) -> Bool {
+        provider.supportsSubscriptionAuth && subscriptionToken(for: provider).hasAccessToken
+    }
+
+    func isReady(for provider: LLMProvider) -> Bool {
+        switch authMode(for: provider) {
+        case .apiKey:
+            return hasAPIKey(for: provider)
+        case .subscription:
+            return hasSubscriptionToken(for: provider)
+        }
+    }
+
+    func credential(for provider: LLMProvider) -> LLMAuthCredential {
+        switch authMode(for: provider) {
+        case .apiKey:
+            return .apiKey(apiKey(for: provider))
+        case .subscription:
+            return .subscription(subscriptionToken(for: provider))
+        }
+    }
+
     private func saveProvider() {
         UserDefaults.standard.set(provider.rawValue, forKey: Self.providerKey)
     }
@@ -177,6 +353,10 @@ final class LLMSettingsStore {
 
     private static func modelKey(for provider: LLMProvider) -> String {
         "overline.llm.model.\(provider.rawValue)"
+    }
+
+    private static func authModeKey(for provider: LLMProvider) -> String {
+        "overline.llm.authMode.\(provider.rawValue)"
     }
 
     private static func normalizedModelID(_ modelID: String, for provider: LLMProvider) -> String {
@@ -206,6 +386,7 @@ final class LLMSettingsStore {
     }
 
     private static let keychain = KeychainStringStore(service: "aib.Overline.llm")
+    private static let subscriptionKeychain = KeychainStringStore(service: "aib.Overline.llm.subscription")
 }
 
 struct KeychainStringStore {

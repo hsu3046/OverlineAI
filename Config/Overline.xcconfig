@@ -1,0 +1,5 @@
+// Shared build settings for Overline.
+// Keep real secrets in Config/Secrets.xcconfig, which is ignored by git.
+KAKAO_REST_API_KEY =
+ALADIN_TTB_KEY =
+#include? "Secrets.xcconfig"
