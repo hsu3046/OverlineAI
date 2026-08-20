@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AppIntentRouter.self) private var intentRouter
+    @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     @State private var selectedTab: AppTab = .capture
     @State private var isBottomMenuCompact = false
     @State private var isForwardTabTransition = true
@@ -44,11 +45,17 @@ struct ContentView: View {
             apply(intentRouter.request)
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active else {
+                quoteSpeechPlayer.stop()
+                return
+            }
             recordAppOpen()
         }
         .onChange(of: selectedTab) { _, _ in
             setBottomMenuCompact(false)
+            if selectedTab != .library {
+                quoteSpeechPlayer.stop()
+            }
         }
         .onChange(of: intentRouter.request) { _, request in
             apply(request)
@@ -317,6 +324,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     ContentView()
         .environment(ReadingLibrary.preview)
         .environment(AppIntentRouter())
+        .environment(QuoteSpeechPlayer())
 }
 
 extension Color {

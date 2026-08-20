@@ -3505,11 +3505,14 @@ struct ScrapbookCard: View {
             HStack(alignment: .center, spacing: 10) {
                 HighlightMetaBar(highlight: highlight)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                OverlineShareButton(
-                    item: highlight.shareText,
-                    accessibilityLabel: "공유",
-                    iconYOffset: -2
-                )
+                HStack(spacing: 2) {
+                    QuoteSpeechButton(highlight: highlight)
+                    OverlineShareButton(
+                        item: highlight.shareText,
+                        accessibilityLabel: "공유",
+                        iconYOffset: -2
+                    )
+                }
             }
             .frame(minHeight: 26, alignment: .center)
         }
@@ -3530,6 +3533,35 @@ struct ScrapbookCard: View {
             return nil
         }
         return title
+    }
+}
+
+private struct QuoteSpeechButton: View {
+    @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
+    let highlight: Highlight
+
+    private var isSpeaking: Bool {
+        quoteSpeechPlayer.isSpeaking(highlight.id)
+    }
+
+    var body: some View {
+        Button {
+            quoteSpeechPlayer.toggle(highlight)
+        } label: {
+            Image(systemName: isSpeaking ? "stop.fill" : "speaker.wave.2")
+                .font(.system(size: 18, weight: .regular))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(
+                    isSpeaking
+                        ? Color.overlineAccent
+                        : Color.overlineMutedInk.opacity(0.46)
+                )
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isSpeaking ? "글조각 낭독 중지" : "글조각 듣기")
     }
 }
 
@@ -3770,4 +3802,5 @@ private struct HighlightMetaItem: View {
             .navigationTitle("책장")
     }
     .environment(ReadingLibrary.preview)
+    .environment(QuoteSpeechPlayer())
 }
