@@ -7,13 +7,13 @@ private let insightMetricsLogger = Logger(subsystem: "aib.Overline", category: "
 struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
     @Environment(AppIntentRouter.self) private var intentRouter
+    @Environment(LLMSettingsStore.self) private var llmSettings
     @State private var question = ""
     @State private var selectedPrompt: InsightPrompt = .expand
     @State private var selectedBookIDs: Set<ReadingBook.ID> = []
     @State private var selectedHighlightIDs: Set<Highlight.ID> = []
     @State private var isSourcePickerPresented = false
     @State private var isLLMSettingsPresented = false
-    @State private var llmSettings = LLMSettingsStore()
     @State private var isGeneratingInsight = false
     @State private var insightErrorMessage: String?
     @State private var showsInsightSavedAlert = false
@@ -379,6 +379,7 @@ struct InsightsView: View {
             )
             showsInsightSavedAlert = true
         } catch {
+            llmSettings.handleRequestError(error, provider: provider)
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
                 provider: provider,
@@ -404,6 +405,10 @@ struct InsightsView: View {
     }
 
     private func missingCredentialMessage(for provider: LLMProvider) -> String {
+        if llmSettings.isCredentialRejected(for: provider) {
+            return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
+        }
+
         switch llmSettings.authMode(for: provider) {
         case .apiKey:
             return "\(provider.title) API 키를 먼저 입력해 주세요."
@@ -628,9 +633,9 @@ private struct LLMSettingsSheet: View {
                             }
                         }
                     }
-                    .disabled(isTestingConnection || !settings.isReady(for: settings.provider))
+                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
 
-                    if !settings.isReady(for: settings.provider) {
+                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
                         Text(connectionSetupHint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -702,6 +707,10 @@ private struct LLMSettingsSheet: View {
     }
 
     private var connectionSetupHint: String {
+        if settings.isCredentialRejected(for: settings.provider) {
+            return "\(settings.provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. 토큰·API 키 또는 모델을 다시 확인해 주세요."
+        }
+
         switch settings.authMode(for: settings.provider) {
         case .apiKey:
             return "\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다."
@@ -713,10 +722,12 @@ private struct LLMSettingsSheet: View {
     @MainActor
     private func testConnection() async {
         guard !isTestingConnection else { return }
-        guard settings.isReady(for: settings.provider) else { return }
+        guard settings.hasCredential(for: settings.provider) else { return }
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
+        let modelTitle = settings.selectedModelTitle
+        let authMode = settings.authMode(for: provider)
         let startedAt = Date()
 
         isTestingConnection = true
@@ -747,9 +758,10 @@ private struct LLMSettingsSheet: View {
             )
 
             let preview = String(response.trimmed.prefix(120))
+            settings.handleRequestSuccess(provider: provider)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: preview.isEmpty ? "연결 확인 완료" : preview
+                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(preview.isEmpty ? "연결 확인 완료" : preview)"
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -759,9 +771,10 @@ private struct LLMSettingsSheet: View {
                 "llm_connection_test_completed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public)"
             )
         } catch {
+            settings.handleRequestError(error, provider: provider)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: false,
-                message: error.localizedDescription
+                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(error.localizedDescription)"
             )
             insightMetricsLogger.error(
                 "llm_connection_test_failed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public) error_code=\(error.insightMetricsCode, privacy: .public)"
@@ -2127,4 +2140,6 @@ private struct FlowLayout: Layout {
             .navigationTitle("인사이트")
     }
     .environment(ReadingLibrary.preview)
+    .environment(AppIntentRouter.shared)
+    .environment(LLMSettingsStore())
 }

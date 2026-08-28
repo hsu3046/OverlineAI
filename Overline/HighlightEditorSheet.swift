@@ -4,6 +4,7 @@ import UIKit
 struct HighlightEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
+    @Environment(LLMSettingsStore.self) private var llmSettings
 
     let highlightID: Highlight.ID
     var deleteHighlight: ((Highlight.ID) -> Void)? = nil
@@ -18,7 +19,6 @@ struct HighlightEditorSheet: View {
     @State private var isReviewed = false
     @State private var showsDeleteConfirmation = false
     @State private var isBookSelectionPresented = false
-    @State private var llmSettings = LLMSettingsStore()
     @State private var isCorrectingOCR = false
     @State private var correctionProposal: OCRCorrectionProposal?
     @State private var isRegeneratingTags = false
@@ -356,8 +356,8 @@ struct HighlightEditorSheet: View {
         let trimmedText = sourceText.trimmed
         guard !trimmedText.isEmpty else { return }
 
-        guard let configuration = llmSettings.lightweightCorrectionConfiguration else {
-            showAIAlert(title: "AI 교정", message: "AI 설정에서 OpenAI, Claude 또는 Gemini를 먼저 연결해 주세요.")
+        guard let configuration = llmSettings.activeConfiguration else {
+            showAIAlert(title: "AI 교정", message: selectedAISetupMessage)
             return
         }
 
@@ -397,6 +397,7 @@ struct HighlightEditorSheet: View {
                     risk: result.risk
                 )
             } catch {
+                llmSettings.handleRequestError(error, provider: configuration.provider)
                 showAIAlert(title: "AI 교정", message: error.localizedDescription)
             }
         }
@@ -422,8 +423,8 @@ struct HighlightEditorSheet: View {
         let trimmedText = snapshot.text.trimmed
         guard !trimmedText.isEmpty else { return }
 
-        guard let configuration = llmSettings.lightweightTagConfiguration else {
-            showAIAlert(title: "AI 태그", message: "AI 설정에서 OpenAI, Claude 또는 Gemini를 먼저 연결해 주세요.")
+        guard let configuration = llmSettings.activeConfiguration else {
+            showAIAlert(title: "AI 태그", message: selectedAISetupMessage)
             return
         }
 
@@ -472,6 +473,7 @@ struct HighlightEditorSheet: View {
                     suggestedTags: suggestedTags
                 )
             } catch {
+                llmSettings.handleRequestError(error, provider: configuration.provider)
                 showAIAlert(title: "AI 태그", message: error.localizedDescription)
             }
         }
@@ -494,6 +496,20 @@ struct HighlightEditorSheet: View {
             tagsText: tagsText,
             selectedBookID: selectedBookID
         )
+    }
+
+    private var selectedAISetupMessage: String {
+        let provider = llmSettings.provider
+        if llmSettings.isCredentialRejected(for: provider) {
+            return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
+        }
+
+        switch llmSettings.authMode(for: provider) {
+        case .apiKey:
+            return "AI 설정에서 선택한 \(provider.title) API 키를 입력해 주세요."
+        case .subscription:
+            return "AI 설정에서 선택한 \(provider.title) 구독 토큰을 연결해 주세요."
+        }
     }
 
     private func showAIAlert(title: String, message: String) {
@@ -703,4 +719,5 @@ private struct TagRegenerationPreviewSheet: View {
 #Preview {
     HighlightEditorSheet(highlightID: SampleData.books[0].highlights[0].id)
         .environment(ReadingLibrary.preview)
+        .environment(LLMSettingsStore())
 }

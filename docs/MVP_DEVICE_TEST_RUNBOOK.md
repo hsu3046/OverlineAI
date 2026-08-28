@@ -26,7 +26,7 @@ MVP 통과는 아래 10개 항목이 모두 실제 기기에서 확인되고, �
 - 한국어 종이책 1권. ISBN 바코드가 보이는 뒷표지가 있으면 좋다.
 - Kakao REST API 키와 Aladin TTBKey가 `Config/Secrets.xcconfig`에 준비되어 있어야 한다.
   - 도서 API 키가 앱 번들에 포함되는 방식과 검증 절차는 [BOOK_METADATA_API_KEYS.md](BOOK_METADATA_API_KEYS.md)를 따른다.
-- LLM 제공자 API 키 또는 구독 토큰 1개 이상. 인사이트 생성은 OpenRouter, Anthropic, OpenAI, Gemini 중 하나로 시작하면 된다. 자동 태그 보강은 Anthropic, OpenAI, Gemini 설정이 있을 때 동작한다.
+- LLM 제공자 API 키 또는 구독 토큰 1개 이상. 인사이트 생성과 자동 태그 보강은 AI 설정에서 현재 선택한 OpenRouter, Anthropic, OpenAI, Gemini 연결만 사용한다.
 - 조명을 낮출 수 있는 환경. 저조도와 플래시 토글을 확인하기 위함이다.
 
 ## 사전 점검
@@ -115,7 +115,7 @@ Kakao 또는 Aladin 실제 검색이 성공하면 앱이 MVP 점검의 `도서 A
 2. `질문`, `연결`, `확장`, `요약` 중 하나를 선택한다.
 3. 입력창에 짧은 질문을 넣고 생성한다.
 4. 응답이 저장됨 카드로 남고, 선택한 글조각 출처를 다시 볼 수 있는지 확인한다.
-5. Anthropic, OpenAI, Gemini 중 하나가 준비된 상태라면 새 글조각 저장 후 자동 태그가 뒤에서 보강되는지 확인한다.
+5. 현재 선택한 AI 제공자와 모델이 준비된 상태라면 새 글조각 저장 후 같은 제공자와 모델로 자동 태그가 뒤에서 보강되는지 확인한다.
 
 현재 모델 테스트나 실제 생성이 성공하면 앱이 MVP 점검의 `LLM 인사이트`를 자동 체크한다. 자동 체크가 실패했을 때만 검증 리포트의 `LLM 연결` 근거를 확인한 뒤 수동 체크한다.
 
@@ -158,7 +158,7 @@ Kakao 또는 Aladin 실제 검색이 성공하면 앱이 MVP 점검의 `도서 A
 | 글조각 낭독이 부자연스러움 | iOS 설정의 음성 콘텐츠에서 고품질 한국어 음성이 설치되어 있는지 확인 |
 | LLM 키는 준비됐지만 연결 대기 | `인사이트 > AI 설정 > 현재 모델 테스트`를 다시 실행하고 검증 리포트의 `LLM 연결` 날짜 확인 |
 | LLM 실패 | 제공자 API 키, 모델 ID, 네트워크, 잔액/쿼터 |
-| 자동 태그가 붙지 않음 | [AUTOMATIC_TAGGING.md](AUTOMATIC_TAGGING.md)의 provider 우선순위, 설정 준비 상태, `CaptureMetrics` 로그 확인 |
+| 자동 태그가 붙지 않음 | [AUTOMATIC_TAGGING.md](AUTOMATIC_TAGGING.md)의 현재 선택 provider/model, 설정 준비 상태, `CaptureMetrics` 로그 확인 |
 
 ## 보류되는 지표
 

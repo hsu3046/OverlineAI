@@ -8,13 +8,13 @@ private let captureMetricsLogger = Logger(subsystem: "aib.Overline", category: "
 
 struct CaptureView: View {
     @Environment(ReadingLibrary.self) private var library
+    @Environment(LLMSettingsStore.self) private var llmSettings
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedLineIDs: Set<Int> = []
     @State private var selectedCameraLineIDs: Set<CameraRecognizedTextLine.ID> = []
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var cameraScanner = CameraTextScanner()
     @State private var speechRecorder = SpeechMemoRecorder()
-    @State private var llmSettings = LLMSettingsStore()
     @State private var memo = ""
     @State private var pageReferenceText = ""
     @State private var tagsText = ""
@@ -595,7 +595,7 @@ struct CaptureView: View {
     }
 
     private func scheduleAutomaticTagGeneration(for highlightID: Highlight.ID) {
-        guard let configuration = llmSettings.lightweightTagConfiguration else {
+        guard let configuration = llmSettings.activeConfiguration else {
             captureMetricsLogger.info("auto_tags_skipped reason=no_provider")
             return
         }
@@ -677,6 +677,7 @@ struct CaptureView: View {
                     "auto_tags_applied provider=\(configuration.provider.rawValue, privacy: .public) count=\(generatedTags.count, privacy: .public)"
                 )
             } catch {
+                llmSettings.handleRequestError(error, provider: configuration.provider)
                 captureMetricsLogger.error(
                     "auto_tags_failed provider=\(configuration.provider.rawValue, privacy: .public) error=\(String(describing: type(of: error)), privacy: .public)"
                 )
@@ -3141,4 +3142,5 @@ private enum MemoNoteMetrics {
             .navigationTitle("캡처")
     }
     .environment(ReadingLibrary.preview)
+    .environment(LLMSettingsStore())
 }

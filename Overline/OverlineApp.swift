@@ -12,6 +12,7 @@ struct OverlineApp: App {
     @State private var library = ReadingLibrary.shared
     @State private var intentRouter = AppIntentRouter.shared
     @State private var quoteSpeechPlayer = QuoteSpeechPlayer()
+    @State private var llmSettings = LLMSettingsStore()
 
     var body: some Scene {
         WindowGroup {
@@ -19,6 +20,7 @@ struct OverlineApp: App {
                 .environment(library)
                 .environment(intentRouter)
                 .environment(quoteSpeechPlayer)
+                .environment(llmSettings)
                 .preferredColorScheme(.light)
         }
     }
