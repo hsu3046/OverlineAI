@@ -1664,6 +1664,7 @@ final class ReadingLibrary {
     @ObservationIgnored private let snapshotWriter: LibrarySnapshotWriteCoordinator
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     @ObservationIgnored private var persistenceGeneration = 0
+    @ObservationIgnored private var pendingResetBackupCleanupData: Data?
     @ObservationIgnored private var bookIndexByID: [ReadingBook.ID: Int] = [:]
     @ObservationIgnored private var highlightLocationByID: [Highlight.ID: (bookIndex: Int, highlightIndex: Int)] = [:]
     private let legacyHighlightsKey = "overline.userHighlights.v1"
@@ -2012,6 +2013,7 @@ final class ReadingLibrary {
     func resetLibrary() {
         let removedHighlightIDs = books.flatMap { $0.highlights.map(\.id) }
         let snapshot = currentSnapshot
+        pendingResetBackupCleanupData = nil
         if !snapshot.isEmpty {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
         }
@@ -2027,9 +2029,11 @@ final class ReadingLibrary {
     @discardableResult
     func restoreLastResetBackup() -> Bool {
         guard
-            let snapshot = Self.loadSnapshotBackup(key: Self.resetBackupKey),
+            let backupData = UserDefaults.standard.data(forKey: Self.resetBackupKey),
+            let snapshot = try? JSONDecoder().decode(LibraryStateSnapshot.self, from: backupData),
             !snapshot.isEmpty
         else {
+            pendingResetBackupCleanupData = nil
             resetBackupAvailable = false
             return false
         }
@@ -2044,12 +2048,10 @@ final class ReadingLibrary {
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
             ? snapshot.selectedBookID
             : snapshot.books.first?.id
+        pendingResetBackupCleanupData = backupData
         persist()
         postRemovedHighlights(removedHighlightIDs)
         cleanupSnapshotFilesIfNeeded()
-        Self.deleteSnapshotBackup(key: Self.resetBackupKey)
-        HighlightSnapshotStore.clearResetBackup()
-        resetBackupAvailable = false
         return true
     }
 
@@ -2202,7 +2204,25 @@ final class ReadingLibrary {
                 fallbackSaveSucceeded: result.fallbackSaveSucceeded,
                 lastSavedAt: result.fallbackSaveSucceeded || result.primarySaveSucceeded ? .now : nil
             )
+
+            if result.primarySaveSucceeded || result.fallbackSaveSucceeded {
+                self.clearPendingResetBackupIfUnchanged()
+            }
         }
+    }
+
+    private func clearPendingResetBackupIfUnchanged() {
+        guard
+            let pendingResetBackupCleanupData,
+            UserDefaults.standard.data(forKey: Self.resetBackupKey) == pendingResetBackupCleanupData
+        else {
+            return
+        }
+
+        Self.deleteSnapshotBackup(key: Self.resetBackupKey)
+        HighlightSnapshotStore.clearResetBackup()
+        self.pendingResetBackupCleanupData = nil
+        resetBackupAvailable = false
     }
 
     private func refreshDerivedState() {
