@@ -3,7 +3,15 @@ import Observation
 import SwiftData
 import SwiftUI
 
-enum StickyTone: String, Codable, CaseIterable {
+extension Notification.Name {
+    static let overlineHighlightsRemoved = Notification.Name("overline.highlightsRemoved")
+}
+
+enum OverlineNotificationUserInfoKey {
+    static let highlightIDs = "highlightIDs"
+}
+
+nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
     case yellow
     case blue
     case rose
@@ -37,7 +45,7 @@ enum StickyTone: String, Codable, CaseIterable {
     }
 }
 
-enum CoverTheme: String, Codable, CaseIterable {
+nonisolated enum CoverTheme: String, Codable, CaseIterable, Sendable {
     case forest
     case cobalt
     case vermilion
@@ -78,7 +86,7 @@ enum CoverTheme: String, Codable, CaseIterable {
     }
 }
 
-enum CaptureLanguage: String, Codable, CaseIterable, Identifiable {
+nonisolated enum CaptureLanguage: String, Codable, CaseIterable, Identifiable, Sendable {
     case korean
     case english
     case japanese
@@ -122,20 +130,20 @@ enum CaptureLanguage: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum HighlightSource: String, Codable {
+nonisolated enum HighlightSource: String, Codable, Sendable {
     case sample
     case capture
     case shortcut
 }
 
-enum BookMetadataSource: String, Codable, CaseIterable {
+nonisolated enum BookMetadataSource: String, Codable, CaseIterable, Sendable {
     case manual
     case kakao
     case aladin
     case google
 }
 
-struct Highlight: Identifiable, Hashable, Codable {
+nonisolated struct Highlight: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var text: String
     var memo: String
@@ -172,7 +180,7 @@ struct Highlight: Identifiable, Hashable, Codable {
     }
 }
 
-struct LibraryInsight: Identifiable, Hashable, Codable {
+nonisolated struct LibraryInsight: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var categoryRaw: String
     var prompt: String
@@ -1057,7 +1065,7 @@ enum LLMUsageMetricsStore {
     }
 }
 
-struct ReadingBook: Identifiable, Hashable, Codable {
+nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var title: String
     var author: String
@@ -1131,7 +1139,7 @@ struct ReadingBook: Identifiable, Hashable, Codable {
     }
 }
 
-struct LibraryStateSnapshot: Codable, Equatable {
+nonisolated struct LibraryStateSnapshot: Codable, Equatable, Sendable {
     var books: [ReadingBook]
     var insights: [LibraryInsight]
     var selectedBookID: ReadingBook.ID?
@@ -1193,6 +1201,7 @@ final class PersistentLibrarySnapshot {
 final class LibraryPersistence {
     private let container: ModelContainer
     private let context: ModelContext
+    fileprivate let writer: LibraryPersistenceWriter
     private static let recordKey = "main"
 
     init(inMemory: Bool = false) throws {
@@ -1200,6 +1209,7 @@ final class LibraryPersistence {
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
         container = try ModelContainer(for: schema, configurations: [configuration])
         context = container.mainContext
+        writer = LibraryPersistenceWriter(modelContainer: container)
     }
 
     static func live() -> LibraryPersistence? {
@@ -1207,33 +1217,75 @@ final class LibraryPersistence {
     }
 
     func load() -> LibraryStateSnapshot? {
-        guard
-            let record = try? context.fetch(FetchDescriptor<PersistentLibrarySnapshot>())
-                .first(where: { $0.key == Self.recordKey })
-        else {
+        let record = try? context.fetch(FetchDescriptor<PersistentLibrarySnapshot>())
+            .first(where: { $0.key == Self.recordKey })
+
+        guard let record else {
             return nil
         }
 
         return try? JSONDecoder().decode(LibraryStateSnapshot.self, from: record.data)
     }
 
-    func save(_ snapshot: LibraryStateSnapshot) -> Bool {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return false }
+}
 
-        let records = (try? context.fetch(FetchDescriptor<PersistentLibrarySnapshot>())) ?? []
+@ModelActor
+actor LibraryPersistenceWriter {
+    func save(_ data: Data) -> Bool {
+        guard !Task.isCancelled else { return false }
+
+        let records = (try? modelContext.fetch(FetchDescriptor<PersistentLibrarySnapshot>())) ?? []
         if let record = records.first(where: { $0.key == Self.recordKey }) {
             record.data = data
             record.updatedAt = .now
         } else {
-            context.insert(PersistentLibrarySnapshot(key: Self.recordKey, data: data))
+            modelContext.insert(PersistentLibrarySnapshot(key: Self.recordKey, data: data))
         }
 
         do {
-            try context.save()
+            try modelContext.save()
             return true
         } catch {
             return false
         }
+    }
+
+    private static let recordKey = "main"
+}
+
+private struct LibrarySnapshotWriteResult: Sendable {
+    let primarySaveSucceeded: Bool
+    let fallbackSaveSucceeded: Bool
+}
+
+private actor LibrarySnapshotWriteCoordinator {
+    private let primaryWriter: LibraryPersistenceWriter?
+    private var latestGeneration = 0
+
+    init(primaryWriter: LibraryPersistenceWriter?) {
+        self.primaryWriter = primaryWriter
+    }
+
+    func save(
+        _ snapshot: LibraryStateSnapshot,
+        generation: Int,
+        fallbackKey: String
+    ) async -> LibrarySnapshotWriteResult? {
+        guard !Task.isCancelled, generation >= latestGeneration else { return nil }
+        latestGeneration = generation
+
+        guard let data = try? JSONEncoder().encode(snapshot), !Task.isCancelled else {
+            return nil
+        }
+
+        let primarySaveSucceeded = await primaryWriter?.save(data) ?? false
+        guard !Task.isCancelled, generation == latestGeneration else { return nil }
+
+        UserDefaults.standard.set(data, forKey: fallbackKey)
+        return LibrarySnapshotWriteResult(
+            primarySaveSucceeded: primarySaveSucceeded,
+            fallbackSaveSucceeded: true
+        )
     }
 }
 
@@ -1609,6 +1661,11 @@ final class ReadingLibrary {
     private(set) var resetBackupAvailable: Bool
 
     private let persistence: LibraryPersistence?
+    @ObservationIgnored private let snapshotWriter: LibrarySnapshotWriteCoordinator
+    @ObservationIgnored private var persistenceTask: Task<Void, Never>?
+    @ObservationIgnored private var persistenceGeneration = 0
+    @ObservationIgnored private var bookIndexByID: [ReadingBook.ID: Int] = [:]
+    @ObservationIgnored private var highlightLocationByID: [Highlight.ID: (bookIndex: Int, highlightIndex: Int)] = [:]
     private let legacyHighlightsKey = "overline.userHighlights.v1"
     private static let snapshotBackupKey = "overline.librarySnapshot.backup.v1"
     private static let resetBackupKey = "overline.librarySnapshot.resetBackup.v1"
@@ -1620,6 +1677,7 @@ final class ReadingLibrary {
         persistence: LibraryPersistence? = nil
     ) {
         self.persistence = persistence
+        self.snapshotWriter = LibrarySnapshotWriteCoordinator(primaryWriter: persistence?.writer)
         self.storageStatus = LibraryStorageStatus.initial(
             hasPrimaryStore: persistence != nil,
             hasFallbackBackup: Self.hasSnapshotBackup(key: Self.snapshotBackupKey)
@@ -1666,19 +1724,29 @@ final class ReadingLibrary {
     }
 
     func book(with id: ReadingBook.ID) -> ReadingBook? {
-        books.first { $0.id == id }
+        guard let index = bookIndexByID[id], books.indices.contains(index) else { return nil }
+        return books[index]
     }
 
     func highlight(with id: Highlight.ID) -> Highlight? {
-        books
-            .flatMap(\.highlights)
-            .first { $0.id == id }
+        guard
+            let location = highlightLocationByID[id],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
+        else {
+            return nil
+        }
+        return books[location.bookIndex].highlights[location.highlightIndex]
     }
 
     func bookID(containing highlightID: Highlight.ID) -> ReadingBook.ID? {
-        books.first { book in
-            book.highlights.contains { $0.id == highlightID }
-        }?.id
+        guard
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex)
+        else {
+            return nil
+        }
+        return books[location.bookIndex].id
     }
 
     func suggestedTagsForSelectedBook() -> [String] {
@@ -1725,13 +1793,15 @@ final class ReadingLibrary {
     @discardableResult
     func appendTags(_ tags: [String], to highlightID: Highlight.ID, limit: Int = 6) -> Bool {
         guard
-            let bookIndex = books.firstIndex(where: { book in
-                book.highlights.contains { $0.id == highlightID }
-            }),
-            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
         else {
             return false
         }
+
+        let bookIndex = location.bookIndex
+        let highlightIndex = location.highlightIndex
 
         let existingTags = CapturedHighlightMetadata.deduplicated(books[bookIndex].highlights[highlightIndex].tags)
         guard existingTags.count < limit else { return false }
@@ -1815,6 +1885,7 @@ final class ReadingLibrary {
     }
 
     func deleteBook(_ bookID: ReadingBook.ID) {
+        let removedHighlightIDs = books.first(where: { $0.id == bookID })?.highlights.map(\.id) ?? []
         books.removeAll { $0.id == bookID }
 
         if selectedBookID == bookID {
@@ -1822,6 +1893,7 @@ final class ReadingLibrary {
         }
 
         persist()
+        postRemovedHighlights(removedHighlightIDs)
     }
 
     @discardableResult
@@ -1938,6 +2010,7 @@ final class ReadingLibrary {
     }
 
     func resetLibrary() {
+        let removedHighlightIDs = books.flatMap { $0.highlights.map(\.id) }
         let snapshot = currentSnapshot
         if !snapshot.isEmpty {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
@@ -1947,6 +2020,7 @@ final class ReadingLibrary {
         savedInsights = []
         selectedBookID = nil
         persist()
+        postRemovedHighlights(removedHighlightIDs)
         cleanupSnapshotFilesIfNeeded()
     }
 
@@ -1984,13 +2058,16 @@ final class ReadingLibrary {
         isReviewed: Bool = false
     ) {
         guard
-            let bookIndex = books.firstIndex(where: { book in
-                book.highlights.contains { $0.id == highlightID }
-            }),
-            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
         else {
             return
         }
+
+
+        let bookIndex = location.bookIndex
+        let highlightIndex = location.highlightIndex
 
         let trimmedText = text.normalizedQuotesForStorage.trimmed
         guard !trimmedText.isEmpty else { return }
@@ -2032,14 +2109,20 @@ final class ReadingLibrary {
     @discardableResult
     func deleteHighlightForUndo(_ highlightID: Highlight.ID) -> DeletedHighlightSnapshot? {
         guard
-            let bookIndex = books.firstIndex(where: { $0.highlights.contains { $0.id == highlightID } }),
-            let highlightIndex = books[bookIndex].highlights.firstIndex(where: { $0.id == highlightID })
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
         else {
             return nil
         }
 
+
+        let bookIndex = location.bookIndex
+        let highlightIndex = location.highlightIndex
+
         let highlight = books[bookIndex].highlights.remove(at: highlightIndex)
         persist()
+        postRemovedHighlights([highlight.id])
         return DeletedHighlightSnapshot(
             highlight: highlight,
             bookID: books[bookIndex].id,
@@ -2048,7 +2131,7 @@ final class ReadingLibrary {
     }
 
     func restoreDeletedHighlight(_ deletion: DeletedHighlightSnapshot) {
-        guard !books.flatMap(\.highlights).contains(where: { $0.id == deletion.highlight.id }) else { return }
+        guard highlightLocationByID[deletion.highlight.id] == nil else { return }
         guard let bookIndex = books.firstIndex(where: { $0.id == deletion.bookID }) else { return }
 
         let index = min(max(deletion.index, 0), books[bookIndex].highlights.count)
@@ -2086,24 +2169,68 @@ final class ReadingLibrary {
     private func persist() {
         refreshDerivedState()
         let snapshot = currentSnapshot
+        persistenceGeneration += 1
+        let generation = persistenceGeneration
+        let snapshotWriter = snapshotWriter
+        let hasPrimaryStore = persistence != nil
 
-        let primarySaveSucceeded = persistence?.save(snapshot) ?? false
-        let fallbackSaveSucceeded = Self.saveSnapshotBackup(snapshot, key: Self.snapshotBackupKey)
-        storageStatus = LibraryStorageStatus(
-            primaryStore: persistence == nil ? "SwiftData 미사용" : "SwiftData",
-            fallbackStore: "UserDefaults 백업",
-            primarySaveSucceeded: primarySaveSucceeded,
-            fallbackSaveSucceeded: fallbackSaveSucceeded,
-            lastSavedAt: fallbackSaveSucceeded || primarySaveSucceeded ? .now : nil
-        )
+        persistenceTask?.cancel()
+        persistenceTask = Task { [weak self] in
+            let result = await snapshotWriter.save(
+                snapshot,
+                generation: generation,
+                fallbackKey: Self.snapshotBackupKey
+            )
+            guard
+                let self,
+                self.persistenceGeneration == generation,
+                let result
+            else {
+                return
+            }
+
+            self.storageStatus = LibraryStorageStatus(
+                primaryStore: hasPrimaryStore ? "SwiftData" : "SwiftData 미사용",
+                fallbackStore: "UserDefaults 백업",
+                primarySaveSucceeded: result.primarySaveSucceeded,
+                fallbackSaveSucceeded: result.fallbackSaveSucceeded,
+                lastSavedAt: result.fallbackSaveSucceeded || result.primarySaveSucceeded ? .now : nil
+            )
+        }
     }
 
     private func refreshDerivedState() {
-        let highlights = books
-            .flatMap(\.highlights)
-            .sorted { $0.createdAt > $1.createdAt }
+        var nextBookIndexByID: [ReadingBook.ID: Int] = [:]
+        var nextHighlightLocationByID: [Highlight.ID: (bookIndex: Int, highlightIndex: Int)] = [:]
+        var highlights: [Highlight] = []
+        highlights.reserveCapacity(books.reduce(into: 0) { $0 += $1.highlights.count })
+
+        for (bookIndex, book) in books.enumerated() {
+            nextBookIndexByID[book.id] = bookIndex
+            for (highlightIndex, highlight) in book.highlights.enumerated() {
+                nextHighlightLocationByID[highlight.id] = (bookIndex, highlightIndex)
+                highlights.append(highlight)
+            }
+        }
+
+        highlights.sort { $0.createdAt > $1.createdAt }
+        bookIndexByID = nextBookIndexByID
+        highlightLocationByID = nextHighlightLocationByID
         recentHighlights = highlights
         highlightCount = highlights.count
+    }
+
+    private func postRemovedHighlights(_ highlightIDs: [Highlight.ID]) {
+        guard !highlightIDs.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: .overlineHighlightsRemoved,
+            object: nil,
+            userInfo: [OverlineNotificationUserInfoKey.highlightIDs: highlightIDs]
+        )
+    }
+
+    func flushPendingPersistence() async {
+        await persistenceTask?.value
     }
 
     private func cleanupSnapshotFilesIfNeeded() {
@@ -2282,12 +2409,16 @@ enum SampleData {
 }
 
 extension Date {
-    var overlineShortDate: String {
+    private static let overlineShortDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "M월d일(E) HH:mm"
-        return formatter.string(from: self)
+        return formatter
+    }()
+
+    var overlineShortDate: String {
+        Self.overlineShortDateFormatter.string(from: self)
     }
 }
 

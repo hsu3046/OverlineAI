@@ -24,6 +24,9 @@ struct InsightsView: View {
     @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
+        let selectedCount = selectedSourceCount
+        let visibleSavedInsights = filteredSavedInsights
+
         List {
             InsightWorkspaceHeader(
                 settings: llmSettings,
@@ -34,8 +37,8 @@ struct InsightsView: View {
             InsightComposer(
                 question: $question,
                 selectedPrompt: $selectedPrompt,
-                selectedCount: selectedSourceCount,
-                canSubmit: selectedSourceCount > 0 && !isGeneratingInsight,
+                selectedCount: selectedCount,
+                canSubmit: selectedCount > 0 && !isGeneratingInsight,
                 isSubmitting: isGeneratingInsight,
                 errorMessage: insightErrorMessage,
                 openPicker: { isSourcePickerPresented = true },
@@ -54,7 +57,7 @@ struct InsightsView: View {
                 OverlinePillSearchField(text: $savedInsightSearchText, prompt: "인사이트, 질문 검색")
                     .insightListRowChrome(top: 0, bottom: 10)
 
-                if filteredSavedInsights.isEmpty && pendingDeletedInsight == nil {
+                if visibleSavedInsights.isEmpty && pendingDeletedInsight == nil {
                     ContentUnavailableView(
                         "검색 결과 없음",
                         systemImage: "magnifyingglass",
@@ -66,7 +69,7 @@ struct InsightsView: View {
                     .padding(.vertical, 18)
                     .insightListRowChrome(top: 0, bottom: 16)
                 } else {
-                    ForEach(Array(filteredSavedInsights.enumerated()), id: \.element.id) { index, insight in
+                    ForEach(Array(visibleSavedInsights.enumerated()), id: \.element.id) { index, insight in
                         if pendingDeletedInsight?.visibleIndex == index {
                             OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
                                 .insightListRowChrome(top: 0, bottom: 12)
@@ -94,7 +97,7 @@ struct InsightsView: View {
                         .insightListRowChrome(top: 0, bottom: 12)
                     }
 
-                    if let pendingDeletedInsight, pendingDeletedInsight.visibleIndex >= filteredSavedInsights.count {
+                    if let pendingDeletedInsight, pendingDeletedInsight.visibleIndex >= visibleSavedInsights.count {
                         OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
                             .insightListRowChrome(top: 0, bottom: 12)
                     }
@@ -105,7 +108,6 @@ struct InsightsView: View {
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
-        .background(OverlineCanvasBackground().ignoresSafeArea())
         .onAppear {
             _ = applyInsightSeed(intentRouter.request)
         }
