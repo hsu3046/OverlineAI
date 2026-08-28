@@ -128,7 +128,7 @@ struct CaptureView: View {
                 if active {
                     scheduleCameraStart()
                 } else {
-                    applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
+                    applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
                     delayedCameraStartTask?.cancel()
                     delayedCameraStartTask = nil
                     isHighlighterGestureActive = false
@@ -164,7 +164,7 @@ struct CaptureView: View {
                         scheduleCameraStart()
                     }
                 } else {
-                    applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
+                    applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
                     delayedCameraStartTask?.cancel()
                     delayedCameraStartTask = nil
                     delayedCameraStopTask?.cancel()

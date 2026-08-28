@@ -2034,12 +2034,18 @@ final class ReadingLibrary {
             return false
         }
 
+        let restoredHighlightIDs = Set(snapshot.books.flatMap { $0.highlights.map(\.id) })
+        let removedHighlightIDs = books
+            .flatMap { $0.highlights.map(\.id) }
+            .filter { !restoredHighlightIDs.contains($0) }
+
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
             ? snapshot.selectedBookID
             : snapshot.books.first?.id
         persist()
+        postRemovedHighlights(removedHighlightIDs)
         cleanupSnapshotFilesIfNeeded()
         Self.deleteSnapshotBackup(key: Self.resetBackupKey)
         HighlightSnapshotStore.clearResetBackup()
