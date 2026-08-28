@@ -493,7 +493,7 @@ private struct InsightWorkspaceHeader: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("AI 설정")
+            .accessibilityLabel("설정")
             .accessibilityValue("\(settings.provider.title), \(settings.selectedModelTitle)")
         }
     }
@@ -524,6 +524,7 @@ private struct InsightSectionHeader: View {
 
 private struct LLMSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     let settings: LLMSettingsStore
     @State private var isTestingConnection = false
     @State private var connectionTestResult: LLMConnectionTestResult?
@@ -651,6 +652,24 @@ private struct LLMSettingsSheet: View {
                     }
                 }
 
+                Section("읽어주기") {
+                    NavigationLink {
+                        QuoteSpeechSettingsView(player: quoteSpeechPlayer)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("음성 선택")
+                                Text(quoteSpeechPlayer.selectedVoiceName(for: .korean))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        } icon: {
+                            Image(systemName: "speaker.wave.2")
+                        }
+                    }
+                }
+
                 Section("전송 안내") {
                     Text("선택한 글조각과 메모만 현재 AI 제공자로 전송됩니다. Overline은 캡처 내용을 자체 서버에 저장하지 않으며, 캡처 내용은 AI 학습에 사용되지 않습니다.")
                         .font(.caption)
@@ -669,7 +688,7 @@ private struct LLMSettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("AI 설정")
+            .navigationTitle("설정")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -782,6 +801,55 @@ private struct LLMSettingsSheet: View {
         }
 
         isTestingConnection = false
+    }
+}
+
+private struct QuoteSpeechSettingsView: View {
+    let player: QuoteSpeechPlayer
+
+    var body: some View {
+        Form {
+            ForEach(CaptureLanguage.allCases) { language in
+                Section(language.title) {
+                    Picker("음성", selection: voiceBinding(for: language)) {
+                        ForEach(player.voiceOptions(for: language)) { option in
+                            Text(option.pickerTitle)
+                                .tag(option.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+
+                    Button {
+                        player.togglePreview(for: language)
+                    } label: {
+                        Label(
+                            player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
+                            systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Label("iPhone에 설치된 음성만 표시됩니다.", systemImage: "iphone")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } footer: {
+                Text("고음질 음성은 설정 > 손쉬운 사용 > 읽기 및 말하기 > 음성에서 추가할 수 있습니다.")
+            }
+        }
+        .navigationTitle("읽어주기")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            player.stop()
+        }
+    }
+
+    private func voiceBinding(for language: CaptureLanguage) -> Binding<String> {
+        Binding(
+            get: { player.selectedVoiceIdentifier(for: language) },
+            set: { player.setSelectedVoiceIdentifier($0, for: language) }
+        )
     }
 }
 
