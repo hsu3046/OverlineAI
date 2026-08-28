@@ -622,7 +622,8 @@ struct CaptureView: View {
             bookSummary: book.summary,
             text: highlight.text,
             memo: highlight.memo,
-            existingTags: highlight.tags
+            existingTags: highlight.tags,
+            mode: .automaticAppend
         )
 
         captureMetricsLogger.info(

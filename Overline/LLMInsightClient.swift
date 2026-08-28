@@ -18,6 +18,11 @@ struct LLMInsightRequest {
     let sources: [LLMInsightSource]
 }
 
+enum LLMTagGenerationMode {
+    case automaticAppend
+    case manualRegeneration
+}
+
 struct LLMTagRequest {
     let provider: LLMProvider
     let modelID: String
@@ -28,6 +33,7 @@ struct LLMTagRequest {
     let text: String
     let memo: String
     let existingTags: [String]
+    let mode: LLMTagGenerationMode
 }
 
 struct LLMOCRCorrectionRequest {
@@ -679,15 +685,29 @@ struct LLMInsightClient {
     private func tagPrompt(for request: LLMTagRequest) -> String {
         let existingTags = request.existingTags.isEmpty ? "없음" : request.existingTags.joined(separator: ", ")
 
-        return """
-        이미 있는 태그:
-        \(existingTags)
+        switch request.mode {
+        case .automaticAppend:
+            return """
+            이미 있는 태그:
+            \(existingTags)
 
-        작업:
-        - 글조각을 나중에 다시 찾기 쉬운 태그 2-4개로 정리하세요.
-        - 기존 태그가 적합하면 재사용해도 됩니다.
-        - 책 전체 주제가 아니라, 선택된 글조각의 핵심 주제와 개념을 우선하세요.
-        """
+            작업:
+            - 글조각을 나중에 다시 찾기 쉬운 태그 2-4개로 정리하세요.
+            - 기존 태그가 적합하면 재사용해도 됩니다.
+            - 책 전체 주제가 아니라, 선택된 글조각의 핵심 주제와 개념을 우선하세요.
+            """
+        case .manualRegeneration:
+            return """
+            현재 태그:
+            \(existingTags)
+
+            작업:
+            - 현재 태그를 단순히 보강하지 말고, 이 글조각에 가장 적합한 최종 태그 묶음 2-4개를 새로 제안하세요.
+            - 현재 태그는 참고만 하며, 부정확하거나 중복되면 유지하지 마세요.
+            - 글조각 본문을 가장 중요한 근거로 사용하고, 메모와 책 정보는 문맥을 이해하는 데만 활용하세요.
+            - 책 전체 주제가 아니라, 선택된 글조각의 핵심 주제와 개념을 우선하세요.
+            """
+        }
     }
 
     private func modeSystemPrompt(for request: LLMInsightRequest) -> String {
