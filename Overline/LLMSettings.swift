@@ -174,6 +174,8 @@ final class LLMSettingsStore {
     private var authModes: [LLMProvider: LLMAuthMode]
     private var selectedModelIDs: [LLMProvider: String]
     private var rejectedCredentialKeys: Set<String>
+    @ObservationIgnored private var loadedAPIKeyProviders: Set<LLMProvider> = []
+    @ObservationIgnored private var loadedSubscriptionTokenProviders: Set<LLMProvider> = []
 
     init() {
         let defaults = UserDefaults.standard
@@ -186,30 +188,8 @@ final class LLMSettingsStore {
             provider = .openai
         }
 
-        apiKeys = Dictionary(
-            uniqueKeysWithValues: LLMProvider.allCases.map { provider in
-                let storedKey = Self.keychain.string(account: provider.rawValue) ?? ""
-                if !storedKey.trimmed.isEmpty {
-                    Self.keychain.set(storedKey, account: provider.rawValue)
-                }
-                return (provider, storedKey)
-            }
-        )
-
-        let subscriptionDecoder = JSONDecoder()
-        subscriptionTokens = Dictionary(
-            uniqueKeysWithValues: LLMProvider.allCases.map { provider in
-                guard
-                    let storedToken = Self.subscriptionKeychain.string(account: provider.rawValue),
-                    let tokenData = storedToken.data(using: .utf8),
-                    let token = try? subscriptionDecoder.decode(LLMSubscriptionToken.self, from: tokenData)
-                else {
-                    return (provider, LLMSubscriptionToken.empty)
-                }
-
-                return (provider, token)
-            }
-        )
+        apiKeys = [:]
+        subscriptionTokens = [:]
 
         authModes = Dictionary(
             uniqueKeysWithValues: LLMProvider.allCases.map { provider in
@@ -275,10 +255,12 @@ final class LLMSettingsStore {
     }
 
     func apiKey(for provider: LLMProvider) -> String {
-        apiKeys[provider] ?? ""
+        ensureAPIKeyLoaded(for: provider)
+        return apiKeys[provider] ?? ""
     }
 
     func setAPIKey(_ apiKey: String, for provider: LLMProvider) {
+        loadedAPIKeyProviders.insert(provider)
         apiKeys[provider] = apiKey
         Self.keychain.set(apiKey.trimmed, account: provider.rawValue)
         clearCredentialRejection(for: provider, mode: .apiKey)
@@ -300,10 +282,12 @@ final class LLMSettingsStore {
     }
 
     func subscriptionToken(for provider: LLMProvider) -> LLMSubscriptionToken {
-        subscriptionTokens[provider] ?? .empty
+        ensureSubscriptionTokenLoaded(for: provider)
+        return subscriptionTokens[provider] ?? .empty
     }
 
     func setSubscriptionToken(_ token: LLMSubscriptionToken, for provider: LLMProvider) {
+        loadedSubscriptionTokenProviders.insert(provider)
         subscriptionTokens[provider] = token
         clearCredentialRejection(for: provider, mode: .subscription)
 
@@ -377,6 +361,25 @@ final class LLMSettingsStore {
 
     private func saveProvider() {
         UserDefaults.standard.set(provider.rawValue, forKey: Self.providerKey)
+    }
+
+    private func ensureAPIKeyLoaded(for provider: LLMProvider) {
+        guard loadedAPIKeyProviders.insert(provider).inserted else { return }
+        apiKeys[provider] = Self.keychain.string(account: provider.rawValue) ?? ""
+    }
+
+    private func ensureSubscriptionTokenLoaded(for provider: LLMProvider) {
+        guard loadedSubscriptionTokenProviders.insert(provider).inserted else { return }
+        guard
+            let storedToken = Self.subscriptionKeychain.string(account: provider.rawValue),
+            let tokenData = storedToken.data(using: .utf8),
+            let token = try? JSONDecoder().decode(LLMSubscriptionToken.self, from: tokenData)
+        else {
+            subscriptionTokens[provider] = .empty
+            return
+        }
+
+        subscriptionTokens[provider] = token
     }
 
     private static let providerKey = "overline.llm.provider"

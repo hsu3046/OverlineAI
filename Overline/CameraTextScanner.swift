@@ -1119,6 +1119,13 @@ final class CameraTextScanner {
         }
     }
 
+    static func makePrepared() async -> CameraTextScanner {
+        let core = await Task.detached(priority: .userInitiated) {
+            CameraTextScannerCore()
+        }.value
+        return CameraTextScanner(core: core)
+    }
+
     var canUseLiveCamera: Bool {
         #if targetEnvironment(simulator)
         false
@@ -1152,7 +1159,8 @@ final class CameraTextScanner {
         status = .unavailable("시뮬레이터에서는 카메라 대신 목업 캡처를 사용합니다.")
         return
         #else
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        switch authorizationStatus {
         case .authorized:
             status = .running
             core.start()
@@ -1450,6 +1458,9 @@ struct CameraPreview: UIViewRepresentable {
         let view = CameraPreviewView()
         view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        if #available(iOS 26.0, *), view.previewLayer.isDeferredStartSupported {
+            view.previewLayer.isDeferredStartEnabled = false
+        }
         return view
     }
 
@@ -1509,7 +1520,10 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     var onFrozenFrame: ((UIImage) -> Void)?
     var onFailure: ((String) -> Void)?
 
-    private let sessionQueue = DispatchQueue(label: "aib.overline.camera.session")
+    private let sessionQueue = DispatchQueue(
+        label: "aib.overline.camera.session",
+        qos: .userInitiated
+    )
     private let visionQueue = DispatchQueue(label: "aib.overline.camera.vision", qos: .utility)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sampleBufferDelegate = CameraSampleBufferDelegate()
@@ -1583,6 +1597,8 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         sessionQueue.async { [weak self] in
             guard let self else { return }
 
+            guard !session.isRunning else { return }
+
             do {
                 if !isConfigured {
                     try configureSession()
@@ -1622,6 +1638,9 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     private func configureSession() throws {
         session.beginConfiguration()
         session.sessionPreset = .high
+        if #available(iOS 26.0, *) {
+            session.automaticallyRunsDeferredStart = true
+        }
 
         defer {
             session.commitConfiguration()
@@ -1646,6 +1665,9 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
+        if #available(iOS 26.0, *), videoOutput.isDeferredStartSupported {
+            videoOutput.isDeferredStartEnabled = true
+        }
         videoOutput.setSampleBufferDelegate(sampleBufferDelegate, queue: visionQueue)
 
         guard session.canAddOutput(videoOutput) else {

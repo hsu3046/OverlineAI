@@ -6,6 +6,7 @@ import UIKit
 struct LibraryView: View {
     @Environment(ReadingLibrary.self) private var library
     var rootResetToken = 0
+    var isActive = true
     @State private var presentedSheet: LibrarySheet?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
@@ -13,7 +14,16 @@ struct LibraryView: View {
     @State private var pendingDeletedHighlight: PendingHighlightUndo?
     @State private var undoDismissTask: Task<Void, Never>?
 
+    @ViewBuilder
     var body: some View {
+        if isActive {
+            activeContent
+        } else {
+            Color.clear
+        }
+    }
+
+    private var activeContent: some View {
         List {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
@@ -192,7 +202,6 @@ struct LibraryView: View {
         }
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
-        .background(OverlineCanvasBackground().ignoresSafeArea())
         .navigationDestination(isPresented: isBookNavigationPresented) {
             if let activeBookID {
                 ScrapbookView(bookID: activeBookID)
@@ -403,6 +412,8 @@ private struct HighlightBrowserSheet: View {
     @State private var undoDismissTask: Task<Void, Never>?
 
     var body: some View {
+        let visibleHighlights = filteredHighlights
+
         NavigationStack {
             VStack(spacing: 0) {
                 if !library.recentHighlights.isEmpty {
@@ -410,7 +421,7 @@ private struct HighlightBrowserSheet: View {
                         if !library.books.isEmpty {
                             OverlineBookSelectorButton(
                                 title: selectedBookFilterTitle,
-                                subtitle: "\(filteredHighlights.count)조각",
+                                subtitle: "\(visibleHighlights.count)조각",
                                 systemImage: selectedBookID == nil ? "tray.full" : "book.closed",
                                 height: 52,
                                 cornerRadius: 26,
@@ -429,7 +440,7 @@ private struct HighlightBrowserSheet: View {
                 }
 
                 List {
-                    ForEach(Array(filteredHighlights.enumerated()), id: \.element.id) { index, highlight in
+                    ForEach(Array(visibleHighlights.enumerated()), id: \.element.id) { index, highlight in
                         if pendingDeletedHighlight?.visibleIndex == index {
                             OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
                                 .listRowChrome(top: 0, bottom: 12)
@@ -455,12 +466,12 @@ private struct HighlightBrowserSheet: View {
                         .listRowChrome(top: 0, bottom: 12)
                     }
 
-                    if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= filteredHighlights.count {
+                    if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= visibleHighlights.count {
                         OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
                             .listRowChrome(top: 0, bottom: 12)
                     }
 
-                    if filteredHighlights.isEmpty && pendingDeletedHighlight == nil {
+                    if visibleHighlights.isEmpty && pendingDeletedHighlight == nil {
                         ContentUnavailableView(
                             searchText.trimmed.isEmpty ? "글조각 없음" : "검색 결과 없음",
                             systemImage: "text.viewfinder",
@@ -3185,7 +3196,6 @@ struct ScrapbookView: View {
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.hidden)
                 .overlineBottomMenuCompaction()
-                .background(OverlineCanvasBackground().ignoresSafeArea())
                 .navigationTitle(book.title)
                 .sheet(item: $presentedSheet) { sheet in
                     switch sheet {
@@ -3527,13 +3537,10 @@ struct ScrapbookCard: View {
                 ScrapbookCoverBackdrop(book: book, cornerRadius: 18)
             }
         }
-        .libraryGlassSurface(
+        .libraryCardSurface(
             cornerRadius: 18,
-            tint: Color.white.opacity(0.13),
-            fillOpacity: 0.08,
-            strokeOpacity: 0.34,
-            shadowOpacity: 0.05,
-            shadowRadius: 16
+            fillOpacity: book == nil ? 0.54 : 0.08,
+            strokeOpacity: 0.34
         )
     }
 
@@ -3553,6 +3560,7 @@ private struct ScrapbookCoverBackdrop: View {
         GeometryReader { proxy in
             ZStack {
                 book.coverTheme.gradient
+                    .opacity(0.22)
 
                 if let coverURL = book.coverURL {
                     AsyncImage(url: coverURL) { phase in
@@ -3569,9 +3577,7 @@ private struct ScrapbookCoverBackdrop: View {
                         }
                     }
                     .frame(width: proxy.size.width, height: proxy.size.height)
-                    .scaleEffect(1.12)
-                    .saturation(0.48)
-                    .blur(radius: 22, opaque: true)
+                    .opacity(0.26)
                 }
 
                 Color.white.opacity(0.78)
@@ -3614,64 +3620,20 @@ private struct QuoteSpeechButton: View {
 }
 
 private extension View {
-    @ViewBuilder
-    func libraryGlassSurface(
+    func libraryCardSurface(
         cornerRadius: CGFloat,
-        tint: Color = Color.white.opacity(0.12),
-        fillOpacity: Double = 0.07,
-        strokeOpacity: Double = 0.30,
-        shadowOpacity: Double = 0.05,
-        shadowRadius: CGFloat = 14
-    ) -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .background {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(fillOpacity))
-                }
-                .glassEffect(
-                    .regular.tint(tint),
-                    in: .rect(cornerRadius: cornerRadius)
-                )
-                .libraryGlassChrome(
-                    cornerRadius: cornerRadius,
-                    strokeOpacity: strokeOpacity,
-                    shadowOpacity: shadowOpacity,
-                    shadowRadius: shadowRadius
-                )
-        } else {
-            self
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .libraryGlassChrome(
-                    cornerRadius: cornerRadius,
-                    strokeOpacity: strokeOpacity,
-                    shadowOpacity: shadowOpacity,
-                    shadowRadius: shadowRadius
-                )
-        }
-    }
-
-    func libraryGlassChrome(
-        cornerRadius: CGFloat,
-        strokeOpacity: Double,
-        shadowOpacity: Double,
-        shadowRadius: CGFloat
+        fillOpacity: Double,
+        strokeOpacity: Double
     ) -> some View {
         self
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(fillOpacity))
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(Color.white.opacity(strokeOpacity), lineWidth: 1)
             }
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(strokeOpacity * 0.62), lineWidth: 0.6)
-                    .blur(radius: 0.2)
-                    .mask(alignment: .top) {
-                        Rectangle()
-                            .frame(height: 24)
-                    }
-            }
-            .shadow(color: Color.black.opacity(shadowOpacity), radius: shadowRadius, y: shadowRadius * 0.42)
     }
 }
 

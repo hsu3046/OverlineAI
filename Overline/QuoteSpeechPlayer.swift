@@ -39,14 +39,13 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var previewLanguage: CaptureLanguage?
     private(set) var selectedVoiceIdentifiers: [String: String] = [:]
 
-    @ObservationIgnored private let synthesizer = AVSpeechSynthesizer()
+    @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
+    @ObservationIgnored private var cachedVoices: [AVSpeechSynthesisVoice]?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
     @ObservationIgnored private let defaults = UserDefaults.standard
 
     override init() {
         super.init()
-        synthesizer.delegate = self
-        synthesizer.usesApplicationAudioSession = false
         loadVoiceSelections()
     }
 
@@ -66,7 +65,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
         currentUtterance = utterance
         activeHighlightID = highlight.id
-        synthesizer.speak(utterance)
+        activeSynthesizer().speak(utterance)
     }
 
     func togglePreview(for language: CaptureLanguage) {
@@ -82,7 +81,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
         currentUtterance = utterance
         previewLanguage = language
-        synthesizer.speak(utterance)
+        activeSynthesizer().speak(utterance)
     }
 
     func voiceOptions(for language: CaptureLanguage) -> [QuoteSpeechVoiceOption] {
@@ -162,8 +161,13 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    func invalidateVoiceCatalog() {
+        cachedVoices = nil
+    }
+
     func stop() {
-        if synthesizer.isSpeaking || synthesizer.isPaused {
+        if let synthesizer,
+           synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
         }
         currentUtterance = nil
@@ -224,7 +228,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         let localeIdentifier = language.speechLocaleIdentifier
         let languageCode = localeIdentifier.split(separator: "-").first.map(String.init) ?? localeIdentifier
 
-        return AVSpeechSynthesisVoice.speechVoices().filter { voice in
+        return availableVoices().filter { voice in
             voice.language.caseInsensitiveCompare(localeIdentifier) == .orderedSame
                 || voice.language.lowercased().hasPrefix("\(languageCode.lowercased())-")
         }
@@ -258,14 +262,32 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func loadVoiceSelections() {
         for language in CaptureLanguage.allCases {
-            let savedIdentifier = defaults.string(forKey: voiceDefaultsKey(for: language))
-            let resolvedIdentifier = savedIdentifier.flatMap { saved in
-                isVoiceAvailable(saved, for: language) ? saved : nil
-            } ?? QuoteSpeechVoiceIdentifier.systemAutomatic
-
-            selectedVoiceIdentifiers[language.rawValue] = resolvedIdentifier
-            defaults.set(resolvedIdentifier, forKey: voiceDefaultsKey(for: language))
+            selectedVoiceIdentifiers[language.rawValue] =
+                defaults.string(forKey: voiceDefaultsKey(for: language))
+                ?? QuoteSpeechVoiceIdentifier.systemAutomatic
         }
+    }
+
+    private func activeSynthesizer() -> AVSpeechSynthesizer {
+        if let synthesizer {
+            return synthesizer
+        }
+
+        let synthesizer = AVSpeechSynthesizer()
+        synthesizer.delegate = self
+        synthesizer.usesApplicationAudioSession = false
+        self.synthesizer = synthesizer
+        return synthesizer
+    }
+
+    private func availableVoices() -> [AVSpeechSynthesisVoice] {
+        if let cachedVoices {
+            return cachedVoices
+        }
+
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        cachedVoices = voices
+        return voices
     }
 
     private func isVoiceAvailable(_ identifier: String, for language: CaptureLanguage) -> Bool {

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -14,80 +15,117 @@ struct ContentView: View {
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     @State private var selectedTab: AppTab = .capture
     @State private var isBottomMenuCompact = false
-    @State private var isForwardTabTransition = true
     @State private var libraryRootResetToken = 0
+    @State private var cameraScanner: CameraTextScanner?
+    @State private var loadedTabs: Set<AppTab> = [.capture]
 
     var body: some View {
-        ZStack {
-            selectedTabContent
-                .id(selectedTab)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(selectedTabTransition)
-        }
-        .animation(OverlineMotion.tab, value: selectedTab)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Spacer(minLength: 0)
-                OverlineBottomMenu(
-                    selectedTab: selectedTab,
-                    isCompact: isBottomMenuCompact,
-                    selectTab: selectTab
-                )
-                Spacer(minLength: 0)
+        persistentTabContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    OverlineBottomMenu(
+                        selectedTab: selectedTab,
+                        isCompact: isBottomMenuCompact,
+                        selectTab: selectTab
+                    )
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
-        }
-        .tint(Color.overlineAccent)
-        .background(OverlineCanvasBackground().ignoresSafeArea())
-        .environment(\.setBottomMenuCompact, setBottomMenuCompact)
-        .onAppear {
-            recordAppOpen()
-            apply(intentRouter.request)
-        }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else {
+            .tint(Color.overlineAccent)
+            .background(OverlineCanvasBackground().ignoresSafeArea())
+            .environment(\.setBottomMenuCompact, setBottomMenuCompact)
+            .onAppear {
+                recordAppOpen()
+                apply(intentRouter.request)
+            }
+            .task {
+                guard cameraScanner == nil else { return }
+                cameraScanner = await CameraTextScanner.makePrepared()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else {
+                    quoteSpeechPlayer.stop()
+                    Task {
+                        await library.flushPendingPersistence()
+                    }
+                    return
+                }
+                quoteSpeechPlayer.invalidateVoiceCatalog()
+                recordAppOpen()
+            }
+            .onChange(of: selectedTab) { _, _ in
+                setBottomMenuCompact(false)
+                if selectedTab != .library {
+                    quoteSpeechPlayer.stop()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .overlineHighlightsRemoved)) { notification in
+                guard
+                    let activeHighlightID = quoteSpeechPlayer.activeHighlightID,
+                    let removedHighlightIDs = notification.userInfo?[OverlineNotificationUserInfoKey.highlightIDs]
+                        as? [Highlight.ID],
+                    removedHighlightIDs.contains(activeHighlightID)
+                else {
+                    return
+                }
                 quoteSpeechPlayer.stop()
-                return
             }
-            recordAppOpen()
-        }
-        .onChange(of: selectedTab) { _, _ in
-            setBottomMenuCompact(false)
-            if selectedTab != .library {
-                quoteSpeechPlayer.stop()
+            .onChange(of: intentRouter.request) { _, request in
+                apply(request)
             }
-        }
-        .onChange(of: library.books.flatMap(\.highlights).map(\.id)) { _, highlightIDs in
-            guard
-                let activeHighlightID = quoteSpeechPlayer.activeHighlightID,
-                !highlightIDs.contains(activeHighlightID)
-            else {
-                return
-            }
-            quoteSpeechPlayer.stop()
-        }
-        .onChange(of: intentRouter.request) { _, request in
-            apply(request)
-        }
     }
 
     @ViewBuilder
-    private var selectedTabContent: some View {
-        switch selectedTab {
-        case .capture:
-            NavigationStack {
-                CaptureView()
+    private var persistentTabContent: some View {
+        ZStack {
+            if loadedTabs.contains(.capture) {
+                persistentTabLayer(.capture) {
+                    NavigationStack {
+                        if let cameraScanner {
+                            CaptureView(cameraScanner: cameraScanner, isActive: selectedTab == .capture)
+                        } else {
+                            CameraStartupPlaceholder()
+                        }
+                    }
+                }
             }
-        case .library:
-            NavigationStack {
-                LibraryView(rootResetToken: libraryRootResetToken)
+
+            if loadedTabs.contains(.library) {
+                persistentTabLayer(.library) {
+                    NavigationStack {
+                        LibraryView(
+                            rootResetToken: libraryRootResetToken,
+                            isActive: selectedTab == .library
+                        )
+                    }
+                }
             }
-        case .insights:
-            NavigationStack {
-                InsightsView()
+
+            if loadedTabs.contains(.insights) {
+                persistentTabLayer(.insights) {
+                    NavigationStack {
+                        InsightsView(isActive: selectedTab == .insights)
+                    }
+                }
             }
         }
+    }
+
+    private func persistentTabLayer<Content: View>(
+        _ tab: AppTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isSelected = selectedTab == tab
+
+        return content()
+            .opacity(isSelected ? 1 : 0)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
+            .zIndex(isSelected ? 1 : 0)
     }
 
     private func apply(_ request: AppIntentRequest?) {
@@ -103,6 +141,13 @@ struct ContentView: View {
     }
 
     private func selectTab(_ tab: AppTab) {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+
         guard selectedTab != tab else {
             if tab == .library {
                 libraryRootResetToken += 1
@@ -111,11 +156,9 @@ struct ContentView: View {
             return
         }
 
-        isForwardTabTransition = tab.order > selectedTab.order
-        withAnimation(OverlineMotion.tab) {
-            selectedTab = tab
-            isBottomMenuCompact = false
-        }
+        loadedTabs.insert(tab)
+        selectedTab = tab
+        isBottomMenuCompact = false
     }
 
     private func recordAppOpen() {
@@ -125,11 +168,14 @@ struct ContentView: View {
         }
     }
 
-    private var selectedTabTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: isForwardTabTransition ? .trailing : .leading).combined(with: .opacity),
-            removal: .move(edge: isForwardTabTransition ? .leading : .trailing).combined(with: .opacity)
-        )
+}
+
+private struct CameraStartupPlaceholder: View {
+    var body: some View {
+        ProgressView()
+            .tint(Color.overlineAccent)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel("카메라 준비 중")
     }
 }
 
@@ -206,8 +252,6 @@ private struct OverlineBottomMenuItem: View {
                 }
         }
         .buttonStyle(.plain)
-        .animation(OverlineMotion.menu, value: isCompact)
-        .animation(OverlineMotion.tab, value: isSelected)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
@@ -313,21 +357,6 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var order: Int {
-        Self.allCases.firstIndex(of: self) ?? 0
-    }
-
-    @ViewBuilder
-    var rootView: some View {
-        switch self {
-        case .capture:
-            CaptureView()
-        case .library:
-            LibraryView()
-        case .insights:
-            InsightsView()
-        }
-    }
 }
 
 #Preview {
@@ -371,27 +400,10 @@ struct OverlineCanvasBackground: View {
 
 private struct OverlineCanvasTexture: View {
     var body: some View {
-        Canvas { context, size in
-            var grain = Path()
-            let spacing: CGFloat = 9
-            for y in stride(from: CGFloat.zero, through: size.height, by: spacing) {
-                for x in stride(from: CGFloat.zero, through: size.width, by: spacing) {
-                    let column = Int((x / spacing).rounded(.down))
-                    let row = Int((y / spacing).rounded(.down))
-                    guard (column + row).isMultiple(of: 3) else { continue }
-                    grain.addEllipse(in: CGRect(x: x, y: y, width: 0.65, height: 0.65))
-                }
-            }
-            context.fill(grain, with: .color(Color.white.opacity(0.06)))
-
-            var fibers = Path()
-            for y in stride(from: CGFloat(6), through: size.height, by: 22) {
-                fibers.move(to: CGPoint(x: 0, y: y))
-                fibers.addLine(to: CGPoint(x: size.width, y: y + 1.2))
-            }
-            context.stroke(fibers, with: .color(Color.overlineMutedInk.opacity(0.018)), lineWidth: 0.45)
-        }
+        Image("CanvasTexture")
+            .resizable(resizingMode: .tile)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

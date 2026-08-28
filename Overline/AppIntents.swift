@@ -132,6 +132,7 @@ struct AddReadingThoughtIntent: AppIntent {
         await MainActor.run {
             _ = ReadingLibrary.shared.addQuickThought(trimmed, bookID: book?.bookID)
         }
+        await ReadingLibrary.shared.flushPendingPersistence()
 
         if let book {
             return .result(dialog: "\(book.title)에 저장했어요.")

@@ -7,13 +7,15 @@ import UIKit
 private let captureMetricsLogger = Logger(subsystem: "aib.Overline", category: "CaptureMetrics")
 
 struct CaptureView: View {
+    let cameraScanner: CameraTextScanner
+    let isActive: Bool
+
     @Environment(ReadingLibrary.self) private var library
     @Environment(LLMSettingsStore.self) private var llmSettings
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedLineIDs: Set<Int> = []
     @State private var selectedCameraLineIDs: Set<CameraRecognizedTextLine.ID> = []
     @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var cameraScanner = CameraTextScanner()
     @State private var speechRecorder = SpeechMemoRecorder()
     @State private var memo = ""
     @State private var pageReferenceText = ""
@@ -99,7 +101,6 @@ struct CaptureView: View {
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .overlineBottomMenuCompaction()
-            .background(OverlineCanvasBackground().ignoresSafeArea())
             .task(id: selectedPhotoItem) {
                 await recognizeSelectedPhoto()
             }
@@ -107,7 +108,9 @@ struct CaptureView: View {
                 captureScreenOpenedAt = .now
                 captureMetricsLogger.info("capture_screen_opened")
                 prefillTagsFromSelectedBookIfNeeded()
-                scheduleCameraStart()
+                if isActive {
+                    scheduleCameraStart()
+                }
             }
             .onDisappear {
                 applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
@@ -120,6 +123,18 @@ struct CaptureView: View {
                 isHighlighterGestureActive = false
                 speechRecorder.cancel()
                 scheduleCameraStopAfterGrace()
+            }
+            .onChange(of: isActive) { _, active in
+                if active {
+                    scheduleCameraStart()
+                } else {
+                    applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
+                    delayedCameraStartTask?.cancel()
+                    delayedCameraStartTask = nil
+                    isHighlighterGestureActive = false
+                    speechRecorder.cancel()
+                    scheduleCameraStopAfterGrace()
+                }
             }
             .onChange(of: speechRecorder.transcript) { _, transcript in
                 guard speechRecorder.isRecording else { return }
@@ -144,8 +159,18 @@ struct CaptureView: View {
                 scrollMemoIntoKeyboardComfort(using: scrollProxy)
             }
             .onChange(of: scenePhase) { _, phase in
-                guard phase != .active else { return }
-                applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
+                if phase == .active {
+                    if isActive {
+                        scheduleCameraStart()
+                    }
+                } else {
+                    applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
+                    delayedCameraStartTask?.cancel()
+                    delayedCameraStartTask = nil
+                    delayedCameraStopTask?.cancel()
+                    delayedCameraStopTask = nil
+                    cameraScanner.stop(clearRecognitionResults: false)
+                }
             }
             .sheet(item: $presentedSheet) { sheet in
                 switch sheet {
@@ -189,15 +214,24 @@ struct CaptureView: View {
     }
 
     private func scheduleCameraStart() {
+        guard isActive, scenePhase == .active else { return }
         delayedCameraStopTask?.cancel()
         delayedCameraStopTask = nil
         delayedCameraStartTask?.cancel()
+
+        guard isHighlighterGestureActive else {
+            delayedCameraStartTask = nil
+            cameraScanner.start()
+            return
+        }
+
         delayedCameraStartTask = Task { @MainActor in
             while isHighlighterGestureActive {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard !Task.isCancelled else { return }
             }
 
+            guard isActive, scenePhase == .active else { return }
             cameraScanner.start()
             delayedCameraStartTask = nil
         }
@@ -207,7 +241,7 @@ struct CaptureView: View {
         delayedCameraStopTask?.cancel()
         delayedCameraStopTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !isActive else { return }
 
             cameraScanner.stop(clearRecognitionResults: false)
             delayedCameraStopTask = nil
@@ -3138,7 +3172,7 @@ private enum MemoNoteMetrics {
 
 #Preview {
     NavigationStack {
-        CaptureView()
+        CaptureView(cameraScanner: CameraTextScanner(), isActive: true)
             .navigationTitle("캡처")
     }
     .environment(ReadingLibrary.preview)
