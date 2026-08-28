@@ -161,6 +161,10 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    func invalidateVoiceCatalog() {
+        cachedVoices = nil
+    }
+
     func stop() {
         if let synthesizer,
            synthesizer.isSpeaking || synthesizer.isPaused {

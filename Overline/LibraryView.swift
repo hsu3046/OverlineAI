@@ -6,6 +6,7 @@ import UIKit
 struct LibraryView: View {
     @Environment(ReadingLibrary.self) private var library
     var rootResetToken = 0
+    var isActive = true
     @State private var presentedSheet: LibrarySheet?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
@@ -13,7 +14,16 @@ struct LibraryView: View {
     @State private var pendingDeletedHighlight: PendingHighlightUndo?
     @State private var undoDismissTask: Task<Void, Never>?
 
+    @ViewBuilder
     var body: some View {
+        if isActive {
+            activeContent
+        } else {
+            Color.clear
+        }
+    }
+
+    private var activeContent: some View {
         List {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {

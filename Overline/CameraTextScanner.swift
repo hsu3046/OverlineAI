@@ -1662,7 +1662,9 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         session.addInput(input)
 
         videoOutput.alwaysDiscardsLateVideoFrames = true
-        videoOutput.videoSettings = [:]
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
         if #available(iOS 26.0, *), videoOutput.isDeferredStartSupported {
             videoOutput.isDeferredStartEnabled = true
         }

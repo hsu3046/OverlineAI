@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -53,6 +54,7 @@ struct ContentView: View {
                     }
                     return
                 }
+                quoteSpeechPlayer.invalidateVoiceCatalog()
                 recordAppOpen()
             }
             .onChange(of: selectedTab) { _, _ in
@@ -95,7 +97,10 @@ struct ContentView: View {
             if loadedTabs.contains(.library) {
                 persistentTabLayer(.library) {
                     NavigationStack {
-                        LibraryView(rootResetToken: libraryRootResetToken)
+                        LibraryView(
+                            rootResetToken: libraryRootResetToken,
+                            isActive: selectedTab == .library
+                        )
                     }
                 }
             }
@@ -103,7 +108,7 @@ struct ContentView: View {
             if loadedTabs.contains(.insights) {
                 persistentTabLayer(.insights) {
                     NavigationStack {
-                        InsightsView()
+                        InsightsView(isActive: selectedTab == .insights)
                     }
                 }
             }
@@ -136,6 +141,13 @@ struct ContentView: View {
     }
 
     private func selectTab(_ tab: AppTab) {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+
         guard selectedTab != tab else {
             if tab == .library {
                 libraryRootResetToken += 1

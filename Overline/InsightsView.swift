@@ -8,6 +8,7 @@ struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
     @Environment(AppIntentRouter.self) private var intentRouter
     @Environment(LLMSettingsStore.self) private var llmSettings
+    var isActive = true
     @State private var question = ""
     @State private var selectedPrompt: InsightPrompt = .expand
     @State private var selectedBookIDs: Set<ReadingBook.ID> = []
@@ -23,11 +24,20 @@ struct InsightsView: View {
     @State private var pendingDeletedInsight: PendingInsightUndo?
     @State private var undoDismissTask: Task<Void, Never>?
 
+    @ViewBuilder
     var body: some View {
+        if isActive {
+            activeContent
+        } else {
+            Color.clear
+        }
+    }
+
+    private var activeContent: some View {
         let selectedCount = selectedSourceCount
         let visibleSavedInsights = filteredSavedInsights
 
-        List {
+        return List {
             InsightWorkspaceHeader(
                 settings: llmSettings,
                 openSettings: { isLLMSettingsPresented = true }
