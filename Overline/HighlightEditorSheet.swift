@@ -4,6 +4,7 @@ import UIKit
 struct HighlightEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
+    @Environment(LLMSettingsStore.self) private var llmSettings
 
     let highlightID: Highlight.ID
     var deleteHighlight: ((Highlight.ID) -> Void)? = nil
@@ -18,10 +19,11 @@ struct HighlightEditorSheet: View {
     @State private var isReviewed = false
     @State private var showsDeleteConfirmation = false
     @State private var isBookSelectionPresented = false
-    @State private var llmSettings = LLMSettingsStore()
     @State private var isCorrectingOCR = false
     @State private var correctionProposal: OCRCorrectionProposal?
-    @State private var correctionMessage: String?
+    @State private var isRegeneratingTags = false
+    @State private var tagRegenerationProposal: TagRegenerationProposal?
+    @State private var aiAlert: EditorAIAlert?
 
     var body: some View {
         NavigationStack {
@@ -102,10 +104,20 @@ struct HighlightEditorSheet: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.thinMaterial)
             }
-            .alert("AI 교정", isPresented: correctionMessageBinding) {
-                Button("확인", role: .cancel) {}
-            } message: {
-                Text(correctionMessage ?? "")
+            .sheet(item: $tagRegenerationProposal) { proposal in
+                TagRegenerationPreviewSheet(proposal: proposal) {
+                    applyTagRegeneration(proposal)
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.thinMaterial)
+            }
+            .alert(item: $aiAlert) { alert in
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .cancel(Text("확인"))
+                )
             }
             .onAppear {
                 loadHighlight()
@@ -179,7 +191,14 @@ struct HighlightEditorSheet: View {
 
     private var tagsEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "태그")
+            HStack(spacing: 8) {
+                OverlineEditorLabel(title: "태그")
+
+                Spacer(minLength: 0)
+
+                tagRegenerationButton
+                    .padding(.trailing, 14)
+            }
 
             TextField("태그", text: $tagsText)
                 .font(.title3.weight(.medium))
@@ -189,6 +208,31 @@ struct HighlightEditorSheet: View {
                 .frame(minHeight: formControlHeight, alignment: .leading)
                 .overlineGlassControl(cornerRadius: formControlCornerRadius)
         }
+    }
+
+    private var tagRegenerationButton: some View {
+        Button {
+            requestTagRegeneration()
+        } label: {
+            ZStack {
+                if isRegeneratingTags {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.overlineAccent)
+                } else {
+                    Image(systemName: "sparkles")
+                        .font(.body.weight(.semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.overlineAccent)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(text.trimmed.isEmpty || isRegeneratingTags)
+        .opacity(text.trimmed.isEmpty ? 0.32 : 1)
+        .accessibilityLabel("AI 태그 재생성")
     }
 
     private var toneEditor: some View {
@@ -248,19 +292,6 @@ struct HighlightEditorSheet: View {
     private var selectedBook: ReadingBook? {
         guard let selectedBookID else { return library.books.first }
         return library.book(with: selectedBookID) ?? library.books.first
-    }
-
-    private var correctionMessageBinding: Binding<Bool> {
-        Binding(
-            get: {
-                correctionMessage != nil
-            },
-            set: { isPresented in
-                if !isPresented {
-                    correctionMessage = nil
-                }
-            }
-        )
     }
 
     private var formControlHeight: CGFloat {
@@ -325,14 +356,14 @@ struct HighlightEditorSheet: View {
         let trimmedText = sourceText.trimmed
         guard !trimmedText.isEmpty else { return }
 
-        guard let configuration = llmSettings.lightweightCorrectionConfiguration else {
-            correctionMessage = "AI 설정에서 OpenAI, Claude 또는 Gemini를 먼저 연결해 주세요."
+        guard let configuration = llmSettings.activeConfiguration else {
+            showAIAlert(title: "AI 교정", message: selectedAISetupMessage)
             return
         }
 
         let book = selectedBook
         isCorrectingOCR = true
-        correctionMessage = nil
+        aiAlert = nil
 
         Task { @MainActor in
             defer { isCorrectingOCR = false }
@@ -350,12 +381,12 @@ struct HighlightEditorSheet: View {
                 )
 
                 guard text == sourceText else {
-                    correctionMessage = "글조각이 바뀌어서 교정 제안을 적용하지 않았어요."
+                    showAIAlert(title: "AI 교정", message: "글조각이 바뀌어서 교정 제안을 적용하지 않았어요.")
                     return
                 }
 
                 guard result.correctedText != trimmedText else {
-                    correctionMessage = "교정할 부분을 찾지 못했어요."
+                    showAIAlert(title: "AI 교정", message: "교정할 부분을 찾지 못했어요.")
                     return
                 }
 
@@ -366,24 +397,152 @@ struct HighlightEditorSheet: View {
                     risk: result.risk
                 )
             } catch {
-                correctionMessage = error.localizedDescription
+                llmSettings.handleRequestError(error, configuration: configuration)
+                showAIAlert(title: "AI 교정", message: error.localizedDescription)
             }
         }
     }
 
     private func applyCorrection(_ proposal: OCRCorrectionProposal) {
         guard text == proposal.sourceText else {
-            correctionMessage = "글조각이 바뀌어서 교정을 적용하지 않았어요."
+            showAIAlert(title: "AI 교정", message: "글조각이 바뀌어서 교정을 적용하지 않았어요.")
             return
         }
 
         text = proposal.correctedText
         correctionProposal = nil
     }
+
+    private func requestTagRegeneration() {
+        let snapshot = TagRegenerationSnapshot(
+            text: text,
+            memo: memo,
+            tagsText: tagsText,
+            selectedBookID: selectedBookID
+        )
+        let trimmedText = snapshot.text.trimmed
+        guard !trimmedText.isEmpty else { return }
+
+        guard let configuration = llmSettings.activeConfiguration else {
+            showAIAlert(title: "AI 태그", message: selectedAISetupMessage)
+            return
+        }
+
+        let book = selectedBook
+        let currentTags = editorTags(from: snapshot.tagsText)
+        isRegeneratingTags = true
+        aiAlert = nil
+
+        Task { @MainActor in
+            defer { isRegeneratingTags = false }
+
+            do {
+                let suggestedTags = try await LLMInsightClient().generateTags(
+                    LLMTagRequest(
+                        provider: configuration.provider,
+                        modelID: configuration.modelID,
+                        credential: configuration.credential,
+                        bookTitle: book?.title ?? "",
+                        bookAuthor: book?.author ?? "",
+                        bookSummary: book?.summary ?? "",
+                        text: trimmedText,
+                        memo: snapshot.memo.trimmed,
+                        existingTags: currentTags,
+                        mode: .manualRegeneration
+                    )
+                )
+
+                guard currentTagRegenerationSnapshot == snapshot else {
+                    showAIAlert(title: "AI 태그", message: "편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.")
+                    return
+                }
+
+                guard !suggestedTags.isEmpty else {
+                    showAIAlert(title: "AI 태그", message: "추천할 태그를 찾지 못했어요.")
+                    return
+                }
+
+                guard canonicalTags(currentTags) != canonicalTags(suggestedTags) else {
+                    showAIAlert(title: "AI 태그", message: "현재 태그가 이 글조각에 잘 맞아요.")
+                    return
+                }
+
+                tagRegenerationProposal = TagRegenerationProposal(
+                    snapshot: snapshot,
+                    currentTags: currentTags,
+                    suggestedTags: suggestedTags
+                )
+            } catch {
+                llmSettings.handleRequestError(error, configuration: configuration)
+                showAIAlert(title: "AI 태그", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func applyTagRegeneration(_ proposal: TagRegenerationProposal) {
+        guard currentTagRegenerationSnapshot == proposal.snapshot else {
+            showAIAlert(title: "AI 태그", message: "편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.")
+            return
+        }
+
+        tagsText = proposal.suggestedTags.joined(separator: " ")
+        tagRegenerationProposal = nil
+    }
+
+    private var currentTagRegenerationSnapshot: TagRegenerationSnapshot {
+        TagRegenerationSnapshot(
+            text: text,
+            memo: memo,
+            tagsText: tagsText,
+            selectedBookID: selectedBookID
+        )
+    }
+
+    private var selectedAISetupMessage: String {
+        let provider = llmSettings.provider
+        if llmSettings.isCredentialRejected(for: provider) {
+            return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
+        }
+
+        switch llmSettings.authMode(for: provider) {
+        case .apiKey:
+            return "AI 설정에서 선택한 \(provider.title) API 키를 입력해 주세요."
+        case .subscription:
+            return "AI 설정에서 선택한 \(provider.title) 구독 토큰을 연결해 주세요."
+        }
+    }
+
+    private func showAIAlert(title: String, message: String) {
+        aiAlert = EditorAIAlert(title: title, message: message)
+    }
 }
 
 private func editorPageNumber(from value: String) -> String {
     String(value.filter { $0.isNumber }.prefix(4))
+}
+
+private func editorTags(from value: String) -> [String] {
+    var seen = Set<String>()
+
+    return value
+        .split { character in
+            character.isWhitespace || character == ","
+        }
+        .compactMap { rawTag in
+            let content = String(rawTag)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+                .trimmed
+            guard !content.isEmpty else { return nil }
+
+            let tag = "#\(content.replacingOccurrences(of: " ", with: ""))"
+            let key = tag.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return tag
+        }
+}
+
+private func canonicalTags(_ tags: [String]) -> Set<String> {
+    Set(tags.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "#")).lowercased() })
 }
 
 private struct OCRCorrectionProposal: Identifiable, Equatable {
@@ -392,6 +551,26 @@ private struct OCRCorrectionProposal: Identifiable, Equatable {
     let correctedText: String
     let changes: [String]
     let risk: String
+}
+
+private struct EditorAIAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+private struct TagRegenerationSnapshot: Equatable {
+    let text: String
+    let memo: String
+    let tagsText: String
+    let selectedBookID: ReadingBook.ID?
+}
+
+private struct TagRegenerationProposal: Identifiable, Equatable {
+    let id = UUID()
+    let snapshot: TagRegenerationSnapshot
+    let currentTags: [String]
+    let suggestedTags: [String]
 }
 
 private struct OCRCorrectionPreviewSheet: View {
@@ -482,7 +661,63 @@ private struct OCRCorrectionPreviewSheet: View {
     }
 }
 
+private struct TagRegenerationPreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let proposal: TagRegenerationProposal
+    let apply: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                OverlineSheetHeader(title: "AI 태그") {
+                    OverlineSheetIconButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "취소",
+                        tint: Color.overlineMutedInk.opacity(0.72),
+                        font: .title3.weight(.semibold)
+                    ) {
+                        dismiss()
+                    }
+                } trailing: {
+                    OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "적용") {
+                        apply()
+                        dismiss()
+                    }
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        tagCard(title: "새 태그", tags: proposal.suggestedTags, isPrimary: true)
+                        tagCard(title: "현재 태그", tags: proposal.currentTags, isPrimary: false)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    .padding(.bottom, 40)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        }
+    }
+
+    private func tagCard(title: String, tags: [String], isPrimary: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            OverlineEditorLabel(title: title)
+                .padding(.leading, 0)
+
+            Text(tags.isEmpty ? "없음" : tags.joined(separator: "  "))
+                .font(.title3.weight(isPrimary ? .semibold : .medium))
+                .foregroundStyle(isPrimary ? Color.overlineInk : Color.overlineMutedInk.opacity(0.78))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
+                .overlineGlassControl(cornerRadius: 22)
+        }
+    }
+}
+
 #Preview {
     HighlightEditorSheet(highlightID: SampleData.books[0].highlights[0].id)
         .environment(ReadingLibrary.preview)
+        .environment(LLMSettingsStore())
 }

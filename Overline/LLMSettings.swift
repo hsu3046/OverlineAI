@@ -64,19 +64,6 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         modelOptions.first?.id ?? ""
     }
 
-    var lightweightTagModelID: String? {
-        switch self {
-        case .anthropic:
-            return "claude-haiku-4-5-20251001"
-        case .openai:
-            return "gpt-5.4-mini"
-        case .gemini:
-            return "gemini-3.1-flash-lite"
-        case .openrouter:
-            return nil
-        }
-    }
-
     var modelOptions: [LLMModelOption] {
         switch self {
         case .openrouter:
@@ -152,7 +139,7 @@ struct LLMSubscriptionToken: Codable, Equatable {
     }
 }
 
-enum LLMAuthCredential {
+enum LLMAuthCredential: Equatable {
     case apiKey(String)
     case subscription(LLMSubscriptionToken)
 
@@ -166,7 +153,7 @@ enum LLMAuthCredential {
     }
 }
 
-struct LLMTagProviderConfiguration {
+struct LLMTagProviderConfiguration: Equatable {
     let provider: LLMProvider
     let modelID: String
     let credential: LLMAuthCredential
@@ -186,6 +173,7 @@ final class LLMSettingsStore {
     private(set) var subscriptionTokens: [LLMProvider: LLMSubscriptionToken]
     private var authModes: [LLMProvider: LLMAuthMode]
     private var selectedModelIDs: [LLMProvider: String]
+    private var rejectedCredentialKeys: Set<String>
 
     init() {
         let defaults = UserDefaults.standard
@@ -244,6 +232,15 @@ final class LLMSettingsStore {
                 return (provider, provider.defaultModelID)
             }
         )
+
+        rejectedCredentialKeys = Set(
+            LLMProvider.allCases.flatMap { provider in
+                LLMAuthMode.allCases.compactMap { mode in
+                    let key = Self.rejectedCredentialKey(for: provider, mode: mode)
+                    return defaults.bool(forKey: key) ? key : nil
+                }
+            }
+        )
     }
 
     var selectedModelID: String {
@@ -254,21 +251,13 @@ final class LLMSettingsStore {
         provider.modelOptions.first { $0.id == selectedModelID }?.title ?? selectedModelID
     }
 
-    var lightweightTagConfiguration: LLMTagProviderConfiguration? {
-        for provider in [LLMProvider.anthropic, .openai, .gemini] {
-            guard let modelID = provider.lightweightTagModelID, isReady(for: provider) else { continue }
-            return LLMTagProviderConfiguration(
-                provider: provider,
-                modelID: modelID,
-                credential: credential(for: provider)
-            )
-        }
-
-        return nil
-    }
-
-    var lightweightCorrectionConfiguration: LLMTagProviderConfiguration? {
-        lightweightTagConfiguration
+    var activeConfiguration: LLMTagProviderConfiguration? {
+        guard isReady(for: provider) else { return nil }
+        return LLMTagProviderConfiguration(
+            provider: provider,
+            modelID: selectedModelID,
+            credential: credential(for: provider)
+        )
     }
 
     func setSelectedModelID(_ modelID: String) {
@@ -276,11 +265,13 @@ final class LLMSettingsStore {
         guard !trimmedModelID.isEmpty else {
             selectedModelIDs[provider] = provider.defaultModelID
             UserDefaults.standard.set(provider.defaultModelID, forKey: Self.modelKey(for: provider))
+            clearCredentialRejection(for: provider, mode: authMode(for: provider))
             return
         }
 
         selectedModelIDs[provider] = trimmedModelID
         UserDefaults.standard.set(trimmedModelID, forKey: Self.modelKey(for: provider))
+        clearCredentialRejection(for: provider, mode: authMode(for: provider))
     }
 
     func apiKey(for provider: LLMProvider) -> String {
@@ -290,6 +281,7 @@ final class LLMSettingsStore {
     func setAPIKey(_ apiKey: String, for provider: LLMProvider) {
         apiKeys[provider] = apiKey
         Self.keychain.set(apiKey.trimmed, account: provider.rawValue)
+        clearCredentialRejection(for: provider, mode: .apiKey)
     }
 
     func hasAPIKey(for provider: LLMProvider) -> Bool {
@@ -313,6 +305,7 @@ final class LLMSettingsStore {
 
     func setSubscriptionToken(_ token: LLMSubscriptionToken, for provider: LLMProvider) {
         subscriptionTokens[provider] = token
+        clearCredentialRejection(for: provider, mode: .subscription)
 
         guard token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty else {
             Self.subscriptionKeychain.delete(account: provider.rawValue)
@@ -327,13 +320,17 @@ final class LLMSettingsStore {
         provider.supportsSubscriptionAuth && subscriptionToken(for: provider).hasAccessToken
     }
 
-    func isReady(for provider: LLMProvider) -> Bool {
+    func hasCredential(for provider: LLMProvider) -> Bool {
         switch authMode(for: provider) {
         case .apiKey:
             return hasAPIKey(for: provider)
         case .subscription:
             return hasSubscriptionToken(for: provider)
         }
+    }
+
+    func isReady(for provider: LLMProvider) -> Bool {
+        hasCredential(for: provider) && !isCredentialRejected(for: provider)
     }
 
     func credential(for provider: LLMProvider) -> LLMAuthCredential {
@@ -343,6 +340,39 @@ final class LLMSettingsStore {
         case .subscription:
             return .subscription(subscriptionToken(for: provider))
         }
+    }
+
+    func isCredentialRejected(for provider: LLMProvider) -> Bool {
+        rejectedCredentialKeys.contains(
+            Self.rejectedCredentialKey(for: provider, mode: authMode(for: provider))
+        )
+    }
+
+    func handleRequestError(
+        _ error: Error,
+        configuration: LLMTagProviderConfiguration
+    ) {
+        guard
+            case .requestFailed(let statusCode, _) = error as? LLMInsightError,
+            [401, 403].contains(statusCode),
+            isCurrent(configuration)
+        else {
+            return
+        }
+
+        let provider = configuration.provider
+        let mode = configuration.credential.mode
+        let key = Self.rejectedCredentialKey(for: provider, mode: mode)
+        rejectedCredentialKeys.insert(key)
+        UserDefaults.standard.set(true, forKey: key)
+    }
+
+    func handleRequestSuccess(configuration: LLMTagProviderConfiguration) {
+        guard isCurrent(configuration) else { return }
+        clearCredentialRejection(
+            for: configuration.provider,
+            mode: configuration.credential.mode
+        )
     }
 
     private func saveProvider() {
@@ -357,6 +387,23 @@ final class LLMSettingsStore {
 
     private static func authModeKey(for provider: LLMProvider) -> String {
         "overline.llm.authMode.\(provider.rawValue)"
+    }
+
+    private func clearCredentialRejection(for provider: LLMProvider, mode: LLMAuthMode) {
+        let key = Self.rejectedCredentialKey(for: provider, mode: mode)
+        rejectedCredentialKeys.remove(key)
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private func isCurrent(_ configuration: LLMTagProviderConfiguration) -> Bool {
+        let currentModelID = selectedModelIDs[configuration.provider]
+            ?? configuration.provider.defaultModelID
+        return currentModelID == configuration.modelID
+            && credential(for: configuration.provider) == configuration.credential
+    }
+
+    private static func rejectedCredentialKey(for provider: LLMProvider, mode: LLMAuthMode) -> String {
+        "overline.llm.credentialRejected.\(provider.rawValue).\(mode.rawValue)"
     }
 
     private static func normalizedModelID(_ modelID: String, for provider: LLMProvider) -> String {

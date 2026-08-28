@@ -7,13 +7,13 @@ private let insightMetricsLogger = Logger(subsystem: "aib.Overline", category: "
 struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
     @Environment(AppIntentRouter.self) private var intentRouter
+    @Environment(LLMSettingsStore.self) private var llmSettings
     @State private var question = ""
     @State private var selectedPrompt: InsightPrompt = .expand
     @State private var selectedBookIDs: Set<ReadingBook.ID> = []
     @State private var selectedHighlightIDs: Set<Highlight.ID> = []
     @State private var isSourcePickerPresented = false
     @State private var isLLMSettingsPresented = false
-    @State private var llmSettings = LLMSettingsStore()
     @State private var isGeneratingInsight = false
     @State private var insightErrorMessage: String?
     @State private var showsInsightSavedAlert = false
@@ -326,8 +326,13 @@ struct InsightsView: View {
             return
         }
 
-        let provider = llmSettings.provider
-        let modelID = llmSettings.selectedModelID
+        let configuration = LLMTagProviderConfiguration(
+            provider: llmSettings.provider,
+            modelID: llmSettings.selectedModelID,
+            credential: llmSettings.credential(for: llmSettings.provider)
+        )
+        let provider = configuration.provider
+        let modelID = configuration.modelID
         let sourceCount = payload.sources.count
         let category = selectedPrompt.rawValue
         let startedAt = Date()
@@ -347,7 +352,7 @@ struct InsightsView: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    credential: llmSettings.credential(for: provider),
+                    credential: configuration.credential,
                     category: selectedPrompt.title,
                     instruction: selectedPrompt.llmInstruction,
                     userPrompt: prompt,
@@ -379,6 +384,7 @@ struct InsightsView: View {
             )
             showsInsightSavedAlert = true
         } catch {
+            llmSettings.handleRequestError(error, configuration: configuration)
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
                 provider: provider,
@@ -404,6 +410,10 @@ struct InsightsView: View {
     }
 
     private func missingCredentialMessage(for provider: LLMProvider) -> String {
+        if llmSettings.isCredentialRejected(for: provider) {
+            return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
+        }
+
         switch llmSettings.authMode(for: provider) {
         case .apiKey:
             return "\(provider.title) API 키를 먼저 입력해 주세요."
@@ -488,7 +498,7 @@ private struct InsightWorkspaceHeader: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("AI 설정")
+            .accessibilityLabel("설정")
             .accessibilityValue("\(settings.provider.title), \(settings.selectedModelTitle)")
         }
     }
@@ -519,6 +529,7 @@ private struct InsightSectionHeader: View {
 
 private struct LLMSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     let settings: LLMSettingsStore
     @State private var isTestingConnection = false
     @State private var connectionTestResult: LLMConnectionTestResult?
@@ -628,9 +639,9 @@ private struct LLMSettingsSheet: View {
                             }
                         }
                     }
-                    .disabled(isTestingConnection || !settings.isReady(for: settings.provider))
+                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
 
-                    if !settings.isReady(for: settings.provider) {
+                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
                         Text(connectionSetupHint)
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -643,6 +654,24 @@ private struct LLMSettingsSheet: View {
                         )
                         .font(.caption)
                         .foregroundStyle(connectionTestResult.isSuccess ? Color.overlineAccent : Color.overlineCoral)
+                    }
+                }
+
+                Section("읽어주기") {
+                    NavigationLink {
+                        QuoteSpeechSettingsView(player: quoteSpeechPlayer)
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("음성 선택")
+                                Text(quoteSpeechPlayer.selectedVoiceName(for: .korean))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        } icon: {
+                            Image(systemName: "speaker.wave.2")
+                        }
                     }
                 }
 
@@ -664,7 +693,7 @@ private struct LLMSettingsSheet: View {
                     }
                 }
             }
-            .navigationTitle("AI 설정")
+            .navigationTitle("설정")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -702,6 +731,10 @@ private struct LLMSettingsSheet: View {
     }
 
     private var connectionSetupHint: String {
+        if settings.isCredentialRejected(for: settings.provider) {
+            return "\(settings.provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. 토큰·API 키 또는 모델을 다시 확인해 주세요."
+        }
+
         switch settings.authMode(for: settings.provider) {
         case .apiKey:
             return "\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다."
@@ -713,10 +746,17 @@ private struct LLMSettingsSheet: View {
     @MainActor
     private func testConnection() async {
         guard !isTestingConnection else { return }
-        guard settings.isReady(for: settings.provider) else { return }
+        guard settings.hasCredential(for: settings.provider) else { return }
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
+        let modelTitle = settings.selectedModelTitle
+        let configuration = LLMTagProviderConfiguration(
+            provider: provider,
+            modelID: modelID,
+            credential: settings.credential(for: provider)
+        )
+        let authMode = configuration.credential.mode
         let startedAt = Date()
 
         isTestingConnection = true
@@ -730,7 +770,7 @@ private struct LLMSettingsSheet: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    credential: settings.credential(for: provider),
+                    credential: configuration.credential,
                     category: "연결 테스트",
                     instruction: "연결이 정상인지 확인하기 위해 한 문장으로만 답하세요.",
                     userPrompt: "Overline AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
@@ -747,9 +787,10 @@ private struct LLMSettingsSheet: View {
             )
 
             let preview = String(response.trimmed.prefix(120))
+            settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: preview.isEmpty ? "연결 확인 완료" : preview
+                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(preview.isEmpty ? "연결 확인 완료" : preview)"
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -759,9 +800,10 @@ private struct LLMSettingsSheet: View {
                 "llm_connection_test_completed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public)"
             )
         } catch {
+            settings.handleRequestError(error, configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: false,
-                message: error.localizedDescription
+                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(error.localizedDescription)"
             )
             insightMetricsLogger.error(
                 "llm_connection_test_failed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public) error_code=\(error.insightMetricsCode, privacy: .public)"
@@ -769,6 +811,58 @@ private struct LLMSettingsSheet: View {
         }
 
         isTestingConnection = false
+    }
+}
+
+private struct QuoteSpeechSettingsView: View {
+    let player: QuoteSpeechPlayer
+
+    var body: some View {
+        Form {
+            ForEach(CaptureLanguage.allCases) { language in
+                Section(language.title) {
+                    Picker("음성", selection: voiceBinding(for: language)) {
+                        ForEach(player.voiceOptions(for: language)) { option in
+                            Text(option.pickerTitle)
+                                .tag(option.id)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+
+                    Button {
+                        player.togglePreview(for: language)
+                    } label: {
+                        Label(
+                            player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
+                            systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Label("다운로드된 고품질 음성을 우선 표시합니다.", systemImage: "iphone")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } footer: {
+                Text("고품질 음성이 보이지 않으면 iPhone 설정의 음성 콘텐츠에서 해당 언어 음성 팩을 다운로드하세요. Siri 음성은 앱에서 선택할 수 없습니다.")
+            }
+        }
+        .navigationTitle("읽어주기")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            player.logVoiceCatalog()
+        }
+        .onDisappear {
+            player.stop()
+        }
+    }
+
+    private func voiceBinding(for language: CaptureLanguage) -> Binding<String> {
+        Binding(
+            get: { player.selectedVoiceIdentifier(for: language) },
+            set: { player.setSelectedVoiceIdentifier($0, for: language) }
+        )
     }
 }
 
@@ -2127,4 +2221,6 @@ private struct FlowLayout: Layout {
             .navigationTitle("인사이트")
     }
     .environment(ReadingLibrary.preview)
+    .environment(AppIntentRouter.shared)
+    .environment(LLMSettingsStore())
 }
