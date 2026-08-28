@@ -831,11 +831,11 @@ private struct QuoteSpeechSettingsView: View {
             }
 
             Section {
-                Label("iPhone이 Overline에 제공하는 음성입니다.", systemImage: "iphone")
+                Label("다운로드된 고품질 음성을 우선 표시합니다.", systemImage: "iphone")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } footer: {
-                Text("Siri에서 선택한 음성은 iOS 제한에 따라 나타나지 않을 수 있습니다. 각 음성은 미리 듣기로 확인하세요.")
+                Text("고품질 음성이 보이지 않으면 iPhone 설정의 음성 콘텐츠에서 해당 언어 음성 팩을 다운로드하세요. Siri 음성은 앱에서 선택할 수 없습니다.")
             }
         }
         .navigationTitle("읽어주기")

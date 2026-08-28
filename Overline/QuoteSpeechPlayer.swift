@@ -88,28 +88,13 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     func voiceOptions(for language: CaptureLanguage) -> [QuoteSpeechVoiceOption] {
         let automatic = QuoteSpeechVoiceOption(
             id: QuoteSpeechVoiceIdentifier.systemAutomatic,
-            name: "iPhone 자동 선택",
+            name: "최고 음질 자동 선택",
             language: language.speechLocaleIdentifier,
             quality: nil
         )
-        let selectableVoices = matchingVoices(for: language)
-            .sorted { lhs, rhs in
-                if lhs.quality.rawValue != rhs.quality.rawValue {
-                    return lhs.quality.rawValue > rhs.quality.rawValue
-                }
-
-                let lhsIsExactLocale = lhs.language.caseInsensitiveCompare(language.speechLocaleIdentifier) == .orderedSame
-                let rhsIsExactLocale = rhs.language.caseInsensitiveCompare(language.speechLocaleIdentifier) == .orderedSame
-                if lhsIsExactLocale != rhsIsExactLocale {
-                    return lhsIsExactLocale
-                }
-
-                let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
-                if nameOrder != .orderedSame {
-                    return nameOrder == .orderedAscending
-                }
-                return lhs.identifier < rhs.identifier
-            }
+        let rankedVoices = rankedVoices(for: language)
+        let highQualityVoices = rankedVoices.filter { $0.quality != .default }
+        let selectableVoices = (highQualityVoices.isEmpty ? rankedVoices : highQualityVoices)
             .map {
                 QuoteSpeechVoiceOption(
                     id: $0.identifier,
@@ -146,7 +131,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     func logVoiceCatalog() {
         for language in CaptureLanguage.allCases {
-            let automaticVoice = AVSpeechSynthesisVoice(language: language.speechLocaleIdentifier)
+            let automaticVoice = rankedVoices(for: language).first
             if let automaticVoice {
                 logVoice(automaticVoice, selection: "automatic", requestedLanguage: language)
             } else {
@@ -220,7 +205,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
            let voice = AVSpeechSynthesisVoice(identifier: identifier) {
             return voice
         }
-        return AVSpeechSynthesisVoice(language: language.speechLocaleIdentifier)
+        return rankedVoices(for: language).first
     }
 
     private func matchingVoices(for language: CaptureLanguage) -> [AVSpeechSynthesisVoice] {
@@ -230,6 +215,26 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         return AVSpeechSynthesisVoice.speechVoices().filter { voice in
             voice.language.caseInsensitiveCompare(localeIdentifier) == .orderedSame
                 || voice.language.lowercased().hasPrefix("\(languageCode.lowercased())-")
+        }
+    }
+
+    private func rankedVoices(for language: CaptureLanguage) -> [AVSpeechSynthesisVoice] {
+        matchingVoices(for: language).sorted { lhs, rhs in
+            if lhs.quality.rawValue != rhs.quality.rawValue {
+                return lhs.quality.rawValue > rhs.quality.rawValue
+            }
+
+            let lhsIsExactLocale = lhs.language.caseInsensitiveCompare(language.speechLocaleIdentifier) == .orderedSame
+            let rhsIsExactLocale = rhs.language.caseInsensitiveCompare(language.speechLocaleIdentifier) == .orderedSame
+            if lhsIsExactLocale != rhsIsExactLocale {
+                return lhsIsExactLocale
+            }
+
+            let nameOrder = lhs.name.localizedStandardCompare(rhs.name)
+            if nameOrder != .orderedSame {
+                return nameOrder == .orderedAscending
+            }
+            return lhs.identifier < rhs.identifier
         }
     }
 
@@ -270,9 +275,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
             traits = "regular"
         }
 
-        let looksLikeSiri = voice.identifier.localizedCaseInsensitiveContains("siri")
         quoteSpeechLogger.info(
-            "tts_voice selection=\(selection, privacy: .public) requested_language=\(requestedLanguage.speechLocaleIdentifier, privacy: .public) name=\(voice.name, privacy: .public) language=\(voice.language, privacy: .public) quality=\(quality, privacy: .public) traits=\(traits, privacy: .public) siri_identifier=\(looksLikeSiri, privacy: .public) identifier=\(voice.identifier, privacy: .public)"
+            "tts_voice selection=\(selection, privacy: .public) requested_language=\(requestedLanguage.speechLocaleIdentifier, privacy: .public) name=\(voice.name, privacy: .public) language=\(voice.language, privacy: .public) quality=\(quality, privacy: .public) traits=\(traits, privacy: .public) identifier=\(voice.identifier, privacy: .public)"
         )
     }
 
