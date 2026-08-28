@@ -831,15 +831,18 @@ private struct QuoteSpeechSettingsView: View {
             }
 
             Section {
-                Label("iPhone에 설치된 음성만 표시됩니다.", systemImage: "iphone")
+                Label("iPhone이 Overline에 제공하는 음성입니다.", systemImage: "iphone")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } footer: {
-                Text("고음질 음성은 설정 > 손쉬운 사용 > 읽기 및 말하기 > 음성에서 추가할 수 있습니다.")
+                Text("Siri에서 선택한 음성은 iOS 제한에 따라 나타나지 않을 수 있습니다. 각 음성은 미리 듣기로 확인하세요.")
             }
         }
         .navigationTitle("읽어주기")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            player.logVoiceCatalog()
+        }
         .onDisappear {
             player.stop()
         }

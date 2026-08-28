@@ -1,25 +1,34 @@
 import AVFoundation
 import Observation
+import OSLog
+
+private let quoteSpeechLogger = Logger(subsystem: "aib.Overline", category: "SpeechVoice")
+
+private enum QuoteSpeechVoiceIdentifier {
+    static let systemAutomatic = "overline.system-automatic"
+}
 
 struct QuoteSpeechVoiceOption: Identifiable {
     let id: String
     let name: String
     let language: String
-    let quality: AVSpeechSynthesisVoiceQuality
+    let quality: AVSpeechSynthesisVoiceQuality?
 
     var qualityTitle: String {
         switch quality {
-        case .premium:
+        case .some(.premium):
             "최고 음질"
-        case .enhanced:
+        case .some(.enhanced):
             "고음질"
-        default:
+        case .some:
             "기본"
+        case .none:
+            ""
         }
     }
 
     var pickerTitle: String {
-        "\(name) · \(qualityTitle)"
+        qualityTitle.isEmpty ? name : "\(name) · \(qualityTitle)"
     }
 }
 
@@ -77,7 +86,13 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func voiceOptions(for language: CaptureLanguage) -> [QuoteSpeechVoiceOption] {
-        matchingVoices(for: language)
+        let automatic = QuoteSpeechVoiceOption(
+            id: QuoteSpeechVoiceIdentifier.systemAutomatic,
+            name: "iPhone 자동 선택",
+            language: language.speechLocaleIdentifier,
+            quality: nil
+        )
+        let selectableVoices = matchingVoices(for: language)
             .sorted { lhs, rhs in
                 if lhs.quality.rawValue != rhs.quality.rawValue {
                     return lhs.quality.rawValue > rhs.quality.rawValue
@@ -103,6 +118,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
                     quality: $0.quality
                 )
             }
+
+        return [automatic] + selectableVoices
     }
 
     func selectedVoiceIdentifier(for language: CaptureLanguage) -> String {
@@ -111,7 +128,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
            voiceOptions(for: language).contains(where: { $0.id == savedIdentifier }) {
             return savedIdentifier
         }
-        return voiceOptions(for: language).first?.id ?? ""
+        return QuoteSpeechVoiceIdentifier.systemAutomatic
     }
 
     func selectedVoiceName(for language: CaptureLanguage) -> String {
@@ -125,6 +142,27 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         stop()
         selectedVoiceIdentifiers[language.rawValue] = identifier
         defaults.set(identifier, forKey: voiceDefaultsKey(for: language))
+    }
+
+    func logVoiceCatalog() {
+        for language in CaptureLanguage.allCases {
+            let automaticVoice = AVSpeechSynthesisVoice(language: language.speechLocaleIdentifier)
+            if let automaticVoice {
+                logVoice(automaticVoice, selection: "automatic", requestedLanguage: language)
+            } else {
+                quoteSpeechLogger.info(
+                    "tts_voice_automatic_unavailable requested_language=\(language.speechLocaleIdentifier, privacy: .public)"
+                )
+            }
+
+            let voices = matchingVoices(for: language)
+            quoteSpeechLogger.info(
+                "tts_voice_catalog requested_language=\(language.speechLocaleIdentifier, privacy: .public) count=\(voices.count, privacy: .public)"
+            )
+            for voice in voices {
+                logVoice(voice, selection: "catalog", requestedLanguage: language)
+            }
+        }
     }
 
     func stop() {
@@ -178,7 +216,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func selectedVoice(for language: CaptureLanguage) -> AVSpeechSynthesisVoice? {
         let identifier = selectedVoiceIdentifier(for: language)
-        if !identifier.isEmpty, let voice = AVSpeechSynthesisVoice(identifier: identifier) {
+        if identifier != QuoteSpeechVoiceIdentifier.systemAutomatic,
+           let voice = AVSpeechSynthesisVoice(identifier: identifier) {
             return voice
         }
         return AVSpeechSynthesisVoice(language: language.speechLocaleIdentifier)
@@ -200,12 +239,41 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
             let savedIdentifier = defaults.string(forKey: voiceDefaultsKey(for: language))
             let resolvedIdentifier = savedIdentifier.flatMap { saved in
                 options.contains(where: { $0.id == saved }) ? saved : nil
-            } ?? options.first?.id
+            } ?? QuoteSpeechVoiceIdentifier.systemAutomatic
 
-            guard let resolvedIdentifier else { continue }
             selectedVoiceIdentifiers[language.rawValue] = resolvedIdentifier
             defaults.set(resolvedIdentifier, forKey: voiceDefaultsKey(for: language))
         }
+    }
+
+    private func logVoice(
+        _ voice: AVSpeechSynthesisVoice,
+        selection: String,
+        requestedLanguage: CaptureLanguage
+    ) {
+        let quality: String
+        switch voice.quality {
+        case .premium:
+            quality = "premium"
+        case .enhanced:
+            quality = "enhanced"
+        default:
+            quality = "default"
+        }
+
+        let traits: String
+        if voice.voiceTraits.contains(.isPersonalVoice) {
+            traits = "personal"
+        } else if voice.voiceTraits.contains(.isNoveltyVoice) {
+            traits = "novelty"
+        } else {
+            traits = "regular"
+        }
+
+        let looksLikeSiri = voice.identifier.localizedCaseInsensitiveContains("siri")
+        quoteSpeechLogger.info(
+            "tts_voice selection=\(selection, privacy: .public) requested_language=\(requestedLanguage.speechLocaleIdentifier, privacy: .public) name=\(voice.name, privacy: .public) language=\(voice.language, privacy: .public) quality=\(quality, privacy: .public) traits=\(traits, privacy: .public) siri_identifier=\(looksLikeSiri, privacy: .public) identifier=\(voice.identifier, privacy: .public)"
+        )
     }
 
     private func voiceDefaultsKey(for language: CaptureLanguage) -> String {
