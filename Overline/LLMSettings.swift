@@ -348,7 +348,11 @@ final class LLMSettingsStore {
         )
     }
 
-    func handleRequestError(_ error: Error, provider: LLMProvider) {
+    func handleRequestError(
+        _ error: Error,
+        provider: LLMProvider,
+        mode: LLMAuthMode
+    ) {
         guard
             case .requestFailed(let statusCode, _) = error as? LLMInsightError,
             [401, 403].contains(statusCode)
@@ -356,14 +360,13 @@ final class LLMSettingsStore {
             return
         }
 
-        let mode = authMode(for: provider)
         let key = Self.rejectedCredentialKey(for: provider, mode: mode)
         rejectedCredentialKeys.insert(key)
         UserDefaults.standard.set(true, forKey: key)
     }
 
-    func handleRequestSuccess(provider: LLMProvider) {
-        clearCredentialRejection(for: provider, mode: authMode(for: provider))
+    func handleRequestSuccess(provider: LLMProvider, mode: LLMAuthMode) {
+        clearCredentialRejection(for: provider, mode: mode)
     }
 
     private func saveProvider() {

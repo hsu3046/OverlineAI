@@ -94,7 +94,19 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         )
         let rankedVoices = rankedVoices(for: language)
         let highQualityVoices = rankedVoices.filter { $0.quality != .default }
-        let selectableVoices = (highQualityVoices.isEmpty ? rankedVoices : highQualityVoices)
+        var selectableVoices = highQualityVoices.isEmpty ? rankedVoices : highQualityVoices
+        let savedIdentifier = selectedVoiceIdentifiers[language.rawValue]
+            ?? defaults.string(forKey: voiceDefaultsKey(for: language))
+        if
+            let savedIdentifier,
+            savedIdentifier != QuoteSpeechVoiceIdentifier.systemAutomatic,
+            !selectableVoices.contains(where: { $0.identifier == savedIdentifier }),
+            let savedVoice = rankedVoices.first(where: { $0.identifier == savedIdentifier })
+        {
+            selectableVoices.append(savedVoice)
+        }
+
+        let options = selectableVoices
             .map {
                 QuoteSpeechVoiceOption(
                     id: $0.identifier,
@@ -104,13 +116,13 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
                 )
             }
 
-        return [automatic] + selectableVoices
+        return [automatic] + options
     }
 
     func selectedVoiceIdentifier(for language: CaptureLanguage) -> String {
         let savedIdentifier = selectedVoiceIdentifiers[language.rawValue]
         if let savedIdentifier,
-           voiceOptions(for: language).contains(where: { $0.id == savedIdentifier }) {
+           isVoiceAvailable(savedIdentifier, for: language) {
             return savedIdentifier
         }
         return QuoteSpeechVoiceIdentifier.systemAutomatic
@@ -220,6 +232,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func rankedVoices(for language: CaptureLanguage) -> [AVSpeechSynthesisVoice] {
         matchingVoices(for: language).sorted { lhs, rhs in
+            let lhsIsNovelty = lhs.voiceTraits.contains(.isNoveltyVoice)
+            let rhsIsNovelty = rhs.voiceTraits.contains(.isNoveltyVoice)
+            if lhsIsNovelty != rhsIsNovelty {
+                return !lhsIsNovelty
+            }
+
             if lhs.quality.rawValue != rhs.quality.rawValue {
                 return lhs.quality.rawValue > rhs.quality.rawValue
             }
@@ -240,15 +258,19 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func loadVoiceSelections() {
         for language in CaptureLanguage.allCases {
-            let options = voiceOptions(for: language)
             let savedIdentifier = defaults.string(forKey: voiceDefaultsKey(for: language))
             let resolvedIdentifier = savedIdentifier.flatMap { saved in
-                options.contains(where: { $0.id == saved }) ? saved : nil
+                isVoiceAvailable(saved, for: language) ? saved : nil
             } ?? QuoteSpeechVoiceIdentifier.systemAutomatic
 
             selectedVoiceIdentifiers[language.rawValue] = resolvedIdentifier
             defaults.set(resolvedIdentifier, forKey: voiceDefaultsKey(for: language))
         }
+    }
+
+    private func isVoiceAvailable(_ identifier: String, for language: CaptureLanguage) -> Bool {
+        identifier == QuoteSpeechVoiceIdentifier.systemAutomatic
+            || matchingVoices(for: language).contains(where: { $0.identifier == identifier })
     }
 
     private func logVoice(

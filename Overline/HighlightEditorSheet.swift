@@ -397,7 +397,11 @@ struct HighlightEditorSheet: View {
                     risk: result.risk
                 )
             } catch {
-                llmSettings.handleRequestError(error, provider: configuration.provider)
+                llmSettings.handleRequestError(
+                    error,
+                    provider: configuration.provider,
+                    mode: configuration.credential.mode
+                )
                 showAIAlert(title: "AI 교정", message: error.localizedDescription)
             }
         }
@@ -473,7 +477,11 @@ struct HighlightEditorSheet: View {
                     suggestedTags: suggestedTags
                 )
             } catch {
-                llmSettings.handleRequestError(error, provider: configuration.provider)
+                llmSettings.handleRequestError(
+                    error,
+                    provider: configuration.provider,
+                    mode: configuration.credential.mode
+                )
                 showAIAlert(title: "AI 태그", message: error.localizedDescription)
             }
         }

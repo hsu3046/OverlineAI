@@ -677,7 +677,11 @@ struct CaptureView: View {
                     "auto_tags_applied provider=\(configuration.provider.rawValue, privacy: .public) count=\(generatedTags.count, privacy: .public)"
                 )
             } catch {
-                llmSettings.handleRequestError(error, provider: configuration.provider)
+                llmSettings.handleRequestError(
+                    error,
+                    provider: configuration.provider,
+                    mode: configuration.credential.mode
+                )
                 captureMetricsLogger.error(
                     "auto_tags_failed provider=\(configuration.provider.rawValue, privacy: .public) error=\(String(describing: type(of: error)), privacy: .public)"
                 )
