@@ -3862,4 +3862,5 @@ private struct HighlightMetaItem: View {
     }
     .environment(ReadingLibrary.preview)
     .environment(QuoteSpeechPlayer())
+    .environment(LLMSettingsStore())
 }

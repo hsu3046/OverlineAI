@@ -139,7 +139,7 @@ struct LLMSubscriptionToken: Codable, Equatable {
     }
 }
 
-enum LLMAuthCredential {
+enum LLMAuthCredential: Equatable {
     case apiKey(String)
     case subscription(LLMSubscriptionToken)
 
@@ -153,7 +153,7 @@ enum LLMAuthCredential {
     }
 }
 
-struct LLMTagProviderConfiguration {
+struct LLMTagProviderConfiguration: Equatable {
     let provider: LLMProvider
     let modelID: String
     let credential: LLMAuthCredential
@@ -350,23 +350,29 @@ final class LLMSettingsStore {
 
     func handleRequestError(
         _ error: Error,
-        provider: LLMProvider,
-        mode: LLMAuthMode
+        configuration: LLMTagProviderConfiguration
     ) {
         guard
             case .requestFailed(let statusCode, _) = error as? LLMInsightError,
-            [401, 403].contains(statusCode)
+            [401, 403].contains(statusCode),
+            isCurrent(configuration)
         else {
             return
         }
 
+        let provider = configuration.provider
+        let mode = configuration.credential.mode
         let key = Self.rejectedCredentialKey(for: provider, mode: mode)
         rejectedCredentialKeys.insert(key)
         UserDefaults.standard.set(true, forKey: key)
     }
 
-    func handleRequestSuccess(provider: LLMProvider, mode: LLMAuthMode) {
-        clearCredentialRejection(for: provider, mode: mode)
+    func handleRequestSuccess(configuration: LLMTagProviderConfiguration) {
+        guard isCurrent(configuration) else { return }
+        clearCredentialRejection(
+            for: configuration.provider,
+            mode: configuration.credential.mode
+        )
     }
 
     private func saveProvider() {
@@ -387,6 +393,13 @@ final class LLMSettingsStore {
         let key = Self.rejectedCredentialKey(for: provider, mode: mode)
         rejectedCredentialKeys.remove(key)
         UserDefaults.standard.removeObject(forKey: key)
+    }
+
+    private func isCurrent(_ configuration: LLMTagProviderConfiguration) -> Bool {
+        let currentModelID = selectedModelIDs[configuration.provider]
+            ?? configuration.provider.defaultModelID
+        return currentModelID == configuration.modelID
+            && credential(for: configuration.provider) == configuration.credential
     }
 
     private static func rejectedCredentialKey(for provider: LLMProvider, mode: LLMAuthMode) -> String {

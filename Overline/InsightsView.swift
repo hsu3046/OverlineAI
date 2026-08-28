@@ -326,9 +326,13 @@ struct InsightsView: View {
             return
         }
 
-        let provider = llmSettings.provider
-        let modelID = llmSettings.selectedModelID
-        let credential = llmSettings.credential(for: provider)
+        let configuration = LLMTagProviderConfiguration(
+            provider: llmSettings.provider,
+            modelID: llmSettings.selectedModelID,
+            credential: llmSettings.credential(for: llmSettings.provider)
+        )
+        let provider = configuration.provider
+        let modelID = configuration.modelID
         let sourceCount = payload.sources.count
         let category = selectedPrompt.rawValue
         let startedAt = Date()
@@ -348,7 +352,7 @@ struct InsightsView: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    credential: credential,
+                    credential: configuration.credential,
                     category: selectedPrompt.title,
                     instruction: selectedPrompt.llmInstruction,
                     userPrompt: prompt,
@@ -380,7 +384,7 @@ struct InsightsView: View {
             )
             showsInsightSavedAlert = true
         } catch {
-            llmSettings.handleRequestError(error, provider: provider, mode: credential.mode)
+            llmSettings.handleRequestError(error, configuration: configuration)
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
                 provider: provider,
@@ -747,8 +751,12 @@ private struct LLMSettingsSheet: View {
         let provider = settings.provider
         let modelID = settings.selectedModelID
         let modelTitle = settings.selectedModelTitle
-        let credential = settings.credential(for: provider)
-        let authMode = credential.mode
+        let configuration = LLMTagProviderConfiguration(
+            provider: provider,
+            modelID: modelID,
+            credential: settings.credential(for: provider)
+        )
+        let authMode = configuration.credential.mode
         let startedAt = Date()
 
         isTestingConnection = true
@@ -762,7 +770,7 @@ private struct LLMSettingsSheet: View {
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
-                    credential: credential,
+                    credential: configuration.credential,
                     category: "연결 테스트",
                     instruction: "연결이 정상인지 확인하기 위해 한 문장으로만 답하세요.",
                     userPrompt: "Overline AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
@@ -779,7 +787,7 @@ private struct LLMSettingsSheet: View {
             )
 
             let preview = String(response.trimmed.prefix(120))
-            settings.handleRequestSuccess(provider: provider, mode: authMode)
+            settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
                 message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(preview.isEmpty ? "연결 확인 완료" : preview)"
@@ -792,7 +800,7 @@ private struct LLMSettingsSheet: View {
                 "llm_connection_test_completed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public)"
             )
         } catch {
-            settings.handleRequestError(error, provider: provider, mode: authMode)
+            settings.handleRequestError(error, configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: false,
                 message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(error.localizedDescription)"
