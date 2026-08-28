@@ -133,9 +133,10 @@ struct LibraryView: View {
                         .listRowChrome(top: 0, bottom: 12)
                 }
 
+                let book = book(for: highlight)
                 ScrapbookCard(
                     highlight: highlight,
-                    bookTitle: bookTitle(for: highlight),
+                    book: book,
                     edit: {
                         presentedSheet = .editHighlight(highlight.id)
                     }
@@ -245,14 +246,14 @@ struct LibraryView: View {
         return Array(library.recentHighlights.prefix(10))
     }
 
-    private func bookTitle(for highlight: Highlight) -> String? {
+    private func book(for highlight: Highlight) -> ReadingBook? {
         guard
             let bookID = library.bookID(containing: highlight.id),
             let book = library.book(with: bookID)
         else {
             return nil
         }
-        return book.title.trimmed.isEmpty ? nil : book.title
+        return book
     }
 
     private var isBookNavigationPresented: Binding<Bool> {
@@ -434,9 +435,10 @@ private struct HighlightBrowserSheet: View {
                                 .listRowChrome(top: 0, bottom: 12)
                         }
 
+                        let book = book(for: highlight)
                         ScrapbookCard(
                             highlight: highlight,
-                            bookTitle: bookTitle(for: highlight),
+                            book: book,
                             searchQuery: searchText,
                             edit: {
                                 presentedHighlight = HighlightEditorPresentation(id: highlight.id)
@@ -516,14 +518,14 @@ private struct HighlightBrowserSheet: View {
         return library.book(with: selectedBookID)?.title ?? "전체"
     }
 
-    private func bookTitle(for highlight: Highlight) -> String? {
+    private func book(for highlight: Highlight) -> ReadingBook? {
         guard
             let bookID = library.bookID(containing: highlight.id),
             let book = library.book(with: bookID)
         else {
             return nil
         }
-        return book.title.trimmed.isEmpty ? nil : book.title
+        return book
     }
 
     private var bookFilterSheetHeight: CGFloat {
@@ -3146,6 +3148,7 @@ struct ScrapbookView: View {
 
                         ScrapbookCard(
                             highlight: highlight,
+                            shareBookTitle: book.title,
                             searchQuery: searchText,
                             edit: {
                                 presentedSheet = .editHighlight(highlight.id)
@@ -3448,7 +3451,8 @@ private struct BookMetaLine: View {
 
 struct ScrapbookCard: View {
     let highlight: Highlight
-    var bookTitle: String? = nil
+    var book: ReadingBook? = nil
+    var shareBookTitle: String? = nil
     var searchQuery = ""
     var edit: () -> Void = {}
 
@@ -3508,7 +3512,7 @@ struct ScrapbookCard: View {
                 HStack(spacing: 2) {
                     QuoteSpeechButton(highlight: highlight)
                     OverlineShareButton(
-                        item: highlight.shareText,
+                        item: highlight.shareText(bookTitle: shareBookTitle ?? book?.title),
                         accessibilityLabel: "공유",
                         iconYOffset: -2
                     )
@@ -3518,6 +3522,11 @@ struct ScrapbookCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if let book {
+                ScrapbookCoverBackdrop(book: book, cornerRadius: 18)
+            }
+        }
         .libraryGlassSurface(
             cornerRadius: 18,
             tint: Color.white.opacity(0.13),
@@ -3529,10 +3538,49 @@ struct ScrapbookCard: View {
     }
 
     private var visibleBookTitle: String? {
-        guard let title = bookTitle?.trimmed, !title.isEmpty else {
+        guard let title = book?.title.trimmed, !title.isEmpty else {
             return nil
         }
         return title
+    }
+}
+
+private struct ScrapbookCoverBackdrop: View {
+    let book: ReadingBook
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                book.coverTheme.gradient
+
+                if let coverURL = book.coverURL {
+                    AsyncImage(url: coverURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .interpolation(.medium)
+                                .scaledToFill()
+                        case .failure, .empty:
+                            Color.clear
+                        @unknown default:
+                            Color.clear
+                        }
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .scaleEffect(1.12)
+                    .saturation(0.48)
+                    .blur(radius: 22, opaque: true)
+                }
+
+                Color.white.opacity(0.78)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -3667,13 +3715,24 @@ private extension Highlight {
             .joined(separator: " ")
     }
 
-    var shareText: String {
-        [
+    func shareText(bookTitle: String?) -> String {
+        let title = bookTitle?.trimmed ?? ""
+        let page = visiblePageReference ?? ""
+        let sourceLine: String
+
+        if !title.isEmpty && !page.isEmpty {
+            sourceLine = "\(title) \(page)"
+        } else if !title.isEmpty {
+            sourceLine = title
+        } else {
+            sourceLine = page
+        }
+
+        return [
             text,
-            visiblePageReference,
+            sourceLine,
             tags.joined(separator: " ")
         ]
-        .compactMap { $0 }
         .filter { !$0.isEmpty }
         .joined(separator: "\n")
     }
