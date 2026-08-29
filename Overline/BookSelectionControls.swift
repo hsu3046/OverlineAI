@@ -20,6 +20,24 @@ struct OverlineDoneToolbarButton: View {
     }
 }
 
+struct OverlineSettingsButton: View {
+    let settings: LLMSettingsStore
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.overlineMutedInk.opacity(0.84))
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("설정")
+        .accessibilityValue("\(settings.provider.title), \(settings.selectedModelTitle)")
+    }
+}
+
 struct OverlineSheetHeader<Leading: View, Trailing: View>: View {
     let title: String
     @ViewBuilder var leading: Leading

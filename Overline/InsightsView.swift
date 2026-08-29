@@ -138,7 +138,7 @@ struct InsightsView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isLLMSettingsPresented) {
-            LLMSettingsSheet(settings: llmSettings)
+            OverlineSettingsSheet(settings: llmSettings)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -476,6 +476,12 @@ private extension View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
     }
+
+    func settingsRowSeparator() -> some View {
+        self
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
+    }
 }
 
 private struct PendingInsightUndo: Identifiable {
@@ -502,16 +508,7 @@ private struct InsightWorkspaceHeader: View {
 
             Spacer()
 
-            Button(action: openSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.overlineMutedInk.opacity(0.84))
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("설정")
-            .accessibilityValue("\(settings.provider.title), \(settings.selectedModelTitle)")
+            OverlineSettingsButton(settings: settings, action: openSettings)
         }
     }
 }
@@ -539,26 +536,66 @@ private struct InsightSectionHeader: View {
     }
 }
 
-private struct LLMSettingsSheet: View {
+struct OverlineSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ReadingLibrary.self) private var library
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     let settings: LLMSettingsStore
     @State private var isTestingConnection = false
     @State private var connectionTestResult: LLMConnectionTestResult?
+    @State private var showsResetConfirmation = false
+    @State private var showsRestoreResetConfirmation = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
+                    LLMActiveModelSummary(settings: settings)
+                        .settingsRowSeparator()
+
+                    Button {
+                        Task {
+                            await testConnection()
+                        }
+                    } label: {
+                        HStack {
+                            Label(connectionTestTitle, systemImage: connectionTestSystemImage)
+                            Spacer()
+
+                            if isTestingConnection {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
+                    .listRowSeparator(.hidden, edges: .bottom)
+                    .settingsRowSeparator()
+
+                    if let connectionTestResult, !connectionTestResult.isSuccess {
+                        Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(Color.overlineCoral)
+                            .settingsRowSeparator()
+                    }
+                } header: {
+                    Text("현재 사용 중인 AI")
+                }
+
+                Section {
                     Picker("제공자", selection: providerBinding) {
-                        ForEach(LLMProvider.allCases) { provider in
-                            Label(provider.title, systemImage: provider.systemImage)
+                        ForEach(LLMProvider.settingsOrder) { provider in
+                            HStack(spacing: 10) {
+                                LLMProviderIcon(provider: provider)
+                                Text(provider.title)
+                            }
                                 .tag(provider)
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
-                    Picker("모델", selection: modelBinding) {
+                    Picker("모델 선택", selection: modelBinding) {
                         ForEach(settings.provider.modelOptions) { model in
                             Text(model.title)
                             .tag(model.id)
@@ -570,8 +607,9 @@ private struct LLMSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
-                    LabeledContent("직접 모델 ID") {
+                    LabeledContent("모델 ID 직접 입력") {
                         TextField(settings.provider.defaultModelID, text: modelBinding)
                             .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
@@ -579,10 +617,13 @@ private struct LLMSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .listRowSeparator(.hidden, edges: .bottom)
+                    .settingsRowSeparator()
 
-                    Text("목록에 없는 모델도 제공자 문서의 모델 ID를 그대로 입력해 사용할 수 있습니다.")
+                    Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .settingsRowSeparator()
 
                     if settings.provider.supportsSubscriptionAuth {
                         Picker("인증", selection: authModeBinding) {
@@ -592,84 +633,59 @@ private struct LLMSettingsSheet: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .settingsRowSeparator()
                     } else {
                         LabeledContent("인증") {
                             Text("API 키")
                                 .foregroundStyle(.secondary)
                         }
+                        .settingsRowSeparator()
                     }
+                } header: {
+                    Text("AI 설정")
                 }
 
                 Section {
-                    ForEach(LLMProvider.allCases) { provider in
+                    ForEach(LLMProvider.settingsOrder) { provider in
                         LLMAPIKeyRow(
                             provider: provider,
                             apiKey: Binding(
                                 get: { settings.apiKey(for: provider) },
-                                set: { settings.setAPIKey($0, for: provider) }
+                                set: {
+                                    settings.setAPIKey($0, for: provider)
+                                    if provider == settings.provider {
+                                        connectionTestResult = nil
+                                    }
+                                }
                             )
                         )
+                        .settingsRowSeparator()
                     }
                 } header: {
                     Text("API 키")
-                } footer: {
-                    Text("API 키는 백업 경로로 유지됩니다. 현재 제공자가 API 키 인증으로 설정된 경우에만 사용합니다.")
                 }
 
                 Section {
-                    ForEach(LLMProvider.allCases.filter(\.supportsSubscriptionAuth)) { provider in
+                    ForEach(LLMProvider.settingsOrder.filter(\.supportsSubscriptionAuth)) { provider in
                         LLMSubscriptionTokenRow(
                             provider: provider,
                             token: Binding(
                                 get: { settings.subscriptionToken(for: provider) },
-                                set: { settings.setSubscriptionToken($0, for: provider) }
+                                set: {
+                                    settings.setSubscriptionToken($0, for: provider)
+                                    if provider == settings.provider {
+                                        connectionTestResult = nil
+                                    }
+                                }
                             )
                         )
+                        .settingsRowSeparator()
                     }
                 } header: {
-                    Text("구독 연동 테스트")
-                } footer: {
-                    Text("OpenAI와 Claude 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다. 브라우저 OAuth 자동 로그인은 다음 단계에서 붙일 수 있도록 호출 경로를 먼저 분리했습니다.")
+                    Text("구독 플랜 토큰")
                 }
 
-                Section {
-                    LLMActiveModelSummary(settings: settings)
-                }
-
-                Section("연결 테스트") {
-                    Button {
-                        Task {
-                            await testConnection()
-                        }
-                    } label: {
-                        HStack {
-                            Label("현재 모델 테스트", systemImage: "network")
-                            Spacer()
-                            if isTestingConnection {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
-
-                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
-                        Text(connectionSetupHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let connectionTestResult {
-                        Label(
-                            connectionTestResult.message,
-                            systemImage: connectionTestResult.isSuccess ? "checkmark.circle.fill" : "exclamationmark.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(connectionTestResult.isSuccess ? Color.overlineAccent : Color.overlineCoral)
-                    }
-                }
-
-                Section("읽어주기") {
+                Section("텍스트 낭독") {
                     NavigationLink {
                         QuoteSpeechSettingsView(player: quoteSpeechPlayer)
                     } label: {
@@ -685,24 +701,51 @@ private struct LLMSettingsSheet: View {
                             Image(systemName: "speaker.wave.2")
                         }
                     }
+                    .settingsRowSeparator()
                 }
 
-                Section("전송 안내") {
-                    Text("선택한 글조각과 메모만 현재 AI 제공자로 전송됩니다. Overline은 캡처 내용을 자체 서버에 저장하지 않으며, 캡처 내용은 AI 학습에 사용되지 않습니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    Button {
+                        showsRestoreResetConfirmation = true
+                    } label: {
+                        HStack {
+                            Label("최근 초기화 복구", systemImage: "arrow.uturn.backward.circle")
+                            Spacer()
+                            if !library.resetBackupAvailable {
+                                Text("복구 없음")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(!library.resetBackupAvailable)
+                    .settingsRowSeparator()
 
+                    Button(role: .destructive) {
+                        showsResetConfirmation = true
+                    } label: {
+                        Label("보관함 초기화", systemImage: "trash")
+                    }
+                    .settingsRowSeparator()
+                } header: {
+                    Text("보관함")
+                } footer: {
+                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다.")
+                }
+
+                Section("개인 정보와 이용 조건") {
                     NavigationLink {
                         PrivacyTransmissionPolicyView()
                     } label: {
-                        Label("개인정보와 AI 전송", systemImage: "lock.shield")
+                        Label("AI 데이터 처리", systemImage: "lock.shield")
                     }
+                    .settingsRowSeparator()
 
                     NavigationLink {
                         OverlineTermsView()
                     } label: {
                         Label("이용 조건", systemImage: "doc.text")
                     }
+                    .settingsRowSeparator()
                 }
             }
             .navigationTitle("설정")
@@ -714,27 +757,56 @@ private struct LLMSettingsSheet: View {
                     }
                 }
             }
+            .confirmationDialog("보관함을 초기화할까요?", isPresented: $showsResetConfirmation, titleVisibility: .visible) {
+                Button("모든 책, 글조각, 인사이트 삭제", role: .destructive) {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                        library.resetLibrary()
+                    }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("삭제 전 최근 상태를 이 기기에 복구 백업으로 남깁니다. 이후 설정의 최근 초기화 복구에서 되돌릴 수 있습니다.")
+            }
+            .confirmationDialog("최근 초기화를 복구할까요?", isPresented: $showsRestoreResetConfirmation, titleVisibility: .visible) {
+                Button("복구") {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                        _ = library.restoreLastResetBackup()
+                    }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
+            }
         }
     }
 
     private var providerBinding: Binding<LLMProvider> {
         Binding(
             get: { settings.provider },
-            set: { settings.provider = $0 }
+            set: {
+                settings.provider = $0
+                connectionTestResult = nil
+            }
         )
     }
 
     private var modelBinding: Binding<String> {
         Binding(
             get: { settings.selectedModelID },
-            set: { settings.setSelectedModelID($0) }
+            set: {
+                settings.setSelectedModelID($0)
+                connectionTestResult = nil
+            }
         )
     }
 
     private var authModeBinding: Binding<LLMAuthMode> {
         Binding(
             get: { settings.authMode(for: settings.provider) },
-            set: { settings.setAuthMode($0, for: settings.provider) }
+            set: {
+                settings.setAuthMode($0, for: settings.provider)
+                connectionTestResult = nil
+            }
         )
     }
 
@@ -742,17 +814,18 @@ private struct LLMSettingsSheet: View {
         settings.provider.modelOptions.contains { $0.id == settings.selectedModelID }
     }
 
-    private var connectionSetupHint: String {
-        if settings.isCredentialRejected(for: settings.provider) {
-            return "\(settings.provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. 토큰·API 키 또는 모델을 다시 확인해 주세요."
+    private var connectionTestTitle: String {
+        if isTestingConnection {
+            return "AI 연결 테스트 중"
         }
+        if connectionTestResult?.isSuccess == true {
+            return "AI 연결 테스트 완료"
+        }
+        return "AI 연결 테스트"
+    }
 
-        switch settings.authMode(for: settings.provider) {
-        case .apiKey:
-            return "\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다."
-        case .subscription:
-            return "\(settings.provider.title) 구독 토큰을 연결하면 현재 모델을 테스트할 수 있습니다."
-        }
+    private var connectionTestSystemImage: String {
+        connectionTestResult?.isSuccess == true ? "checkmark.circle.fill" : "checkmark.circle"
     }
 
     @MainActor
@@ -762,13 +835,11 @@ private struct LLMSettingsSheet: View {
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
-        let modelTitle = settings.selectedModelTitle
         let configuration = LLMTagProviderConfiguration(
             provider: provider,
             modelID: modelID,
             credential: settings.credential(for: provider)
         )
-        let authMode = configuration.credential.mode
         let startedAt = Date()
 
         isTestingConnection = true
@@ -778,7 +849,7 @@ private struct LLMSettingsSheet: View {
         )
 
         do {
-            let response = try await LLMInsightClient().generateInsight(
+            _ = try await LLMInsightClient().generateInsight(
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
@@ -798,11 +869,15 @@ private struct LLMSettingsSheet: View {
                 )
             )
 
-            let preview = String(response.trimmed.prefix(120))
+            guard isCurrentConnectionTest(configuration) else {
+                isTestingConnection = false
+                return
+            }
+
             settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(preview.isEmpty ? "연결 확인 완료" : preview)"
+                message: "AI 연결 테스트 완료"
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -812,10 +887,15 @@ private struct LLMSettingsSheet: View {
                 "llm_connection_test_completed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public)"
             )
         } catch {
+            guard isCurrentConnectionTest(configuration) else {
+                isTestingConnection = false
+                return
+            }
+
             settings.handleRequestError(error, configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: false,
-                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(error.localizedDescription)"
+                message: error.localizedDescription
             )
             insightMetricsLogger.error(
                 "llm_connection_test_failed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public) error_code=\(error.insightMetricsCode, privacy: .public)"
@@ -823,6 +903,12 @@ private struct LLMSettingsSheet: View {
         }
 
         isTestingConnection = false
+    }
+
+    private func isCurrentConnectionTest(_ configuration: LLMTagProviderConfiguration) -> Bool {
+        settings.provider == configuration.provider
+            && settings.selectedModelID == configuration.modelID
+            && settings.credential(for: configuration.provider) == configuration.credential
     }
 }
 
@@ -840,6 +926,7 @@ private struct QuoteSpeechSettingsView: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
                     Button {
                         player.togglePreview(for: language)
@@ -849,18 +936,17 @@ private struct QuoteSpeechSettingsView: View {
                             systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
                         )
                     }
+                    .settingsRowSeparator()
                 }
             }
 
             Section {
-                Label("다운로드된 고품질 음성을 우선 표시합니다.", systemImage: "iphone")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                EmptyView()
             } footer: {
-                Text("고품질 음성이 보이지 않으면 iPhone 설정의 음성 콘텐츠에서 해당 언어 음성 팩을 다운로드하세요. Siri 음성은 앱에서 선택할 수 없습니다.")
+                Text("고품질 음성은 iPhone 설정 → 손쉬운 사용 → 읽기 및 말하기 → 음성 → 한국어 → 음성에서 다운로드할 수 있습니다.")
             }
         }
-        .navigationTitle("읽어주기")
+        .navigationTitle("텍스트 낭독")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             player.logVoiceCatalog()
@@ -916,33 +1002,23 @@ private struct PrivacyTransmissionPolicyView: View {
     private let policies: [PrivacyTransmissionPolicy] = [
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
-            title: "로컬 저장",
-            body: "OCR로 저장한 글조각과 메모만 이 기기 안에 저장됩니다. 캡처 사진은 OCR 완료 후 폐기합니다."
+            title: "기기 내 저장",
+            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "key",
-            title: "API 키 보관",
-            body: "API 키와 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다."
+            title: "인증 정보 보호",
+            body: "API 키와 구독 토큰은 이 기기의 iOS Keychain에 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
-            title: "AI 전송 범위",
-            body: "선택한 글조각과 메모만 현재 선택한 AI 제공자로 전송됩니다. 자동 분석이나 백그라운드 전송은 하지 않습니다."
+            title: "AI로 전송되는 정보",
+            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
-            title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용을 AI 학습 데이터로 사용하지 않습니다. 외부 제공자의 처리 조건은 사용자가 연결한 계정 약관을 따릅니다."
-        ),
-        PrivacyTransmissionPolicy(
-            systemImage: "book.closed",
-            title: "표지 이미지",
-            body: "도서 표지는 Kakao 또는 Aladin API가 제공한 URL만 참조하며, 앱 안에 표지 이미지를 복사 저장하지 않습니다."
-        ),
-        PrivacyTransmissionPolicy(
-            systemImage: "square.and.arrow.up",
-            title: "공유",
-            body: "공유 버튼은 사용자가 선택한 글조각이나 책 메모를 iOS 공유 시트로 넘길 때만 동작합니다. 책 원문 공유는 사적 이용 범위를 넘을 수 있어 매번 확인을 거칩니다."
+            title: "Overline의 처리",
+            body: "Overline은 전송 내용을 자체 서버에 저장하거나 학습에 사용하지 않습니다. 외부 AI에서 처리되는 방식은 연결한 서비스의 정책을 따릅니다."
         )
     ]
 
@@ -968,12 +1044,11 @@ private struct PrivacyTransmissionPolicyView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .settingsRowSeparator()
                 }
-            } footer: {
-                Text("클라우드 동기화는 v1 범위에 포함하지 않습니다.")
             }
         }
-        .navigationTitle("개인정보와 AI")
+        .navigationTitle("AI 데이터 처리")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -989,28 +1064,18 @@ private struct OverlineTermsView: View {
     private let terms: [OverlineTerm] = [
         OverlineTerm(
             systemImage: "person.crop.circle",
-            title: "개인 독서 메모",
-            body: "OCR 캡처 결과는 글조각과 메모로만 저장됩니다. 원문 사진은 개인 기록에도 남기지 않습니다."
+            title: "개인 독서 기록",
+            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
         ),
         OverlineTerm(
             systemImage: "sparkles",
-            title: "요청할 때만 AI 전송",
-            body: "인사이트 생성이나 연결 테스트를 누른 경우에만 선택한 글조각, 메모, 책 정보가 현재 선택한 AI 제공자로 전송됩니다."
-        ),
-        OverlineTerm(
-            systemImage: "nosign",
-            title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용과 메모를 자체 AI 학습 데이터로 사용하지 않으며 별도 서버에 저장하지 않습니다."
+            title: "AI 기능 사용",
+            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         OverlineTerm(
             systemImage: "square.and.arrow.up",
-            title: "공유 주의",
-            body: "책 원문을 공개 채널이나 다른 사람에게 보내는 공유는 사적 이용 범위를 넘을 수 있습니다. 공유 전 직접 작성한 메모나 짧은 인용인지 확인해야 합니다."
-        ),
-        OverlineTerm(
-            systemImage: "icloud.slash",
-            title: "v1 로컬 우선",
-            body: "v1에는 iCloud 동기화, 서버 저장, 소셜 공유, 전자책 연동을 포함하지 않습니다."
+            title: "공유 전 확인",
+            body: "책의 원문을 공유할 때에는 저작권과 인용 범위를 확인해 주세요."
         )
     ]
 
@@ -1036,9 +1101,8 @@ private struct OverlineTermsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .settingsRowSeparator()
                 }
-            } footer: {
-                Text("이 화면은 앱 사용 원칙 안내이며 법률 자문을 대체하지 않습니다.")
             }
         }
         .navigationTitle("이용 조건")
@@ -1059,10 +1123,7 @@ private struct LLMAPIKeyRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: provider.systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 24)
-                .foregroundStyle(Color.overlineAccent)
+            LLMProviderIcon(provider: provider)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(provider.title)
@@ -1086,10 +1147,7 @@ private struct LLMSubscriptionTokenRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: provider.systemImage)
-                    .font(.body.weight(.semibold))
-                    .frame(width: 24)
-                    .foregroundStyle(Color.overlineAccent)
+                LLMProviderIcon(provider: provider)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(provider.title)
@@ -1102,7 +1160,7 @@ private struct LLMSubscriptionTokenRow: View {
 
                 Spacer()
 
-                if token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty {
+                if token.hasAccessToken || !token.accountID.trimmed.isEmpty {
                     Button {
                         token = .empty
                     } label: {
@@ -1123,18 +1181,19 @@ private struct LLMSubscriptionTokenRow: View {
 
             switch provider {
             case .openai:
-                TextField("ChatGPT account id (선택)", text: $token.accountID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .anthropic:
-                SecureField("Refresh token (선택)", text: $token.refreshToken)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.caption)
-                    .privacySensitive()
-            case .openrouter, .gemini:
+                DisclosureGroup("고급 설정") {
+                    TextField("ChatGPT account ID", text: $token.accountID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("여러 ChatGPT 워크스페이스를 사용하는 경우에만 필요합니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            case .anthropic, .openrouter, .gemini:
                 EmptyView()
             }
         }
@@ -1147,10 +1206,7 @@ private struct LLMActiveModelSummary: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: settings.provider.systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 24)
-                .foregroundStyle(Color.overlineAccent)
+            LLMProviderIcon(provider: settings.provider)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(settings.provider.title)
@@ -1165,13 +1221,22 @@ private struct LLMActiveModelSummary: View {
             }
 
             Spacer()
-
-            Image(systemName: settings.isReady(for: settings.provider) ? "checkmark.circle.fill" : "exclamationmark.circle")
-                .font(.body.weight(.semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(settings.isReady(for: settings.provider) ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.68))
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct LLMProviderIcon: View {
+    let provider: LLMProvider
+    var size: CGFloat = 20
+
+    var body: some View {
+        Image(provider.assetName)
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
