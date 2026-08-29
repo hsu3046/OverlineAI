@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 nonisolated struct PageReadingDraftPage: Codable, Sendable {
     let text: String
@@ -35,11 +36,17 @@ actor PageReadingDraftStore {
             .appendingPathComponent(Self.fileName, isDirectory: false)
     }
 
-    func load(now: Date = .now) -> PageReadingDraft? {
+    func load(now: Date = .now) async -> PageReadingDraft? {
         guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
 
+        let data: Data
         do {
-            let data = try Data(contentsOf: fileURL)
+            data = try await readProtectedData()
+        } catch {
+            return nil
+        }
+
+        do {
             let draft = try JSONDecoder().decode(PageReadingDraft.self, from: data)
             guard isValid(draft), draft.expiresAt > now else {
                 try? delete()
@@ -74,8 +81,63 @@ actor PageReadingDraftStore {
         try fileManager.removeItem(at: fileURL)
     }
 
-    func removeIfExpired(now: Date = .now) {
-        _ = load(now: now)
+    func removeIfExpired(now: Date = .now) async {
+        _ = await load(now: now)
+    }
+
+    private func readProtectedData() async throws -> Data {
+        while true {
+            do {
+                return try Data(contentsOf: fileURL)
+            } catch {
+                guard
+                    Self.isProtectedFileAccessError(error),
+                    await isProtectedDataUnavailable()
+                else {
+                    throw error
+                }
+
+                try await waitForProtectedData()
+            }
+        }
+    }
+
+    private func isProtectedDataUnavailable() async -> Bool {
+        await MainActor.run {
+            !UIApplication.shared.isProtectedDataAvailable
+        }
+    }
+
+    private func waitForProtectedData() async throws {
+        let notifications = NotificationCenter.default.notifications(
+            named: UIApplication.protectedDataDidBecomeAvailableNotification
+        )
+        guard await isProtectedDataUnavailable() else { return }
+
+        for await _ in notifications {
+            try Task.checkCancellation()
+            guard await isProtectedDataUnavailable() else { return }
+        }
+
+        throw CancellationError()
+    }
+
+    private static func isProtectedFileAccessError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain,
+           nsError.code == CocoaError.Code.fileReadNoPermission.rawValue {
+            return true
+        }
+
+        guard let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError else {
+            return false
+        }
+        return underlyingError.domain == NSPOSIXErrorDomain
+            && [
+                Int(POSIXErrorCode.EACCES.rawValue),
+                Int(POSIXErrorCode.EPERM.rawValue)
+            ]
+            .contains(underlyingError.code)
     }
 
     private func prepareFolder() throws {

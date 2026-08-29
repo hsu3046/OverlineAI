@@ -1178,7 +1178,7 @@ final class CameraTextScanner {
             "camera_start_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
 
-        guard previewRouter.allowsStart(requestedBy: owner) else {
+        guard previewRouter.allowsCameraOperation(requestedBy: owner) else {
             cameraLifecycleLogger.info(
                 "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
             )
@@ -1230,6 +1230,14 @@ final class CameraTextScanner {
         cameraLifecycleLogger.info(
             "camera_stop_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
+
+        guard previewRouter.allowsCameraOperation(requestedBy: owner) else {
+            cameraLifecycleLogger.info(
+                "camera_stop_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
+            )
+            return
+        }
+
         stopSwipeRecognition(clearResults: clearRecognitionResults)
         core.stop(requestID: requestID, owner: owner)
         if isTorchOn {
@@ -1444,14 +1452,15 @@ private enum CameraFrozenFrameRecognizer {
             throw CameraScannerError.cameraUnavailable
         }
 
-        return try await Task.detached(priority: .userInitiated) {
-            let documentRequest = VNDetectDocumentSegmentationRequest()
-            let textRequest = VNRecognizeTextRequest()
-            textRequest.recognitionLevel = .accurate
-            textRequest.usesLanguageCorrection = true
-            textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
-            textRequest.automaticallyDetectsLanguage = true
+        let documentRequest = VNDetectDocumentSegmentationRequest()
+        let textRequest = VNRecognizeTextRequest()
+        textRequest.recognitionLevel = .accurate
+        textRequest.usesLanguageCorrection = true
+        textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        textRequest.automaticallyDetectsLanguage = true
 
+        let recognitionTask = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
             let handler = VNImageRequestHandler(
                 cgImage: cgImage,
                 orientation: .up,
@@ -1459,6 +1468,7 @@ private enum CameraFrozenFrameRecognizer {
             )
 
             try handler.perform([documentRequest, textRequest])
+            try Task.checkCancellation()
 
             let rawRecognizedLines = (textRequest.results ?? [])
                 .enumerated()
@@ -1502,7 +1512,14 @@ private enum CameraFrozenFrameRecognizer {
                 page: detectedPage
             )
         }
-        .value
+
+        return try await withTaskCancellationHandler {
+            try await recognitionTask.value
+        } onCancel: {
+            documentRequest.cancel()
+            textRequest.cancel()
+            recognitionTask.cancel()
+        }
     }
 }
 
@@ -1540,7 +1557,7 @@ final class CameraPreviewRouter {
         activatePreferredHostIfAvailable()
     }
 
-    func allowsStart(requestedBy owner: String) -> Bool {
+    func allowsCameraOperation(requestedBy owner: String) -> Bool {
         if owner == "highlight" || owner.hasPrefix("highlight.") {
             return preferredOwner == "highlight"
         }
