@@ -27,7 +27,7 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         case .openrouter: "OpenRouter"
         case .anthropic: "Anthropic"
         case .openai: "OpenAI"
-        case .gemini: "Gemini"
+        case .gemini: "Google"
         }
     }
 
@@ -36,7 +36,7 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         case .openrouter: "OR"
         case .anthropic: "AN"
         case .openai: "OA"
-        case .gemini: "GM"
+        case .gemini: "GO"
         }
     }
 
@@ -84,19 +84,19 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         case .anthropic:
             [
                 LLMModelOption(id: "claude-haiku-4-5-20251001", title: "Claude Haiku 4.5"),
-                LLMModelOption(id: "claude-sonnet-4-6", title: "Claude Sonnet 4.6"),
-                LLMModelOption(id: "claude-opus-4-8", title: "Claude Opus 4.8")
+                LLMModelOption(id: "claude-sonnet-5", title: "Claude Sonnet 5"),
+                LLMModelOption(id: "claude-opus-5", title: "Claude Opus 5")
             ]
         case .openai:
             [
-                LLMModelOption(id: "gpt-5.4-nano", title: "GPT-5.4 nano"),
-                LLMModelOption(id: "gpt-5.4-mini", title: "GPT-5.4 mini"),
-                LLMModelOption(id: "gpt-5.5", title: "GPT-5.5")
+                LLMModelOption(id: "gpt-5.6-luna", title: "GPT-5.6 Luna"),
+                LLMModelOption(id: "gpt-5.6-terra", title: "GPT-5.6 Terra"),
+                LLMModelOption(id: "gpt-5.6-sol", title: "GPT-5.6 Sol")
             ]
         case .gemini:
             [
-                LLMModelOption(id: "gemini-3.1-flash-lite", title: "Gemini 3.1 Flash-Lite"),
-                LLMModelOption(id: "gemini-3.5-flash", title: "Gemini 3.5 Flash"),
+                LLMModelOption(id: "gemini-3.5-flash-lite", title: "Gemini 3.5 Flash-Lite"),
+                LLMModelOption(id: "gemini-3.7-flash", title: "Gemini 3.7 Flash"),
                 LLMModelOption(id: "gemini-3.1-pro-preview", title: "Gemini 3.1 Pro")
             ]
         }
