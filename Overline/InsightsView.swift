@@ -545,14 +545,17 @@ struct OverlineSettingsSheet: View {
             Form {
                 Section {
                     Picker("제공자", selection: providerBinding) {
-                        ForEach(LLMProvider.allCases) { provider in
-                            Label(provider.title, systemImage: provider.systemImage)
+                        ForEach(LLMProvider.settingsOrder) { provider in
+                            HStack(spacing: 10) {
+                                LLMProviderIcon(provider: provider)
+                                Text(provider.title)
+                            }
                                 .tag(provider)
                         }
                     }
                     .pickerStyle(.navigationLink)
 
-                    Picker("모델", selection: modelBinding) {
+                    Picker("모델 선택", selection: modelBinding) {
                         ForEach(settings.provider.modelOptions) { model in
                             Text(model.title)
                             .tag(model.id)
@@ -565,7 +568,7 @@ struct OverlineSettingsSheet: View {
                     }
                     .pickerStyle(.navigationLink)
 
-                    LabeledContent("직접 모델 ID") {
+                    LabeledContent("모델 ID 직접 입력") {
                         TextField(settings.provider.defaultModelID, text: modelBinding)
                             .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
@@ -574,7 +577,7 @@ struct OverlineSettingsSheet: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text("목록에 없는 모델도 제공자 문서의 모델 ID를 그대로 입력해 사용할 수 있습니다.")
+                    Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -595,7 +598,7 @@ struct OverlineSettingsSheet: View {
                 }
 
                 Section {
-                    ForEach(LLMProvider.allCases) { provider in
+                    ForEach(LLMProvider.settingsOrder) { provider in
                         LLMAPIKeyRow(
                             provider: provider,
                             apiKey: Binding(
@@ -606,12 +609,10 @@ struct OverlineSettingsSheet: View {
                     }
                 } header: {
                     Text("API 키")
-                } footer: {
-                    Text("API 키는 백업 경로로 유지됩니다. 현재 제공자가 API 키 인증으로 설정된 경우에만 사용합니다.")
                 }
 
                 Section {
-                    ForEach(LLMProvider.allCases.filter(\.supportsSubscriptionAuth)) { provider in
+                    ForEach(LLMProvider.settingsOrder.filter(\.supportsSubscriptionAuth)) { provider in
                         LLMSubscriptionTokenRow(
                             provider: provider,
                             token: Binding(
@@ -1099,10 +1100,7 @@ private struct LLMAPIKeyRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: provider.systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 24)
-                .foregroundStyle(Color.overlineAccent)
+            LLMProviderIcon(provider: provider)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(provider.title)
@@ -1126,10 +1124,7 @@ private struct LLMSubscriptionTokenRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: provider.systemImage)
-                    .font(.body.weight(.semibold))
-                    .frame(width: 24)
-                    .foregroundStyle(Color.overlineAccent)
+                LLMProviderIcon(provider: provider)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(provider.title)
@@ -1187,10 +1182,7 @@ private struct LLMActiveModelSummary: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: settings.provider.systemImage)
-                .font(.body.weight(.semibold))
-                .frame(width: 24)
-                .foregroundStyle(Color.overlineAccent)
+            LLMProviderIcon(provider: settings.provider)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(settings.provider.title)
@@ -1212,6 +1204,20 @@ private struct LLMActiveModelSummary: View {
                 .foregroundStyle(settings.isReady(for: settings.provider) ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.68))
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct LLMProviderIcon: View {
+    let provider: LLMProvider
+    var size: CGFloat = 20
+
+    var body: some View {
+        Image(provider.assetName)
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 

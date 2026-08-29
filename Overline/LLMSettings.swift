@@ -15,6 +15,13 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
+    static let settingsOrder: [LLMProvider] = [
+        .openai,
+        .anthropic,
+        .gemini,
+        .openrouter
+    ]
+
     var title: String {
         switch self {
         case .openrouter: "OpenRouter"
@@ -33,12 +40,12 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    var systemImage: String {
+    var assetName: String {
         switch self {
-        case .openrouter: "point.3.connected.trianglepath.dotted"
-        case .anthropic: "a.circle"
-        case .openai: "sparkles"
-        case .gemini: "diamond"
+        case .openrouter: "LLMOpenRouter"
+        case .anthropic: "LLMAnthropic"
+        case .openai: "LLMOpenAI"
+        case .gemini: "LLMGemini"
         }
     }
 
@@ -105,9 +112,9 @@ enum LLMAuthMode: String, CaseIterable, Codable, Identifiable {
     var title: String {
         switch self {
         case .apiKey:
-            return "API 키"
+            return "API 키 사용"
         case .subscription:
-            return "구독"
+            return "구독 플랜 사용"
         }
     }
 
