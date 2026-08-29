@@ -757,6 +757,9 @@ struct PageReaderView: View {
             readingSession.updateSpeechRateMultiplier(Float(multiplier))
         }
         .onDisappear {
+            pageReaderMetricsLogger.info(
+                "camera_handoff event=reader_disappeared scene=\(String(describing: scenePhase), privacy: .public) stage=\(String(describing: readerStage), privacy: .public)"
+            )
             cancelPendingRecognition()
             cameraPreparationTask?.cancel()
             cameraPreparationTask = nil
@@ -770,7 +773,7 @@ struct PageReaderView: View {
             cameraScanner.stopSwipeRecognition(clearResults: true)
             cameraScanner.clearFrozenFrame()
             if scenePhase == .active {
-                cameraScanner.start()
+                cameraScanner.start(owner: "reader.on_disappear_handoff")
             }
         }
         .onChange(of: cameraScanner.frozenFrameImage != nil) { _, hasFrozenFrame in
@@ -800,7 +803,7 @@ struct PageReaderView: View {
                 cameraPreparationTask = nil
                 isCameraPreviewReady = false
                 readingSession.pauseIfNeeded()
-                cameraScanner.stop(clearRecognitionResults: false)
+                cameraScanner.stop(clearRecognitionResults: false, owner: "reader.scene_inactive")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
@@ -851,7 +854,7 @@ struct PageReaderView: View {
                 .fill(Color.black)
 
             if isCameraPreviewReady, cameraScanner.canUseLiveCamera {
-                CameraPreview(session: cameraScanner.session)
+                CameraPreview(session: cameraScanner.session, owner: "reader")
 
                 if let frozenFrameImage = cameraScanner.frozenFrameImage {
                     Image(uiImage: frozenFrameImage)
@@ -1040,7 +1043,7 @@ struct PageReaderView: View {
         cameraScanner.stopSwipeRecognition(clearResults: true)
         cameraScanner.clearSelectedLineCache()
         cameraScanner.clearFrozenFrame()
-        cameraScanner.start()
+        cameraScanner.start(owner: "reader.prepare")
     }
 
     private func scheduleCameraPreparation() {
@@ -1119,7 +1122,7 @@ struct PageReaderView: View {
 
             await Task.yield()
             guard !Task.isCancelled else { return }
-            cameraScanner.stop(clearRecognitionResults: false)
+            cameraScanner.stop(clearRecognitionResults: false, owner: "reader.finish_capture")
             cameraScanner.clearFrozenFrame()
             finishTransitionTask = nil
         }
@@ -1134,7 +1137,7 @@ struct PageReaderView: View {
         isAwaitingFrozenFrame = true
         cameraScanner.stopSwipeRecognition(clearResults: true)
         cameraScanner.clearFrozenFrame()
-        cameraScanner.start()
+        cameraScanner.start(owner: "reader.capture")
         cameraScanner.freezeNextFrame()
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
 
@@ -1156,7 +1159,7 @@ struct PageReaderView: View {
             recognitionTask = nil
             cameraScanner.clearFrozenFrame()
             if scenePhase == .active, readerStage == .camera {
-                cameraScanner.start()
+                cameraScanner.start(owner: "reader.recognition_complete")
             }
         }
 
@@ -1241,7 +1244,7 @@ struct PageReaderView: View {
         readerStage = .lyrics
         cameraPreparationTask?.cancel()
         cameraPreparationTask = nil
-        cameraScanner.stop(clearRecognitionResults: false)
+        cameraScanner.stop(clearRecognitionResults: false, owner: "reader.resume_draft")
         cameraScanner.clearFrozenFrame()
 
         resumeDraftTask?.cancel()

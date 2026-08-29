@@ -112,6 +112,9 @@ struct CaptureView: View {
             .onAppear {
                 captureScreenOpenedAt = .now
                 captureMetricsLogger.info("capture_screen_opened")
+                captureMetricsLogger.info(
+                    "camera_handoff event=highlight_appeared active=\(isActive, privacy: .public) reader_presented=\(isPageReaderPresented, privacy: .public)"
+                )
                 prefillTagsFromSelectedBookIfNeeded()
                 if isActive {
                     scheduleCameraStart()
@@ -119,6 +122,9 @@ struct CaptureView: View {
                 }
             }
             .onDisappear {
+                captureMetricsLogger.info(
+                    "camera_handoff event=highlight_disappeared active=\(isActive, privacy: .public) reader_presented=\(isPageReaderPresented, privacy: .public)"
+                )
                 applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
                 amendDebounceTask?.cancel()
                 amendDebounceTask = nil
@@ -178,7 +184,7 @@ struct CaptureView: View {
                     delayedCameraStartTask = nil
                     delayedCameraStopTask?.cancel()
                     delayedCameraStopTask = nil
-                    cameraScanner.stop(clearRecognitionResults: false)
+                    cameraScanner.stop(clearRecognitionResults: false, owner: "highlight.scene_inactive")
                 }
             }
             .sheet(item: $presentedSheet) { sheet in
@@ -233,10 +239,14 @@ struct CaptureView: View {
         delayedCameraStopTask = nil
         pageReaderRequestedAt = ProcessInfo.processInfo.systemUptime
         captureMetricsLogger.info("page_reader_requested")
+        captureMetricsLogger.info("camera_handoff from=highlight to=reader")
         isPageReaderPresented = true
     }
 
     private func pageReaderDidDismiss() {
+        captureMetricsLogger.info(
+            "camera_handoff from=reader to=highlight active=\(isActive, privacy: .public) scene=\(String(describing: scenePhase), privacy: .public)"
+        )
         lastExperienceMode = CaptureExperienceMode.highlight.rawValue
         pageReaderRequestedAt = nil
         if isActive {
@@ -282,7 +292,7 @@ struct CaptureView: View {
 
         guard isHighlighterGestureActive else {
             delayedCameraStartTask = nil
-            cameraScanner.start()
+            cameraScanner.start(owner: "highlight.schedule.immediate")
             return
         }
 
@@ -293,7 +303,7 @@ struct CaptureView: View {
             }
 
             guard isActive, scenePhase == .active else { return }
-            cameraScanner.start()
+            cameraScanner.start(owner: "highlight.schedule.delayed")
             delayedCameraStartTask = nil
         }
     }
@@ -304,7 +314,7 @@ struct CaptureView: View {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled, !isActive else { return }
 
-            cameraScanner.stop(clearRecognitionResults: false)
+            cameraScanner.stop(clearRecognitionResults: false, owner: "highlight.grace_timeout")
             delayedCameraStopTask = nil
         }
     }
@@ -471,7 +481,7 @@ struct CaptureView: View {
         cameraScanner.clearSelectedLineCache()
         cameraScanner.clearFrozenFrame()
         cameraScanner.stopSwipeRecognition(clearResults: true)
-        cameraScanner.start()
+        cameraScanner.start(owner: "highlight.new_capture")
         resetCaptureTimer()
     }
 
@@ -972,7 +982,7 @@ private struct CaptureStage: View {
                     .fill(Color(red: 0.09, green: 0.12, blue: 0.12))
 
                 if cameraScanner.canUseLiveCamera {
-                    CameraPreview(session: cameraScanner.session)
+                    CameraPreview(session: cameraScanner.session, owner: "highlight")
                         .overlay(Color.black.opacity(0.12))
 
                     if let frozenFrameImage = cameraScanner.frozenFrameImage {
@@ -1450,7 +1460,7 @@ private struct CaptureStage: View {
             pendingCameraCommitTask = nil
             setCameraFeedbackPhase(.idle)
             onCommit()
-            cameraScanner.stop(clearRecognitionResults: false)
+            cameraScanner.stop(clearRecognitionResults: false, owner: "highlight.commit")
         }
     }
 
@@ -1492,7 +1502,7 @@ private struct CaptureStage: View {
             guard pendingCameraCommit, pendingCameraStrokeID == strokeID else { return }
             recognitionStartedStrokeID = strokeID
             cameraRecognitionAttemptCount += 1
-            cameraScanner.start()
+            cameraScanner.start(owner: "highlight.recognition")
             setCameraFeedbackPhase(.reading)
             captureMetricsLogger.info(
                 "camera_ar_recognition_started stroke_id=\(strokeID, privacy: .public) warmup=\(profile.isWarmup, privacy: .public) frozen=\((cameraScanner.frozenFrameImage != nil), privacy: .public) delay_ms=\(profile.startDelayMilliseconds, privacy: .public) duration_ms=\(profile.durationMilliseconds, privacy: .public) max_frames=\(profile.maxFrames, privacy: .public) min_frame_gap_ms=\(profile.minimumFrameIntervalMilliseconds, privacy: .public)"
@@ -1613,7 +1623,7 @@ private struct CaptureStage: View {
         cancelPendingCameraMiss()
         cancelDelayedCameraRecognition()
         cameraScanner.stopSwipeRecognition()
-        cameraScanner.start()
+        cameraScanner.start(owner: "highlight.stroke")
         if isAutoRecognitionEnabled || pendingCameraGestures.isEmpty || cameraScanner.frozenFrameImage == nil {
             cameraScanner.freezeNextFrame()
         }
