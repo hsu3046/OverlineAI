@@ -1,4 +1,5 @@
 import AVFoundation
+import NaturalLanguage
 import Observation
 import SwiftUI
 import UIKit
@@ -60,12 +61,61 @@ struct CaptureExperiencePicker: View {
     }
 }
 
+struct ReadingCue: Identifiable {
+    let id: Int
+    let text: String
+    let range: NSRange
+}
+
 struct ReadingPage: Identifiable {
     let id = UUID()
     let text: String
     let language: CaptureLanguage
     let recognizedLineCount: Int
     let omittedLineCount: Int
+    let cues: [ReadingCue]
+
+    init(
+        text: String,
+        language: CaptureLanguage,
+        recognizedLineCount: Int,
+        omittedLineCount: Int
+    ) {
+        self.text = text
+        self.language = language
+        self.recognizedLineCount = recognizedLineCount
+        self.omittedLineCount = omittedLineCount
+        cues = ReadingCueTokenizer.cues(in: text, language: language)
+    }
+}
+
+private enum ReadingCueTokenizer {
+    static func cues(in text: String, language: CaptureLanguage) -> [ReadingCue] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        tokenizer.setLanguage(naturalLanguage(for: language))
+
+        let cues = tokenizer.tokens(for: text.startIndex..<text.endIndex)
+            .compactMap { range -> ReadingCue? in
+                let cueText = String(text[range]).trimmed
+                guard !cueText.isEmpty else { return nil }
+                let nsRange = NSRange(range, in: text)
+                return ReadingCue(id: nsRange.location, text: cueText, range: nsRange)
+            }
+
+        guard cues.isEmpty else { return cues }
+
+        let fullRange = NSRange(location: 0, length: (text as NSString).length)
+        return [ReadingCue(id: 0, text: text, range: fullRange)]
+    }
+
+    private static func naturalLanguage(for language: CaptureLanguage) -> NLLanguage {
+        switch language {
+        case .korean: .korean
+        case .english: .english
+        case .japanese: .japanese
+        }
+    }
 }
 
 @MainActor
@@ -78,6 +128,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var isSpeaking = false
     private(set) var isPaused = false
     private(set) var isWaitingForNextPage = false
+    private(set) var activeCueIndex = 0
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
@@ -166,6 +217,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         stopPlayback()
         pages.removeAll()
         currentPageIndex = 0
+        activeCueIndex = 0
         isWaitingForNextPage = false
         voiceSettings = nil
     }
@@ -190,12 +242,24 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        willSpeakRangeOfSpeechString characterRange: NSRange,
+        utterance: AVSpeechUtterance
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.updateActiveCue(for: characterRange, utteranceID: utteranceID)
+        }
+    }
+
     private func speakCurrentPage() {
         guard let page = currentPage, let voiceSettings else { return }
 
         stopPlayback()
         let utterance = voiceSettings.configuredUtterance(for: page.text, language: page.language)
         currentUtterance = utterance
+        activeCueIndex = 0
         isSpeaking = true
         isPaused = false
         isWaitingForNextPage = false
@@ -242,6 +306,25 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         self.currentUtterance = nil
         isSpeaking = false
         isPaused = false
+    }
+
+    private func updateActiveCue(
+        for spokenRange: NSRange,
+        utteranceID: ObjectIdentifier
+    ) {
+        guard
+            let currentUtterance,
+            ObjectIdentifier(currentUtterance) == utteranceID,
+            let currentPage
+        else {
+            return
+        }
+
+        let cueIndex = currentPage.cues.lastIndex { cue in
+            cue.range.location <= spokenRange.location
+        } ?? 0
+        guard activeCueIndex != cueIndex else { return }
+        activeCueIndex = cueIndex
     }
 
     private func activeSynthesizer() -> AVSpeechSynthesizer {
@@ -336,6 +419,97 @@ struct PageReadingTextProcessor {
     }
 }
 
+private enum PageReaderStage {
+    case camera
+    case lyrics
+}
+
+private struct PageReaderLyricsStage: View {
+    let page: ReadingPage
+    let pageIndex: Int
+    let pageCount: Int
+    let activeCueIndex: Int
+    let canAddPage: Bool
+    let addPage: () -> Void
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.overlinePaper.opacity(0.82))
+
+            VStack(spacing: 18) {
+                HStack {
+                    Text("\(pageIndex + 1) / \(pageCount)")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(Color.overlineMutedInk)
+
+                    Spacer()
+
+                    Button(action: addPage) {
+                        Image(systemName: "camera.badge.plus")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(canAddPage ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.35))
+                            .frame(width: 46, height: 46)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAddPage)
+                    .accessibilityLabel("다음 페이지 촬영")
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .leading, spacing: 22) {
+                    ForEach(visibleCueIndices, id: \.self) { cueIndex in
+                        cueText(page.cues[cueIndex], isActive: cueIndex == boundedActiveCueIndex)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+        }
+        .aspectRatio(0.78, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.68), lineWidth: 1)
+        }
+        .animation(.easeInOut(duration: 0.28), value: boundedActiveCueIndex)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("현재 페이지 낭독")
+    }
+
+    private var boundedActiveCueIndex: Int {
+        min(max(activeCueIndex, 0), max(page.cues.count - 1, 0))
+    }
+
+    private var visibleCueIndices: [Int] {
+        guard !page.cues.isEmpty else { return [] }
+        let lowerBound = max(boundedActiveCueIndex - 1, 0)
+        let upperBound = min(boundedActiveCueIndex + 2, page.cues.count - 1)
+        return Array(lowerBound...upperBound)
+    }
+
+    private func cueText(_ cue: ReadingCue, isActive: Bool) -> some View {
+        Text(cue.text)
+            .font(.title3.weight(isActive ? .bold : .medium))
+            .foregroundStyle(isActive ? Color.overlineInk : Color.overlineMutedInk.opacity(0.48))
+            .lineSpacing(5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, isActive ? 5 : 0)
+            .padding(.vertical, 3)
+            .background(alignment: .leading) {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.yellow.opacity(0.38))
+                }
+            }
+            .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+}
+
 struct PageReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -349,7 +523,10 @@ struct PageReaderView: View {
     @State private var errorMessage: String?
     @State private var captureTimeoutTask: Task<Void, Never>?
     @State private var recognitionTask: Task<Void, Never>?
+    @State private var cameraPreparationTask: Task<Void, Never>?
     @State private var showsExitConfirmation = false
+    @State private var readerStage: PageReaderStage = .camera
+    @State private var isCameraPreviewReady = false
 
     var body: some View {
         ZStack {
@@ -359,7 +536,7 @@ struct PageReaderView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     header
-                    cameraStage
+                    stageContent
 
                     if let errorMessage {
                         readerStatus(message: errorMessage, systemImage: "exclamationmark.triangle")
@@ -369,7 +546,6 @@ struct PageReaderView: View {
 
                     if !readingSession.pages.isEmpty {
                         readingControls
-                        recognizedTextPreview
                     }
                 }
                 .padding(16)
@@ -391,10 +567,12 @@ struct PageReaderView: View {
         .onAppear {
             quoteSpeechPlayer.stop()
             readingSession.connectVoiceSettings(quoteSpeechPlayer)
-            prepareCamera()
+            scheduleCameraPreparation()
         }
         .onDisappear {
             cancelPendingRecognition()
+            cameraPreparationTask?.cancel()
+            cameraPreparationTask = nil
             readingSession.endSession()
             cameraScanner.stopSwipeRecognition(clearResults: true)
             cameraScanner.clearFrozenFrame()
@@ -414,9 +592,14 @@ struct PageReaderView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                cameraScanner.start()
+                if readerStage == .camera {
+                    scheduleCameraPreparation()
+                }
             } else {
                 cancelPendingRecognition()
+                cameraPreparationTask?.cancel()
+                cameraPreparationTask = nil
+                isCameraPreviewReady = false
                 readingSession.pauseIfNeeded()
                 cameraScanner.stop(clearRecognitionResults: false)
             }
@@ -425,6 +608,8 @@ struct PageReaderView: View {
             cancelPendingRecognition()
             readingSession.endSession()
             cameraScanner.clearFrozenFrame()
+            readerStage = .camera
+            scheduleCameraPreparation()
             errorMessage = "메모리 보호를 위해 읽기 세션을 종료했습니다."
         }
     }
@@ -454,12 +639,30 @@ struct PageReaderView: View {
         }
     }
 
+    @ViewBuilder
+    private var stageContent: some View {
+        if readerStage == .lyrics, let currentPage = readingSession.currentPage {
+            PageReaderLyricsStage(
+                page: currentPage,
+                pageIndex: readingSession.currentPageIndex,
+                pageCount: readingSession.pages.count,
+                activeCueIndex: readingSession.activeCueIndex,
+                canAddPage: readingSession.canAddPage,
+                addPage: openCameraForNextPage
+            )
+            .transition(.opacity)
+        } else {
+            cameraStage
+                .transition(.opacity)
+        }
+    }
+
     private var cameraStage: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.black)
 
-            if cameraScanner.canUseLiveCamera {
+            if isCameraPreviewReady, cameraScanner.canUseLiveCamera {
                 CameraPreview(session: cameraScanner.session)
 
                 if let frozenFrameImage = cameraScanner.frozenFrameImage {
@@ -474,11 +677,15 @@ struct PageReaderView: View {
                     .padding(.horizontal, 42)
                     .padding(.vertical, 34)
                     .allowsHitTesting(false)
-            } else {
+            } else if isCameraPreviewReady {
                 unavailableCameraView
+            } else {
+                ProgressView()
+                    .tint(.white)
+                    .accessibilityLabel("카메라 준비 중")
             }
 
-            if cameraScanner.canToggleTorch {
+            if isCameraPreviewReady, cameraScanner.canToggleTorch {
                 Button {
                     cameraScanner.toggleTorch()
                 } label: {
@@ -547,20 +754,6 @@ struct PageReaderView: View {
 
     private var readingControls: some View {
         VStack(spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("\(readingSession.currentPageIndex + 1) / \(readingSession.pages.count)")
-                    .font(.headline.monospacedDigit())
-                    .foregroundStyle(Color.overlineInk)
-
-                Spacer()
-
-                if let currentPage = readingSession.currentPage, currentPage.omittedLineCount > 0 {
-                    Text("페이지 정보 제외됨")
-                        .font(.caption)
-                        .foregroundStyle(Color.overlineMutedInk)
-                }
-            }
-
             HStack(spacing: 34) {
                 readerControlButton(
                     systemImage: "backward.end.fill",
@@ -586,33 +779,21 @@ struct PageReaderView: View {
                     action: readingSession.moveForward
                 )
             }
+
+            if let currentPage = readingSession.currentPage, currentPage.omittedLineCount > 0 {
+                Text("페이지 정보 제외됨")
+                    .font(.caption)
+                    .foregroundStyle(Color.overlineMutedInk)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 10)
     }
 
-    private var recognizedTextPreview: some View {
-        Group {
-            if let currentPage = readingSession.currentPage {
-                Text(currentPage.text)
-                    .font(.body)
-                    .foregroundStyle(Color.overlineInk)
-                    .lineSpacing(4)
-                    .lineLimit(5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .background(Color.overlinePaper.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.66), lineWidth: 1)
-                    }
-                    .accessibilityLabel("현재 페이지 인식 내용")
-            }
-        }
-    }
-
     private var canCapturePage: Bool {
-        cameraScanner.canUseLiveCamera
+        readerStage == .camera
+            && isCameraPreviewReady
+            && cameraScanner.canUseLiveCamera
             && !isAwaitingFrozenFrame
             && !isProcessingPage
             && readingSession.canAddPage
@@ -658,6 +839,40 @@ struct PageReaderView: View {
         cameraScanner.start()
     }
 
+    private func scheduleCameraPreparation() {
+        cameraPreparationTask?.cancel()
+        cameraPreparationTask = nil
+        isCameraPreviewReady = false
+
+        cameraPreparationTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 70_000_000)
+            guard
+                !Task.isCancelled,
+                scenePhase == .active,
+                readerStage == .camera
+            else {
+                return
+            }
+
+            prepareCamera()
+            isCameraPreviewReady = true
+            cameraPreparationTask = nil
+        }
+    }
+
+    private func openCameraForNextPage() {
+        guard readingSession.canAddPage else {
+            errorMessage = "한 번에 최대 \(PageReadingSession.maximumPageCount)쪽까지 준비할 수 있습니다."
+            return
+        }
+
+        errorMessage = nil
+        withAnimation(.easeInOut(duration: 0.22)) {
+            readerStage = .camera
+        }
+        scheduleCameraPreparation()
+    }
+
     private func capturePage() {
         guard canCapturePage else { return }
 
@@ -686,7 +901,7 @@ struct PageReaderView: View {
             isProcessingPage = false
             recognitionTask = nil
             cameraScanner.clearFrozenFrame()
-            if scenePhase == .active {
+            if scenePhase == .active, readerStage == .camera {
                 cameraScanner.start()
             }
         }
@@ -709,6 +924,11 @@ struct PageReaderView: View {
             }
 
             errorMessage = nil
+            isCameraPreviewReady = false
+            cameraScanner.stop(clearRecognitionResults: false)
+            withAnimation(.easeInOut(duration: 0.22)) {
+                readerStage = .lyrics
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch is CancellationError {
             return
@@ -731,6 +951,8 @@ struct PageReaderView: View {
 
     private func closeReader() {
         cancelPendingRecognition()
+        cameraPreparationTask?.cancel()
+        cameraPreparationTask = nil
         readingSession.endSession()
         cameraScanner.clearFrozenFrame()
         dismiss()
