@@ -380,6 +380,7 @@ struct LLMInsightClient {
                 ]
             ],
             "generationConfig": [
+                "temperature": profile.temperature,
                 "maxOutputTokens": profile.maxOutputTokens
             ]
         ]
