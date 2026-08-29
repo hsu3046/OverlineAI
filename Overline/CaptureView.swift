@@ -235,6 +235,8 @@ struct CaptureView: View {
 
     private func presentPageReader() {
         guard !isPageReaderPresented else { return }
+        delayedCameraStartTask?.cancel()
+        delayedCameraStartTask = nil
         delayedCameraStopTask?.cancel()
         delayedCameraStopTask = nil
         pageReaderRequestedAt = ProcessInfo.processInfo.systemUptime
@@ -291,7 +293,7 @@ struct CaptureView: View {
     }
 
     private func scheduleCameraStart() {
-        guard isActive, scenePhase == .active else { return }
+        guard isActive, scenePhase == .active, !isPageReaderPresented else { return }
         delayedCameraStopTask?.cancel()
         delayedCameraStopTask = nil
         delayedCameraStartTask?.cancel()
@@ -308,7 +310,7 @@ struct CaptureView: View {
                 guard !Task.isCancelled else { return }
             }
 
-            guard isActive, scenePhase == .active else { return }
+            guard isActive, scenePhase == .active, !isPageReaderPresented else { return }
             cameraScanner.start(owner: "highlight.schedule.delayed")
             delayedCameraStartTask = nil
         }

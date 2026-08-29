@@ -1178,6 +1178,13 @@ final class CameraTextScanner {
             "camera_start_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
 
+        guard previewRouter.allowsStart(requestedBy: owner) else {
+            cameraLifecycleLogger.info(
+                "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
+            )
+            return
+        }
+
         #if targetEnvironment(simulator)
         status = .unavailable("시뮬레이터에서는 카메라 대신 목업 캡처를 사용합니다.")
         cameraLifecycleLogger.info(
@@ -1531,6 +1538,16 @@ final class CameraPreviewRouter {
             "camera_preview_owner_selected owner=\(owner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
         activatePreferredHostIfAvailable()
+    }
+
+    func allowsStart(requestedBy owner: String) -> Bool {
+        if owner == "highlight" || owner.hasPrefix("highlight.") {
+            return preferredOwner == "highlight"
+        }
+        if owner == "reader" || owner.hasPrefix("reader.") {
+            return preferredOwner == "reader"
+        }
+        return true
     }
 
     func register(_ hostView: CameraPreviewHostView, owner: String) {
