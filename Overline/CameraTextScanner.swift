@@ -368,7 +368,7 @@ private extension CGImagePropertyOrientation {
     }
 }
 
-private struct OCRTextAssembler {
+struct OCRTextAssembler {
     private struct LayoutMetrics {
         let bodyLeft: CGFloat
         let bodyRight: CGFloat
@@ -396,6 +396,7 @@ private struct OCRTextAssembler {
 
     let pageLines: [CameraRecognizedTextLine]
     let selectedLines: [CameraRecognizedTextLine]
+    var trimsBoundaryFragments = true
 
     func assembledText() -> String {
         let selectedLines = sortedUnique(selectedLines)
@@ -426,7 +427,9 @@ private struct OCRTextAssembler {
                 selectedEnd: selectedEnd
             )
         }
-        includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
+        if trimsBoundaryFragments {
+            includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
+        }
 
         guard !includedSpans.isEmpty else {
             return fallbackText(from: selectedLines)
@@ -1258,6 +1261,14 @@ final class CameraTextScanner {
         }
     }
 
+    func recognizeFrozenPage() async throws -> CameraFrozenFrameRecognitionResult {
+        guard let frozenFrameImage else {
+            throw OCRTextRecognizerError.invalidImage
+        }
+
+        return try await CameraFrozenFrameRecognizer.recognize(in: frozenFrameImage)
+    }
+
     func stopSwipeRecognition(clearResults: Bool = true) {
         recognitionWindowTask?.cancel()
         recognitionWindowTask = nil
@@ -1481,7 +1492,7 @@ final class CameraPreviewView: UIView {
     }
 }
 
-private struct CameraFrozenFrameRecognitionResult {
+struct CameraFrozenFrameRecognitionResult {
     let lines: [CameraRecognizedTextLine]
     let page: CameraDetectedPage?
 }

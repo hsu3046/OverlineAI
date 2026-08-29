@@ -179,6 +179,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         activeHighlightID == highlightID
     }
 
+    func configuredUtterance(for text: String, language: CaptureLanguage) -> AVSpeechUtterance {
+        let utterance = AVSpeechUtterance(string: text)
+        configure(utterance, for: language)
+        return utterance
+    }
+
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer,
         didFinish utterance: AVSpeechUtterance

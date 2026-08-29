@@ -35,11 +35,14 @@ struct CaptureView: View {
     @AppStorage("capture.autoRecognitionEnabled") private var isAutoRecognitionEnabled = true
     @State private var selectedTone: StickyTone = .yellow
     @State private var memoFocusRequest = 0
+    @State private var captureExperience: CaptureExperienceMode = .highlight
 
     var body: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 VStack(spacing: 16) {
+                    CaptureExperiencePicker(selection: $captureExperience)
+
                     CaptureBookSelector(
                         library: library,
                         openAddBook: { presentedSheet = .addBook }
@@ -180,7 +183,21 @@ struct CaptureView: View {
                         .presentationDragIndicator(.visible)
                 }
             }
+            .fullScreenCover(isPresented: pageReaderPresentation) {
+                PageReaderView(cameraScanner: cameraScanner)
+            }
         }
+    }
+
+    private var pageReaderPresentation: Binding<Bool> {
+        Binding(
+            get: { captureExperience == .reader },
+            set: { isPresented in
+                if !isPresented {
+                    captureExperience = .highlight
+                }
+            }
+        )
     }
 
     private func toggleVoiceMemo() {
