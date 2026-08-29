@@ -12,7 +12,7 @@ enum CaptureExperienceMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .highlight: "글조각"
+        case .highlight: "줄긋기"
         case .reader: "읽어주기"
         }
     }
@@ -644,28 +644,16 @@ struct PageReaderView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            CaptureExperiencePicker(
-                selection: Binding(
-                    get: { .reader },
-                    set: { mode in
-                        if mode == .highlight {
-                            requestClose()
-                        }
+        CaptureExperiencePicker(
+            selection: Binding(
+                get: { .reader },
+                set: { mode in
+                    if mode == .highlight {
+                        requestClose()
                     }
-                )
+                }
             )
-
-            Button(action: requestClose) {
-                Image(systemName: "xmark")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color.overlineInk)
-                    .frame(width: 46, height: 46)
-                    .background(.thinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("읽기 종료")
-        }
+        )
     }
 
     @ViewBuilder
