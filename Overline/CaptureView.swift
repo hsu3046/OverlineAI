@@ -255,6 +255,11 @@ struct CaptureView: View {
         pageReaderRequestedAt = nil
         if isActive, scenePhase == .active, !cameraScanner.session.isRunning {
             scheduleCameraStart()
+        } else if !isActive || scenePhase != .active {
+            cameraScanner.stop(
+                clearRecognitionResults: false,
+                owner: "highlight.reader_dismissed_inactive"
+            )
         } else {
             captureMetricsLogger.info(
                 "camera_handoff session_reused=\(cameraScanner.session.isRunning, privacy: .public)"

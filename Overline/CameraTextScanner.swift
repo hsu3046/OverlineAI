@@ -1178,7 +1178,7 @@ final class CameraTextScanner {
             "camera_start_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
 
-        guard previewRouter.allowsCameraOperation(requestedBy: owner) else {
+        guard let authorization = previewRouter.cameraOperationAuthorization(requestedBy: owner) else {
             cameraLifecycleLogger.info(
                 "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
             )
@@ -1196,7 +1196,7 @@ final class CameraTextScanner {
         switch authorizationStatus {
         case .authorized:
             status = .running
-            core.start(requestID: requestID, owner: owner)
+            core.start(requestID: requestID, owner: owner, authorization: authorization)
         case .notDetermined:
             status = .requestingPermission
             cameraLifecycleLogger.info(
@@ -1206,7 +1206,11 @@ final class CameraTextScanner {
                 Task { @MainActor in
                     if granted {
                         self?.status = .running
-                        self?.core.start(requestID: requestID, owner: owner)
+                        self?.core.start(
+                            requestID: requestID,
+                            owner: owner,
+                            authorization: authorization
+                        )
                     } else {
                         self?.status = .unavailable("카메라 권한이 필요합니다.")
                         cameraLifecycleLogger.error(
@@ -1231,7 +1235,7 @@ final class CameraTextScanner {
             "camera_stop_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
 
-        guard previewRouter.allowsCameraOperation(requestedBy: owner) else {
+        guard let authorization = previewRouter.cameraOperationAuthorization(requestedBy: owner) else {
             cameraLifecycleLogger.info(
                 "camera_stop_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
             )
@@ -1239,7 +1243,7 @@ final class CameraTextScanner {
         }
 
         stopSwipeRecognition(clearResults: clearRecognitionResults)
-        core.stop(requestID: requestID, owner: owner)
+        core.stop(requestID: requestID, owner: owner, authorization: authorization)
         if isTorchOn {
             setTorch(false)
         }
@@ -1523,6 +1527,65 @@ private enum CameraFrozenFrameRecognizer {
     }
 }
 
+nonisolated final class CameraOwnershipState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var preferredOwner = "highlight"
+    private var generation = 0
+
+    func selectOwner(_ owner: String) {
+        lock.lock()
+        guard preferredOwner != owner else {
+            lock.unlock()
+            return
+        }
+        preferredOwner = owner
+        generation += 1
+        lock.unlock()
+    }
+
+    func authorization(requestedBy owner: String) -> CameraOperationAuthorization? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let ownerGroup = Self.ownerGroup(for: owner) else {
+            return CameraOperationAuthorization(state: self, ownerGroup: nil, generation: generation)
+        }
+        guard ownerGroup == preferredOwner else { return nil }
+        return CameraOperationAuthorization(
+            state: self,
+            ownerGroup: ownerGroup,
+            generation: generation
+        )
+    }
+
+    fileprivate func isCurrent(ownerGroup: String?, generation: Int) -> Bool {
+        guard let ownerGroup else { return true }
+        lock.lock()
+        defer { lock.unlock() }
+        return self.generation == generation && preferredOwner == ownerGroup
+    }
+
+    private static func ownerGroup(for owner: String) -> String? {
+        if owner == "highlight" || owner.hasPrefix("highlight.") {
+            return "highlight"
+        }
+        if owner == "reader" || owner.hasPrefix("reader.") {
+            return "reader"
+        }
+        return nil
+    }
+}
+
+nonisolated struct CameraOperationAuthorization: @unchecked Sendable {
+    fileprivate let state: CameraOwnershipState
+    fileprivate let ownerGroup: String?
+    fileprivate let generation: Int
+
+    var isCurrent: Bool {
+        state.isCurrent(ownerGroup: ownerGroup, generation: generation)
+    }
+}
+
 @MainActor
 final class CameraPreviewRouter {
     private final class WeakHost {
@@ -1535,6 +1598,7 @@ final class CameraPreviewRouter {
 
     private let session: AVCaptureSession
     private let previewLayer: AVCaptureVideoPreviewLayer
+    private let ownershipState = CameraOwnershipState()
     private var hosts: [String: WeakHost] = [:]
     private var preferredOwner = "highlight"
     private weak var activeHostView: CameraPreviewHostView?
@@ -1551,20 +1615,15 @@ final class CameraPreviewRouter {
 
     func selectOwner(_ owner: String) {
         preferredOwner = owner
+        ownershipState.selectOwner(owner)
         cameraLifecycleLogger.info(
             "camera_preview_owner_selected owner=\(owner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
         activatePreferredHostIfAvailable()
     }
 
-    func allowsCameraOperation(requestedBy owner: String) -> Bool {
-        if owner == "highlight" || owner.hasPrefix("highlight.") {
-            return preferredOwner == "highlight"
-        }
-        if owner == "reader" || owner.hasPrefix("reader.") {
-            return preferredOwner == "reader"
-        }
-        return true
+    func cameraOperationAuthorization(requestedBy owner: String) -> CameraOperationAuthorization? {
+        ownershipState.authorization(requestedBy: owner)
     }
 
     func register(_ hostView: CameraPreviewHostView, owner: String) {
@@ -1807,7 +1866,11 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         clearSnapshot()
     }
 
-    func start(requestID: Int, owner: String) {
+    func start(
+        requestID: Int,
+        owner: String,
+        authorization: CameraOperationAuthorization
+    ) {
         let requestedAt = ProcessInfo.processInfo.systemUptime
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -1816,6 +1879,12 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             cameraLifecycleLogger.info(
                 "camera_start_queue_entered owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) queue_wait_ms=\(queueWaitMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) configured=\(self.isConfigured, privacy: .public)"
             )
+            guard authorization.isCurrent else {
+                cameraLifecycleLogger.info(
+                    "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=stale_preview_owner"
+                )
+                return
+            }
             self.recordStartContext(
                 StartContext(requestID: requestID, owner: owner, requestedAt: requestedAt)
             )
@@ -1870,7 +1939,11 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         }
     }
 
-    func stop(requestID: Int, owner: String) {
+    func stop(
+        requestID: Int,
+        owner: String,
+        authorization: CameraOperationAuthorization
+    ) {
         let requestedAt = ProcessInfo.processInfo.systemUptime
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -1878,6 +1951,12 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
             cameraLifecycleLogger.info(
                 "camera_stop_queue_entered owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) queue_wait_ms=\(queueWaitMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
             )
+            guard authorization.isCurrent else {
+                cameraLifecycleLogger.info(
+                    "camera_stop_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=stale_preview_owner"
+                )
+                return
+            }
             let operationStartedAt = ProcessInfo.processInfo.systemUptime
             if session.isRunning {
                 session.stopRunning()

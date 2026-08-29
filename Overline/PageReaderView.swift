@@ -133,6 +133,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var isWaitingForNextPage = false
     private(set) var activeCueIndex = 0
     private(set) var speechRateMultiplier: Float = 1
+    fileprivate private(set) var lyricsCues: [ReadingLyricsCue] = []
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
@@ -161,6 +162,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     func appendPage(_ page: ReadingPage) -> Bool {
         guard pages.count < Self.maximumPageCount else { return false }
         pages.append(page)
+        lyricsCues.append(contentsOf: Self.makeLyricsCues(for: [page]))
         return true
     }
 
@@ -178,6 +180,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     ) {
         stopPlayback()
         self.pages = Array(pages.prefix(Self.maximumPageCount))
+        lyricsCues = Self.makeLyricsCues(for: self.pages)
         self.currentPageIndex = min(max(currentPageIndex, 0), max(self.pages.count - 1, 0))
         let cueCount = currentPage?.cues.count ?? 0
         self.activeCueIndex = min(max(activeCueIndex, 0), max(cueCount - 1, 0))
@@ -240,11 +243,23 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     func endSession() {
         stopPlayback()
         pages.removeAll()
+        lyricsCues.removeAll()
         currentPageIndex = 0
         activeCueIndex = 0
         isWaitingForNextPage = false
         pendingStartCueIndex = nil
         voiceSettings = nil
+    }
+
+    private static func makeLyricsCues(for pages: [ReadingPage]) -> [ReadingLyricsCue] {
+        pages.flatMap { page in
+            page.cues.map { cue in
+                ReadingLyricsCue(
+                    id: ReadingLyricsCueID(pageID: page.id, cueID: cue.id),
+                    text: cue.text
+                )
+            }
+        }
     }
 
     nonisolated func speechSynthesizer(
@@ -477,6 +492,7 @@ private struct ReadingLyricsCue: Identifiable {
 
 private struct PageReaderLyricsStage: View {
     let pages: [ReadingPage]
+    let lyricsCues: [ReadingLyricsCue]
     let currentPageIndex: Int
     let activeCueIndex: Int
     let isContentReady: Bool
@@ -533,17 +549,6 @@ private struct PageReaderLyricsStage: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("본문 낭독")
-    }
-
-    private var lyricsCues: [ReadingLyricsCue] {
-        pages.flatMap { page in
-            page.cues.map { cue in
-                ReadingLyricsCue(
-                    id: ReadingLyricsCueID(pageID: page.id, cueID: cue.id),
-                    text: cue.text
-                )
-            }
-        }
     }
 
     private var activeCueID: ReadingLyricsCue.ID? {
@@ -806,6 +811,8 @@ struct PageReaderView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             cancelPendingRecognition()
+            resumeDraftTask?.cancel()
+            resumeDraftTask = nil
             finishTransitionTask?.cancel()
             finishTransitionTask = nil
             readingSession.endSession()
@@ -837,6 +844,7 @@ struct PageReaderView: View {
         if readerStage == .lyrics {
             PageReaderLyricsStage(
                 pages: readingSession.pages,
+                lyricsCues: readingSession.lyricsCues,
                 currentPageIndex: readingSession.currentPageIndex,
                 activeCueIndex: readingSession.activeCueIndex,
                 isContentReady: isLyricsContentReady
@@ -1249,17 +1257,32 @@ struct PageReaderView: View {
         resumeDraftTask = Task { @MainActor in
             defer { resumeDraftTask = nil }
             let startedAt = ProcessInfo.processInfo.systemUptime
-            let pages = await Task.detached(priority: .userInitiated) {
-                draft.pages.map { page in
-                    ReadingPage(
+            let tokenizationTask = Task.detached(priority: .userInitiated) { () -> [ReadingPage]? in
+                var pages: [ReadingPage] = []
+                pages.reserveCapacity(draft.pages.count)
+                for page in draft.pages {
+                    guard !Task.isCancelled else { return nil }
+                    pages.append(ReadingPage(
                         text: page.text,
                         language: page.language,
                         recognizedLineCount: page.recognizedLineCount,
                         omittedLineCount: page.omittedLineCount
-                    )
+                    ))
                 }
-            }.value
-            guard !Task.isCancelled else { return }
+                return pages
+            }
+            let tokenizedPages = await withTaskCancellationHandler {
+                await tokenizationTask.value
+            } onCancel: {
+                tokenizationTask.cancel()
+            }
+            guard
+                let pages = tokenizedPages,
+                !Task.isCancelled,
+                readerStage == .lyrics
+            else {
+                return
+            }
 
             let durationMilliseconds = elapsedMilliseconds(since: startedAt)
             let characterCount = draft.pages.reduce(0) { $0 + $1.text.count }
@@ -1272,6 +1295,7 @@ struct PageReaderView: View {
                 return
             }
 
+            guard !Task.isCancelled, readerStage == .lyrics else { return }
             readingSession.restorePages(
                 pages,
                 currentPageIndex: draft.currentPageIndex,
