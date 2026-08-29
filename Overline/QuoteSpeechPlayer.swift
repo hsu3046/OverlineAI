@@ -179,9 +179,17 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         activeHighlightID == highlightID
     }
 
-    func configuredUtterance(for text: String, language: CaptureLanguage) -> AVSpeechUtterance {
+    func configuredUtterance(
+        for text: String,
+        language: CaptureLanguage,
+        rateMultiplier: Float = 1
+    ) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
         configure(utterance, for: language)
+        utterance.rate = min(
+            max(utterance.rate * rateMultiplier, AVSpeechUtteranceMinimumSpeechRate),
+            AVSpeechUtteranceMaximumSpeechRate
+        )
         return utterance
     }
 
