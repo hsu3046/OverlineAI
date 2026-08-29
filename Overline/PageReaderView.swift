@@ -433,80 +433,109 @@ private struct PageReaderLyricsStage: View {
     let addPage: () -> Void
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.overlinePaper.opacity(0.82))
+        VStack(spacing: 0) {
+            stageHeader
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
 
-            VStack(spacing: 18) {
-                HStack {
-                    Text("\(pageIndex + 1) / \(pageCount)")
-                        .font(.headline.monospacedDigit())
-                        .foregroundStyle(Color.overlineMutedInk)
+            GeometryReader { geometry in
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 26) {
+                            Color.clear
+                                .frame(height: verticalScrollInset(for: geometry.size.height))
+                                .accessibilityHidden(true)
 
-                    Spacer()
+                            ForEach(page.cues) { cue in
+                                cueText(cue, isActive: cue.id == activeCueID)
+                                    .id(cue.id)
+                            }
 
-                    Button(action: addPage) {
-                        Image(systemName: "camera.badge.plus")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(canAddPage ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.35))
-                            .frame(width: 46, height: 46)
-                            .background(.thinMaterial, in: Circle())
+                            Color.clear
+                                .frame(height: verticalScrollInset(for: geometry.size.height))
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, 22)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canAddPage)
-                    .accessibilityLabel("다음 페이지 촬영")
-                }
-
-                Spacer(minLength: 0)
-
-                VStack(alignment: .leading, spacing: 22) {
-                    ForEach(visibleCueIndices, id: \.self) { cueIndex in
-                        cueText(page.cues[cueIndex], isActive: cueIndex == boundedActiveCueIndex)
+                    .scrollIndicators(.hidden)
+                    .onAppear {
+                        scrollToActiveCue(using: scrollProxy, animated: false)
+                    }
+                    .onChange(of: boundedActiveCueIndex) { _, _ in
+                        scrollToActiveCue(using: scrollProxy, animated: true)
+                    }
+                    .onChange(of: page.id) { _, _ in
+                        scrollToActiveCue(using: scrollProxy, animated: false)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Spacer(minLength: 0)
             }
-            .padding(20)
         }
-        .aspectRatio(0.78, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.overlinePaper.opacity(0.82))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.white.opacity(0.68), lineWidth: 1)
         }
-        .animation(.easeInOut(duration: 0.28), value: boundedActiveCueIndex)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("현재 페이지 낭독")
+    }
+
+    private var stageHeader: some View {
+        HStack {
+            Text("\(pageIndex + 1) / \(pageCount)")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(Color.overlineMutedInk)
+
+            Spacer()
+
+            Button(action: addPage) {
+                Image(systemName: "camera.badge.plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(canAddPage ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.35))
+                    .frame(width: 46, height: 46)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAddPage)
+            .accessibilityLabel("다음 페이지 촬영")
+        }
     }
 
     private var boundedActiveCueIndex: Int {
         min(max(activeCueIndex, 0), max(page.cues.count - 1, 0))
     }
 
-    private var visibleCueIndices: [Int] {
-        guard !page.cues.isEmpty else { return [] }
-        let lowerBound = max(boundedActiveCueIndex - 1, 0)
-        let upperBound = min(boundedActiveCueIndex + 2, page.cues.count - 1)
-        return Array(lowerBound...upperBound)
+    private var activeCueID: ReadingCue.ID? {
+        guard page.cues.indices.contains(boundedActiveCueIndex) else { return nil }
+        return page.cues[boundedActiveCueIndex].id
     }
 
     private func cueText(_ cue: ReadingCue, isActive: Bool) -> some View {
         Text(cue.text)
-            .font(.title3.weight(isActive ? .bold : .medium))
-            .foregroundStyle(isActive ? Color.overlineInk : Color.overlineMutedInk.opacity(0.48))
-            .lineSpacing(5)
+            .font(.title2.weight(isActive ? .bold : .semibold))
+            .foregroundStyle(isActive ? Color.overlineInk : Color.overlineMutedInk.opacity(0.38))
+            .lineSpacing(6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, isActive ? 5 : 0)
-            .padding(.vertical, 3)
-            .background(alignment: .leading) {
-                if isActive {
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(Color.yellow.opacity(0.38))
-                }
-            }
+            .scaleEffect(isActive ? 1 : 0.86, anchor: .leading)
+            .animation(.smooth(duration: 0.42, extraBounce: 0), value: isActive)
             .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+
+    private func verticalScrollInset(for height: CGFloat) -> CGFloat {
+        max(height * 0.38, 96)
+    }
+
+    private func scrollToActiveCue(using proxy: ScrollViewProxy, animated: Bool) {
+        guard let activeCueID else { return }
+
+        if animated {
+            withAnimation(.smooth(duration: 0.62, extraBounce: 0)) {
+                proxy.scrollTo(activeCueID, anchor: .center)
+            }
+        } else {
+            proxy.scrollTo(activeCueID, anchor: .center)
+        }
     }
 }
 
@@ -533,25 +562,25 @@ struct PageReaderView: View {
             OverlineCanvasBackground()
                 .ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 16) {
-                    header
-                    stageContent
+            VStack(spacing: 16) {
+                header
 
-                    if let errorMessage {
-                        readerStatus(message: errorMessage, systemImage: "exclamationmark.triangle")
-                    } else if readingSession.pages.isEmpty {
-                        readerStatus(message: "인식 내용은 저장되지 않습니다", systemImage: "lock")
-                    }
+                stageContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
 
-                    if !readingSession.pages.isEmpty {
-                        readingControls
-                    }
+                if let errorMessage {
+                    readerStatus(message: errorMessage, systemImage: "exclamationmark.triangle")
+                } else if readingSession.pages.isEmpty {
+                    readerStatus(message: "인식 내용은 저장되지 않습니다", systemImage: "lock")
                 }
-                .padding(16)
-                .padding(.bottom, 24)
+
+                if !readingSession.pages.isEmpty {
+                    readingControls
+                }
             }
-            .scrollIndicators(.hidden)
+            .padding(16)
+            .padding(.bottom, 4)
         }
         .interactiveDismissDisabled(!readingSession.pages.isEmpty)
         .confirmationDialog(
@@ -705,7 +734,7 @@ struct PageReaderView: View {
                 .padding(.bottom, 18)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .aspectRatio(0.78, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
