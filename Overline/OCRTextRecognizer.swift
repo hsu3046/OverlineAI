@@ -1,5 +1,5 @@
 import UIKit
-import Vision
+@preconcurrency import Vision
 
 enum OCRTextRecognizerError: LocalizedError {
     case invalidImage
@@ -31,13 +31,14 @@ struct OCRTextRecognizer {
             throw OCRTextRecognizerError.invalidImage
         }
 
-        return try await Task.detached(priority: .userInitiated) {
-            let request = VNRecognizeTextRequest()
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
-            request.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
-            request.automaticallyDetectsLanguage = true
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        request.automaticallyDetectsLanguage = true
 
+        let recognitionTask = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
             let handler = VNImageRequestHandler(
                 cgImage: cgImage,
                 orientation: CGImagePropertyOrientation(image.imageOrientation),
@@ -45,6 +46,7 @@ struct OCRTextRecognizer {
             )
 
             try handler.perform([request])
+            try Task.checkCancellation()
 
             // Preserve Vision's reading order. Geometry-only sorting can scramble rotated or skewed book pages.
             let recognizedLines = (request.results ?? [])
@@ -74,7 +76,13 @@ struct OCRTextRecognizer {
                 inferredPageReference: inferredPageReference
             )
         }
-        .value
+
+        return try await withTaskCancellationHandler {
+            try await recognitionTask.value
+        } onCancel: {
+            request.cancel()
+            recognitionTask.cancel()
+        }
     }
 }
 

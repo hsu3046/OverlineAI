@@ -43,6 +43,9 @@ struct ContentView: View {
                 apply(intentRouter.request)
             }
             .task {
+                Task {
+                    await PageReadingDraftStore.shared.removeIfExpired()
+                }
                 guard cameraScanner == nil else { return }
                 cameraScanner = await CameraTextScanner.makePrepared()
             }
@@ -55,6 +58,9 @@ struct ContentView: View {
                     return
                 }
                 quoteSpeechPlayer.invalidateVoiceCatalog()
+                Task {
+                    await PageReadingDraftStore.shared.removeIfExpired()
+                }
                 recordAppOpen()
             }
             .onChange(of: selectedTab) { _, _ in

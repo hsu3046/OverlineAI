@@ -6,6 +6,8 @@ import SwiftUI
 import UIKit
 @preconcurrency import Vision
 
+nonisolated private let cameraLifecycleLogger = Logger(subsystem: "aib.Overline", category: "CameraLifecycle")
+
 struct CameraRecognizedTextLine: Identifiable, Hashable {
     let id: String
     let text: String
@@ -368,7 +370,7 @@ private extension CGImagePropertyOrientation {
     }
 }
 
-private struct OCRTextAssembler {
+struct OCRTextAssembler {
     private struct LayoutMetrics {
         let bodyLeft: CGFloat
         let bodyRight: CGFloat
@@ -396,6 +398,7 @@ private struct OCRTextAssembler {
 
     let pageLines: [CameraRecognizedTextLine]
     let selectedLines: [CameraRecognizedTextLine]
+    var trimsBoundaryFragments = true
 
     func assembledText() -> String {
         let selectedLines = sortedUnique(selectedLines)
@@ -426,7 +429,9 @@ private struct OCRTextAssembler {
                 selectedEnd: selectedEnd
             )
         }
-        includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
+        if trimsBoundaryFragments {
+            includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
+        }
 
         guard !includedSpans.isEmpty else {
             return fallbackText(from: selectedLines)
@@ -1067,14 +1072,25 @@ enum CameraScannerStatus: Equatable {
     case requestingPermission
     case running
     case unavailable(String)
+
+    var debugName: String {
+        switch self {
+        case .idle: "idle"
+        case .requestingPermission: "requesting_permission"
+        case .running: "running"
+        case .unavailable: "unavailable"
+        }
+    }
 }
 
 @MainActor
 @Observable
 final class CameraTextScanner {
     @ObservationIgnored private let core: CameraTextScannerCore
+    @ObservationIgnored let previewRouter: CameraPreviewRouter
     @ObservationIgnored private var recognitionWindowTask: Task<Void, Never>?
     @ObservationIgnored private var selectedLineCache: [CameraRecognizedTextLine.ID: CameraRecognizedTextLine] = [:]
+    @ObservationIgnored private var lifecycleRequestSequence = 0
 
     var status: CameraScannerStatus = .idle
     var lines: [CameraRecognizedTextLine] = []
@@ -1091,6 +1107,7 @@ final class CameraTextScanner {
 
     init(core: CameraTextScannerCore = CameraTextScannerCore()) {
         self.core = core
+        previewRouter = CameraPreviewRouter(session: core.session)
         core.onLines = { [weak self] lines in
             Task { @MainActor in
                 self?.lines = lines
@@ -1154,37 +1171,79 @@ final class CameraTextScanner {
         return frameBrightness < 0.28
     }
 
-    func start() {
+    func start(owner: String = "unspecified") {
+        lifecycleRequestSequence += 1
+        let requestID = lifecycleRequestSequence
+        cameraLifecycleLogger.info(
+            "camera_start_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+        )
+
+        guard let authorization = previewRouter.cameraOperationAuthorization(requestedBy: owner) else {
+            cameraLifecycleLogger.info(
+                "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
+            )
+            return
+        }
+
         #if targetEnvironment(simulator)
         status = .unavailable("시뮬레이터에서는 카메라 대신 목업 캡처를 사용합니다.")
+        cameraLifecycleLogger.info(
+            "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=simulator"
+        )
         return
         #else
         let authorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
         switch authorizationStatus {
         case .authorized:
             status = .running
-            core.start()
+            core.start(requestID: requestID, owner: owner, authorization: authorization)
         case .notDetermined:
             status = .requestingPermission
+            cameraLifecycleLogger.info(
+                "camera_authorization_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public)"
+            )
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 Task { @MainActor in
                     if granted {
                         self?.status = .running
-                        self?.core.start()
+                        self?.core.start(
+                            requestID: requestID,
+                            owner: owner,
+                            authorization: authorization
+                        )
                     } else {
                         self?.status = .unavailable("카메라 권한이 필요합니다.")
+                        cameraLifecycleLogger.error(
+                            "camera_authorization_denied owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public)"
+                        )
                     }
                 }
             }
         default:
             status = .unavailable("카메라 권한이 필요합니다.")
+            cameraLifecycleLogger.error(
+                "camera_start_blocked owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=authorization"
+            )
         }
         #endif
     }
 
-    func stop(clearRecognitionResults: Bool = true) {
+    func stop(clearRecognitionResults: Bool = true, owner: String = "unspecified") {
+        lifecycleRequestSequence += 1
+        let requestID = lifecycleRequestSequence
+        cameraLifecycleLogger.info(
+            "camera_stop_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) status=\(self.status.debugName, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+        )
+
+        guard let authorization = previewRouter.cameraOperationAuthorization(requestedBy: owner) else {
+            cameraLifecycleLogger.info(
+                "camera_stop_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=inactive_preview_owner"
+            )
+            return
+        }
+
         stopSwipeRecognition(clearResults: clearRecognitionResults)
-        core.stop()
+        core.stop(requestID: requestID, owner: owner, authorization: authorization)
         if isTorchOn {
             setTorch(false)
         }
@@ -1256,6 +1315,14 @@ final class CameraTextScanner {
                 self.recognitionWindowTask = nil
             }
         }
+    }
+
+    func recognizeFrozenPage() async throws -> CameraFrozenFrameRecognitionResult {
+        guard let frozenFrameImage else {
+            throw OCRTextRecognizerError.invalidImage
+        }
+
+        return try await CameraFrozenFrameRecognizer.recognize(in: frozenFrameImage)
     }
 
     func stopSwipeRecognition(clearResults: Bool = true) {
@@ -1389,14 +1456,15 @@ private enum CameraFrozenFrameRecognizer {
             throw CameraScannerError.cameraUnavailable
         }
 
-        return try await Task.detached(priority: .userInitiated) {
-            let documentRequest = VNDetectDocumentSegmentationRequest()
-            let textRequest = VNRecognizeTextRequest()
-            textRequest.recognitionLevel = .accurate
-            textRequest.usesLanguageCorrection = true
-            textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
-            textRequest.automaticallyDetectsLanguage = true
+        let documentRequest = VNDetectDocumentSegmentationRequest()
+        let textRequest = VNRecognizeTextRequest()
+        textRequest.recognitionLevel = .accurate
+        textRequest.usesLanguageCorrection = true
+        textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        textRequest.automaticallyDetectsLanguage = true
 
+        let recognitionTask = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
             let handler = VNImageRequestHandler(
                 cgImage: cgImage,
                 orientation: .up,
@@ -1404,6 +1472,7 @@ private enum CameraFrozenFrameRecognizer {
             )
 
             try handler.perform([documentRequest, textRequest])
+            try Task.checkCancellation()
 
             let rawRecognizedLines = (textRequest.results ?? [])
                 .enumerated()
@@ -1447,41 +1516,236 @@ private enum CameraFrozenFrameRecognizer {
                 page: detectedPage
             )
         }
-        .value
+
+        return try await withTaskCancellationHandler {
+            try await recognitionTask.value
+        } onCancel: {
+            documentRequest.cancel()
+            textRequest.cancel()
+            recognitionTask.cancel()
+        }
+    }
+}
+
+nonisolated final class CameraOwnershipState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var preferredOwner = "highlight"
+    private var generation = 0
+
+    func selectOwner(_ owner: String) {
+        lock.lock()
+        guard preferredOwner != owner else {
+            lock.unlock()
+            return
+        }
+        preferredOwner = owner
+        generation += 1
+        lock.unlock()
+    }
+
+    func authorization(requestedBy owner: String) -> CameraOperationAuthorization? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let ownerGroup = Self.ownerGroup(for: owner) else {
+            return CameraOperationAuthorization(state: self, ownerGroup: nil, generation: generation)
+        }
+        guard ownerGroup == preferredOwner else { return nil }
+        return CameraOperationAuthorization(
+            state: self,
+            ownerGroup: ownerGroup,
+            generation: generation
+        )
+    }
+
+    fileprivate func isCurrent(ownerGroup: String?, generation: Int) -> Bool {
+        guard let ownerGroup else { return true }
+        lock.lock()
+        defer { lock.unlock() }
+        return self.generation == generation && preferredOwner == ownerGroup
+    }
+
+    private static func ownerGroup(for owner: String) -> String? {
+        if owner == "highlight" || owner.hasPrefix("highlight.") {
+            return "highlight"
+        }
+        if owner == "reader" || owner.hasPrefix("reader.") {
+            return "reader"
+        }
+        return nil
+    }
+}
+
+nonisolated struct CameraOperationAuthorization: @unchecked Sendable {
+    fileprivate let state: CameraOwnershipState
+    fileprivate let ownerGroup: String?
+    fileprivate let generation: Int
+
+    var isCurrent: Bool {
+        state.isCurrent(ownerGroup: ownerGroup, generation: generation)
+    }
+}
+
+@MainActor
+final class CameraPreviewRouter {
+    private final class WeakHost {
+        weak var view: CameraPreviewHostView?
+
+        init(_ view: CameraPreviewHostView) {
+            self.view = view
+        }
+    }
+
+    private let session: AVCaptureSession
+    private let previewLayer: AVCaptureVideoPreviewLayer
+    private let ownershipState = CameraOwnershipState()
+    private var hosts: [String: WeakHost] = [:]
+    private var preferredOwner = "highlight"
+    private weak var activeHostView: CameraPreviewHostView?
+    private var activeOwner: String?
+
+    init(session: AVCaptureSession) {
+        self.session = session
+        previewLayer = AVCaptureVideoPreviewLayer(session: session)
+        previewLayer.videoGravity = .resizeAspectFill
+        if #available(iOS 26.0, *), previewLayer.isDeferredStartSupported {
+            previewLayer.isDeferredStartEnabled = false
+        }
+    }
+
+    func selectOwner(_ owner: String) {
+        preferredOwner = owner
+        ownershipState.selectOwner(owner)
+        cameraLifecycleLogger.info(
+            "camera_preview_owner_selected owner=\(owner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+        )
+        activatePreferredHostIfAvailable()
+    }
+
+    func cameraOperationAuthorization(requestedBy owner: String) -> CameraOperationAuthorization? {
+        ownershipState.authorization(requestedBy: owner)
+    }
+
+    func register(_ hostView: CameraPreviewHostView, owner: String) {
+        if let previousHostView = hosts[owner]?.view, previousHostView !== hostView {
+            previousHostView.managedPreviewLayer = nil
+        }
+        hosts[owner] = WeakHost(hostView)
+
+        cameraLifecycleLogger.info(
+            "camera_preview_registered owner=\(owner, privacy: .public) preferred=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+        )
+        activatePreferredHostIfAvailable()
+    }
+
+    func update(_ hostView: CameraPreviewHostView, owner: String) {
+        guard hosts[owner]?.view !== hostView else {
+            hostView.layoutManagedPreviewLayer()
+            return
+        }
+        register(hostView, owner: owner)
+    }
+
+    func unregister(_ hostView: CameraPreviewHostView, owner: String) {
+        if hosts[owner]?.view === hostView {
+            hosts[owner] = nil
+        }
+        hostView.managedPreviewLayer = nil
+
+        if activeHostView === hostView {
+            previewLayer.removeFromSuperlayer()
+            activeHostView = nil
+            activeOwner = nil
+        }
+
+        cameraLifecycleLogger.info(
+            "camera_preview_unregistered owner=\(owner, privacy: .public) preferred=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) previewing=\(self.previewLayer.isPreviewing, privacy: .public)"
+        )
+        activatePreferredHostIfAvailable()
+    }
+
+    private func activatePreferredHostIfAvailable() {
+        guard let hostView = hosts[preferredOwner]?.view else {
+            if activeHostView != nil {
+                activeHostView?.managedPreviewLayer = nil
+                previewLayer.removeFromSuperlayer()
+                activeHostView = nil
+                activeOwner = nil
+            }
+            cameraLifecycleLogger.info(
+                "camera_preview_waiting owner=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+            )
+            return
+        }
+
+        guard activeHostView !== hostView else {
+            hostView.managedPreviewLayer = previewLayer
+            hostView.layoutManagedPreviewLayer()
+            return
+        }
+
+        let previousOwner = activeOwner ?? "none"
+        activeHostView?.managedPreviewLayer = nil
+        previewLayer.removeFromSuperlayer()
+        hostView.managedPreviewLayer = previewLayer
+        hostView.layer.insertSublayer(previewLayer, at: 0)
+        hostView.layoutManagedPreviewLayer()
+        activeHostView = hostView
+        activeOwner = preferredOwner
+
+        cameraLifecycleLogger.info(
+            "camera_preview_attached owner=\(self.preferredOwner, privacy: .public) previous_owner=\(previousOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) previewing=\(self.previewLayer.isPreviewing, privacy: .public)"
+        )
     }
 }
 
 struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
+    let router: CameraPreviewRouter
+    let owner: String
 
-    func makeUIView(context: Context) -> CameraPreviewView {
-        let view = CameraPreviewView()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
-        if #available(iOS 26.0, *), view.previewLayer.isDeferredStartSupported {
-            view.previewLayer.isDeferredStartEnabled = false
+    final class Coordinator {
+        let owner: String
+        let router: CameraPreviewRouter
+
+        init(owner: String, router: CameraPreviewRouter) {
+            self.owner = owner
+            self.router = router
         }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(owner: owner, router: router)
+    }
+
+    func makeUIView(context: Context) -> CameraPreviewHostView {
+        let view = CameraPreviewHostView()
+        router.register(view, owner: owner)
         return view
     }
 
-    func updateUIView(_ uiView: CameraPreviewView, context: Context) {
-        if uiView.previewLayer.session !== session {
-            uiView.previewLayer.session = session
-        }
+    func updateUIView(_ uiView: CameraPreviewHostView, context: Context) {
+        router.update(uiView, owner: owner)
+    }
+
+    static func dismantleUIView(_ uiView: CameraPreviewHostView, coordinator: Coordinator) {
+        coordinator.router.unregister(uiView, owner: coordinator.owner)
     }
 }
 
-final class CameraPreviewView: UIView {
-    override static var layerClass: AnyClass {
-        AVCaptureVideoPreviewLayer.self
+final class CameraPreviewHostView: UIView {
+    weak var managedPreviewLayer: AVCaptureVideoPreviewLayer?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutManagedPreviewLayer()
     }
 
-    var previewLayer: AVCaptureVideoPreviewLayer {
-        layer as! AVCaptureVideoPreviewLayer
+    func layoutManagedPreviewLayer() {
+        managedPreviewLayer?.frame = bounds
     }
 }
 
-private struct CameraFrozenFrameRecognitionResult {
+struct CameraFrozenFrameRecognitionResult {
     let lines: [CameraRecognizedTextLine]
     let page: CameraDetectedPage?
 }
@@ -1513,6 +1777,12 @@ private nonisolated final class CameraCIContextProvider: @unchecked Sendable {
 }
 
 nonisolated final class CameraTextScannerCore: @unchecked Sendable {
+    private struct StartContext {
+        let requestID: Int
+        let owner: String
+        let requestedAt: TimeInterval
+    }
+
     let session = AVCaptureSession()
     var onLines: (([CameraRecognizedTextLine]) -> Void)?
     var onPage: ((CameraDetectedPage?) -> Void)?
@@ -1530,6 +1800,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     private let ciContextProvider = CameraCIContextProvider()
     private let snapshotLock = NSLock()
     private let freezeLock = NSLock()
+    private let lifecycleLock = NSLock()
 
     private var isConfigured = false
     private var isRecognizingFrame = false
@@ -1546,6 +1817,8 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     private var recognitionMinimumFrameInterval: TimeInterval = 0.22
     private var lastRecognitionTime = Date.distantPast
     private var shouldFreezeNextFrame = false
+    private var activeStartContext: StartContext?
+    private var firstFrameLoggedRequestID: Int?
 
     init() {
         sampleBufferDelegate.owner = self
@@ -1593,26 +1866,63 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         clearSnapshot()
     }
 
-    func start() {
+    func start(
+        requestID: Int,
+        owner: String,
+        authorization: CameraOperationAuthorization
+    ) {
+        let requestedAt = ProcessInfo.processInfo.systemUptime
         sessionQueue.async { [weak self] in
             guard let self else { return }
 
-            guard !session.isRunning else { return }
+            let queueWaitMilliseconds = Self.elapsedMilliseconds(since: requestedAt)
+            cameraLifecycleLogger.info(
+                "camera_start_queue_entered owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) queue_wait_ms=\(queueWaitMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) configured=\(self.isConfigured, privacy: .public)"
+            )
+            guard authorization.isCurrent else {
+                cameraLifecycleLogger.info(
+                    "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=stale_preview_owner"
+                )
+                return
+            }
+            self.recordStartContext(
+                StartContext(requestID: requestID, owner: owner, requestedAt: requestedAt)
+            )
+
+            guard !session.isRunning else {
+                cameraLifecycleLogger.info(
+                    "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=already_running"
+                )
+                return
+            }
 
             do {
+                let operationStartedAt = ProcessInfo.processInfo.systemUptime
+                let configurationStartedAt = ProcessInfo.processInfo.systemUptime
                 if !isConfigured {
                     try configureSession()
                     isConfigured = true
                 }
+                let configurationMilliseconds = Self.elapsedMilliseconds(since: configurationStartedAt)
 
+                let startRunningStartedAt = ProcessInfo.processInfo.systemUptime
                 if !session.isRunning {
                     session.startRunning()
                 }
+                let startRunningMilliseconds = Self.elapsedMilliseconds(since: startRunningStartedAt)
 
+                let postStartStartedAt = ProcessInfo.processInfo.systemUptime
                 if let cameraDevice {
                     CameraDeviceSelection.applyPreferredCenterCropZoom(to: cameraDevice)
                     CameraDeviceSelection.logActivePrimaryConstituent(cameraDevice)
                 }
+                let postStartMilliseconds = Self.elapsedMilliseconds(since: postStartStartedAt)
+
+                let operationMilliseconds = Self.elapsedMilliseconds(since: operationStartedAt)
+                let totalMilliseconds = Self.elapsedMilliseconds(since: requestedAt)
+                cameraLifecycleLogger.info(
+                    "camera_start_completed owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) configuration_ms=\(configurationMilliseconds, privacy: .public) start_running_ms=\(startRunningMilliseconds, privacy: .public) post_start_ms=\(postStartMilliseconds, privacy: .public) operation_ms=\(operationMilliseconds, privacy: .public) total_ms=\(totalMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+                )
 
                 let warmupDate = Date()
                 visionQueue.async { [weak self] in
@@ -1621,17 +1931,41 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
                     self.ciContextProvider.warmUp()
                 }
             } catch {
+                cameraLifecycleLogger.error(
+                    "camera_start_failed owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
                 onFailure?(error.localizedDescription)
             }
         }
     }
 
-    func stop() {
+    func stop(
+        requestID: Int,
+        owner: String,
+        authorization: CameraOperationAuthorization
+    ) {
+        let requestedAt = ProcessInfo.processInfo.systemUptime
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            let queueWaitMilliseconds = Self.elapsedMilliseconds(since: requestedAt)
+            cameraLifecycleLogger.info(
+                "camera_stop_queue_entered owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) queue_wait_ms=\(queueWaitMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+            )
+            guard authorization.isCurrent else {
+                cameraLifecycleLogger.info(
+                    "camera_stop_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=stale_preview_owner"
+                )
+                return
+            }
+            let operationStartedAt = ProcessInfo.processInfo.systemUptime
             if session.isRunning {
                 session.stopRunning()
             }
+            let operationMilliseconds = Self.elapsedMilliseconds(since: operationStartedAt)
+            let totalMilliseconds = Self.elapsedMilliseconds(since: requestedAt)
+            cameraLifecycleLogger.info(
+                "camera_stop_completed owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) operation_ms=\(operationMilliseconds, privacy: .public) total_ms=\(totalMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+            )
         }
     }
 
@@ -1678,6 +2012,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     }
 
     fileprivate func handle(_ sampleBuffer: CMSampleBuffer) {
+        logFirstFrameIfNeeded()
         let now = Date()
         guard !isRecognizingFrame else {
             return
@@ -1775,6 +2110,35 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         }
 
         isRecognizingFrame = false
+    }
+
+    private func recordStartContext(_ context: StartContext) {
+        lifecycleLock.lock()
+        activeStartContext = context
+        firstFrameLoggedRequestID = nil
+        lifecycleLock.unlock()
+    }
+
+    private func logFirstFrameIfNeeded() {
+        lifecycleLock.lock()
+        guard
+            let context = activeStartContext,
+            firstFrameLoggedRequestID != context.requestID
+        else {
+            lifecycleLock.unlock()
+            return
+        }
+        firstFrameLoggedRequestID = context.requestID
+        lifecycleLock.unlock()
+
+        let elapsedMilliseconds = Self.elapsedMilliseconds(since: context.requestedAt)
+        cameraLifecycleLogger.info(
+            "camera_first_frame owner=\(context.owner, privacy: .public) request_id=\(context.requestID, privacy: .public) elapsed_ms=\(elapsedMilliseconds, privacy: .public)"
+        )
+    }
+
+    private static func elapsedMilliseconds(since start: TimeInterval) -> Int {
+        Int(max(0, (ProcessInfo.processInfo.systemUptime - start) * 1_000).rounded())
     }
 
     private func activeRecognitionToken(at date: Date) -> Int? {
