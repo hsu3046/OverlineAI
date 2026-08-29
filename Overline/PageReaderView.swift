@@ -469,7 +469,11 @@ private struct PageReaderLyricsStage: View {
     let pageIndex: Int
     let pageCount: Int
     let activeCueIndex: Int
+    let canMoveBackward: Bool
+    let canMoveForward: Bool
     let canAddPage: Bool
+    let moveBackward: () -> Void
+    let moveForward: () -> Void
     let addPage: () -> Void
     @State private var scrollPosition: ReadingCue.ID?
 
@@ -531,24 +535,63 @@ private struct PageReaderLyricsStage: View {
     }
 
     private var stageHeader: some View {
-        HStack {
+        HStack(spacing: 8) {
+            if pageCount > 1 {
+                pageNavigationButton(
+                    systemImage: "chevron.left",
+                    label: "이전 페이지",
+                    isEnabled: canMoveBackward,
+                    action: moveBackward
+                )
+            }
+
             Text("\(pageIndex + 1) / \(pageCount)")
                 .font(.headline.monospacedDigit())
                 .foregroundStyle(Color.overlineMutedInk)
 
+            if pageCount > 1 {
+                pageNavigationButton(
+                    systemImage: "chevron.right",
+                    label: "다음 페이지",
+                    isEnabled: canMoveForward,
+                    action: moveForward
+                )
+            }
+
             Spacer()
 
             Button(action: addPage) {
-                Image(systemName: "camera.badge.plus")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(canAddPage ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.35))
-                    .frame(width: 46, height: 46)
-                    .background(.thinMaterial, in: Circle())
+                Image(systemName: "plus")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        canAddPage ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.30),
+                        in: Circle()
+                    )
             }
             .buttonStyle(.plain)
             .disabled(!canAddPage)
             .accessibilityLabel("다음 페이지 촬영")
         }
+    }
+
+    private func pageNavigationButton(
+        systemImage: String,
+        label: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(isEnabled ? Color.overlineInk : Color.overlineMutedInk.opacity(0.30))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityLabel(label)
     }
 
     private var boundedActiveCueIndex: Int {
@@ -595,16 +638,18 @@ private struct PageReaderSpeechSettingsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Picker("읽기 속도", selection: $speedMultiplier) {
-                        ForEach(PageReadingSpeed.allCases) { speed in
-                            Text(speed.title)
-                                .tag(speed.rawValue)
-                        }
+            VStack {
+                Picker("읽기 속도", selection: $speedMultiplier) {
+                    ForEach(PageReadingSpeed.allCases) { speed in
+                        Text(speed.title)
+                            .tag(speed.rawValue)
                     }
-                    .pickerStyle(.segmented)
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 28)
+                .padding(.top, 24)
+
+                Spacer()
             }
             .navigationTitle("읽기 속도")
             .navigationBarTitleDisplayMode(.inline)
@@ -759,7 +804,11 @@ struct PageReaderView: View {
                 pageIndex: readingSession.currentPageIndex,
                 pageCount: readingSession.pages.count,
                 activeCueIndex: readingSession.activeCueIndex,
+                canMoveBackward: readingSession.canMoveBackward,
+                canMoveForward: readingSession.canMoveForward,
                 canAddPage: readingSession.canAddPage,
+                moveBackward: readingSession.moveBackward,
+                moveForward: readingSession.moveForward,
                 addPage: openCameraForNextPage
             )
             .transition(.opacity)
@@ -859,26 +908,19 @@ struct PageReaderView: View {
     }
 
     private var readingControls: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 26) {
-                if readingSession.pages.count > 1 {
-                    readerControlButton(
-                        systemImage: "backward.end.fill",
-                        label: "이전 페이지",
-                        isEnabled: readingSession.canMoveBackward,
-                        action: readingSession.moveBackward
-                    )
-                }
+        ZStack {
+            Button(action: readingSession.togglePlayback) {
+                Image(systemName: readingSession.isSpeaking && !readingSession.isPaused ? "pause.fill" : "play.fill")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
+                    .background(Color.overlineAccent, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(readingSession.isSpeaking && !readingSession.isPaused ? "일시정지" : "재생")
 
-                Button(action: readingSession.togglePlayback) {
-                    Image(systemName: readingSession.isSpeaking && !readingSession.isPaused ? "pause.fill" : "play.fill")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 58, height: 58)
-                        .background(Color.overlineAccent, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(readingSession.isSpeaking && !readingSession.isPaused ? "일시정지" : "재생")
+            HStack {
+                Spacer()
 
                 Button {
                     showsSpeechSettings = true
@@ -890,23 +932,9 @@ struct PageReaderView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("읽기 속도 설정")
-
-                if readingSession.pages.count > 1 {
-                    readerControlButton(
-                        systemImage: "forward.end.fill",
-                        label: "다음 페이지",
-                        isEnabled: readingSession.canMoveForward,
-                        action: readingSession.moveForward
-                    )
-                }
-            }
-
-            if let currentPage = readingSession.currentPage, currentPage.omittedLineCount > 0 {
-                Text("페이지 정보 제외됨")
-                    .font(.caption)
-                    .foregroundStyle(Color.overlineMutedInk)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 58)
         .padding(.horizontal, 4)
         .padding(.vertical, 10)
     }
@@ -934,23 +962,6 @@ struct PageReaderView: View {
             .foregroundStyle(Color.overlineMutedInk)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
-    }
-
-    private func readerControlButton(
-        systemImage: String,
-        label: String,
-        isEnabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(isEnabled ? Color.overlineInk : Color.overlineMutedInk.opacity(0.35))
-                .frame(width: 48, height: 48)
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .accessibilityLabel(label)
     }
 
     private func prepareCamera() {
