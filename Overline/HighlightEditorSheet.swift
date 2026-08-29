@@ -129,7 +129,7 @@ struct HighlightEditorSheet: View {
         VStack(spacing: 16) {
             HStack(alignment: .top, spacing: 10) {
                 TextField("글조각", text: $text, axis: .vertical)
-                    .font(.title3.weight(.medium))
+                    .font(.overline(.title3, weight: .medium))
                     .lineSpacing(3)
                     .lineLimit(4...18)
                     .padding(.vertical, 2)
@@ -141,7 +141,7 @@ struct HighlightEditorSheet: View {
             Divider().opacity(0.42)
 
             TextField("메모", text: $memo, axis: .vertical)
-                .font(.body.weight(.regular))
+                .font(.overline(.body, weight: .regular))
                 .lineLimit(1...6)
                 .padding(.vertical, 2)
         }
@@ -160,7 +160,7 @@ struct HighlightEditorSheet: View {
                         .tint(Color.overlineAccent)
                 } else {
                     Image(systemName: "sparkles")
-                        .font(.body.weight(.semibold))
+                        .font(.overline(.body, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.overlineAccent)
                 }
@@ -201,7 +201,7 @@ struct HighlightEditorSheet: View {
             }
 
             TextField("태그", text: $tagsText)
-                .font(.title3.weight(.medium))
+                .font(.overline(.title3, weight: .medium))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 18)
@@ -221,7 +221,7 @@ struct HighlightEditorSheet: View {
                         .tint(Color.overlineAccent)
                 } else {
                     Image(systemName: "sparkles")
-                        .font(.body.weight(.semibold))
+                        .font(.overline(.body, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.overlineAccent)
                 }
@@ -255,16 +255,16 @@ struct HighlightEditorSheet: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "text.book.closed")
-                    .font(.title3.weight(.semibold))
+                    .font(.overline(.title3, weight: .semibold))
                     .foregroundStyle(Color.overlineAccent)
                     .frame(width: 24)
 
                 Text("p.")
-                    .font(.title3.weight(.medium))
+                    .font(.overline(.title3, weight: .medium))
                     .foregroundStyle(Color.overlineInk.opacity(0.62))
 
                 TextField("42", text: pageNumberBinding)
-                    .font(.title3.weight(.medium))
+                    .font(.overline(.title3, weight: .medium))
                     .keyboardType(.numberPad)
                     .tint(Color.overlineAccent)
             }
@@ -279,7 +279,7 @@ struct HighlightEditorSheet: View {
             showsDeleteConfirmation = true
         } label: {
             Image(systemName: "trash")
-                .font(.title2.weight(.semibold))
+                .font(.overline(.title2, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color.overlineCoral)
                 .frame(width: 48, height: 48)
@@ -634,7 +634,7 @@ private struct OCRCorrectionPreviewSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(proposal.changes, id: \.self) { change in
                     Text("· \(change)")
-                        .font(.subheadline.weight(.medium))
+                        .font(.overline(.subheadline, weight: .medium))
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.78))
                 }
             }
@@ -650,7 +650,11 @@ private struct OCRCorrectionPreviewSheet: View {
                 .padding(.leading, 0)
 
             Text(text)
-                .font(isPrimary ? .title3.weight(.medium) : .body.weight(.regular))
+                .font(
+                    isPrimary
+                        ? .overline(.title3, weight: .medium)
+                        : .overline(.body, weight: .regular)
+                )
                 .lineSpacing(isPrimary ? 5 : 4)
                 .foregroundStyle(isPrimary ? Color.overlineInk : Color.overlineMutedInk.opacity(0.86))
                 .textSelection(.enabled)
@@ -707,7 +711,7 @@ private struct TagRegenerationPreviewSheet: View {
                 .padding(.leading, 0)
 
             Text(tags.isEmpty ? "없음" : tags.joined(separator: "  "))
-                .font(.title3.weight(isPrimary ? .semibold : .medium))
+                .font(.overline(.title3, weight: isPrimary ? .semibold : .medium))
                 .foregroundStyle(isPrimary ? Color.overlineInk : Color.overlineMutedInk.opacity(0.78))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)

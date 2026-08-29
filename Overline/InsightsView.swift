@@ -73,7 +73,7 @@ struct InsightsView: View {
                         systemImage: "magnifyingglass",
                         description: Text("다른 질문이나 키워드로 찾아보세요.")
                     )
-                    .font(.caption)
+                    .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
@@ -500,10 +500,10 @@ private struct InsightWorkspaceHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "square.and.pencil")
-                .font(.subheadline.weight(.semibold))
+                .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineAccent)
             Text("생각 정리하기")
-                .font(.headline)
+                .font(.overline(.headline))
                 .foregroundStyle(Color.overlineInk)
 
             Spacer()
@@ -521,14 +521,14 @@ private struct InsightSectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .font(.subheadline.weight(.semibold))
+                .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineAccent)
             Text(title)
-                .font(.headline)
+                .font(.overline(.headline))
                 .foregroundStyle(Color.overlineInk)
             if let trailingText {
                 Text(trailingText)
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
             }
             Spacer()
@@ -574,7 +574,7 @@ struct OverlineSettingsSheet: View {
 
                     if let connectionTestResult, !connectionTestResult.isSuccess {
                         Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
-                            .font(.caption)
+                            .font(.overline(.caption))
                             .foregroundStyle(Color.overlineCoral)
                             .settingsRowSeparator()
                     }
@@ -614,14 +614,14 @@ struct OverlineSettingsSheet: View {
                             .multilineTextAlignment(.trailing)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .font(.caption)
+                            .font(.overline(.caption))
                             .foregroundStyle(.secondary)
                     }
                     .listRowSeparator(.hidden, edges: .bottom)
                     .settingsRowSeparator()
 
                     Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
-                        .font(.caption)
+                        .font(.overline(.caption))
                         .foregroundStyle(.secondary)
                         .settingsRowSeparator()
 
@@ -693,7 +693,7 @@ struct OverlineSettingsSheet: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("음성 선택")
                                 Text(quoteSpeechPlayer.selectedVoiceName(for: .korean))
-                                    .font(.caption)
+                                    .font(.overline(.caption))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
@@ -1028,17 +1028,17 @@ private struct PrivacyTransmissionPolicyView: View {
                 ForEach(policies) { policy in
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: policy.systemImage)
-                            .font(.body.weight(.semibold))
+                            .font(.overline(.body, weight: .semibold))
                             .foregroundStyle(Color.overlineAccent)
                             .frame(width: 24)
 
                         VStack(alignment: .leading, spacing: 5) {
                             Text(policy.title)
-                                .font(.subheadline.weight(.semibold))
+                                .font(.overline(.subheadline, weight: .semibold))
                                 .foregroundStyle(Color.overlineInk)
 
                             Text(policy.body)
-                                .font(.caption)
+                                .font(.overline(.caption))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1085,17 +1085,17 @@ private struct OverlineTermsView: View {
                 ForEach(terms) { term in
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: term.systemImage)
-                            .font(.body.weight(.semibold))
+                            .font(.overline(.body, weight: .semibold))
                             .foregroundStyle(Color.overlineAccent)
                             .frame(width: 24)
 
                         VStack(alignment: .leading, spacing: 5) {
                             Text(term.title)
-                                .font(.subheadline.weight(.semibold))
+                                .font(.overline(.subheadline, weight: .semibold))
                                 .foregroundStyle(Color.overlineInk)
 
                             Text(term.body)
-                                .font(.caption)
+                                .font(.overline(.caption))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1127,13 +1127,13 @@ private struct LLMAPIKeyRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(provider.title)
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk)
 
                 SecureField(provider.keyPlaceholder, text: $apiKey)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .font(.subheadline)
+                    .font(.overline(.subheadline))
                     .privacySensitive()
             }
         }
@@ -1151,10 +1151,10 @@ private struct LLMSubscriptionTokenRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(provider.title)
-                        .font(.caption.weight(.semibold))
+                        .font(.overline(.caption, weight: .semibold))
                         .foregroundStyle(Color.overlineMutedInk)
                     Text(token.hasAccessToken ? "구독 토큰 연결됨" : "구독 토큰 없음")
-                        .font(.caption2.weight(.semibold))
+                        .font(.overline(.caption2, weight: .semibold))
                         .foregroundStyle(token.hasAccessToken ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.72))
                 }
 
@@ -1165,7 +1165,7 @@ private struct LLMSubscriptionTokenRow: View {
                         token = .empty
                     } label: {
                         Image(systemName: "xmark.circle")
-                            .font(.body.weight(.semibold))
+                            .font(.overline(.body, weight: .semibold))
                             .foregroundStyle(Color.overlineMutedInk.opacity(0.7))
                     }
                     .buttonStyle(.plain)
@@ -1176,7 +1176,7 @@ private struct LLMSubscriptionTokenRow: View {
             SecureField("Access token", text: $token.accessToken)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .font(.caption)
+                .font(.overline(.caption))
                 .privacySensitive()
 
             switch provider {
@@ -1185,14 +1185,14 @@ private struct LLMSubscriptionTokenRow: View {
                     TextField("ChatGPT account ID", text: $token.accountID)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .font(.caption)
+                        .font(.overline(.caption))
                         .foregroundStyle(.secondary)
 
                     Text("여러 ChatGPT 워크스페이스를 사용하는 경우에만 필요합니다.")
-                        .font(.caption2)
+                        .font(.overline(.caption2))
                         .foregroundStyle(.secondary)
                 }
-                .font(.caption)
+                .font(.overline(.caption))
             case .anthropic, .openrouter, .gemini:
                 EmptyView()
             }
@@ -1210,13 +1210,13 @@ private struct LLMActiveModelSummary: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(settings.provider.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .foregroundStyle(Color.overlineInk)
                 Text(settings.selectedModelTitle)
-                    .font(.caption)
+                    .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
                 Text(settings.authMode(for: settings.provider).title)
-                    .font(.caption2.weight(.semibold))
+                    .font(.overline(.caption2, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
             }
 
@@ -1266,7 +1266,7 @@ private struct InsightComposer: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 TextField("문장들에게 묻기", text: $question, axis: .vertical)
-                    .font(.body)
+                    .font(.overline(.body))
                     .lineLimit(7...10)
                     .textFieldStyle(.plain)
                     .frame(maxWidth: .infinity, minHeight: 176, alignment: .topLeading)
@@ -1277,7 +1277,7 @@ private struct InsightComposer: View {
                             Image(systemName: "plus")
                             if selectedCount > 0 {
                                 Text("\(selectedCount)")
-                                    .font(.caption2.weight(.bold))
+                                    .font(.overline(.caption2, weight: .bold))
                                     .foregroundStyle(Color.overlineMutedInk)
                                     .monospacedDigit()
                                     .lineLimit(1)
@@ -1285,7 +1285,7 @@ private struct InsightComposer: View {
                                     .frame(minWidth: 17, minHeight: 17)
                             }
                         }
-                        .font(.body.weight(.semibold))
+                        .font(.overline(.body, weight: .semibold))
                         .foregroundStyle(Color.overlineMutedInk)
                         .frame(minWidth: 40, minHeight: 34)
                         .contentShape(Rectangle())
@@ -1318,7 +1318,7 @@ private struct InsightComposer: View {
 
                 if let errorMessage, !errorMessage.isEmpty {
                     Label(errorMessage, systemImage: "exclamationmark.circle")
-                        .font(.caption.weight(.semibold))
+                        .font(.overline(.caption, weight: .semibold))
                         .foregroundStyle(Color.overlineCoral.opacity(0.86))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1547,7 +1547,7 @@ private struct HighlightPickerModeControl: View {
                     }
                 } label: {
                     Text(item.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.overline(.subheadline, weight: .semibold))
                         .foregroundStyle(mode == item ? Color.overlineInk : Color.overlineMutedInk)
                         .frame(maxWidth: .infinity)
                         .frame(height: OverlinePillSearchField.height - 6)
@@ -1583,11 +1583,11 @@ struct OverlinePillSearchField: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.subheadline.weight(.semibold))
+                .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
 
             TextField(prompt, text: $text)
-                .font(.subheadline)
+                .font(.overline(.subheadline))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.search)
@@ -1597,7 +1597,7 @@ struct OverlinePillSearchField: View {
                     text = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.overline(.subheadline, weight: .semibold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
                 }
@@ -1626,19 +1626,19 @@ private struct BookPickerRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.title3.weight(.semibold))
+                .font(.overline(.title3, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.55))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(book.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .foregroundStyle(Color.overlineInk)
                     .lineLimit(2)
 
                 if !book.author.trimmed.isEmpty {
                     Text(book.author)
-                        .font(.caption.weight(.medium))
+                        .font(.overline(.caption, weight: .medium))
                         .foregroundStyle(Color.overlineMutedInk)
                         .lineLimit(1)
                 }
@@ -1647,7 +1647,7 @@ private struct BookPickerRow: View {
             Spacer(minLength: 12)
 
             Text("\(book.highlights.count)조각")
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.82))
                 .lineLimit(1)
         }
@@ -1664,7 +1664,7 @@ private struct HighlightPickerRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.title3.weight(.semibold))
+                .font(.overline(.title3, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.55))
                 .padding(.top, 1)
@@ -1673,7 +1673,7 @@ private struct HighlightPickerRow: View {
                 SearchHighlightedText(
                     text: highlight.text,
                     query: searchQuery,
-                    font: .subheadline.weight(.medium),
+                    font: .overline(.subheadline, weight: .medium),
                     foregroundStyle: Color.overlineInk,
                     lineSpacing: 3,
                     lineLimit: 3
@@ -1688,7 +1688,7 @@ private struct HighlightPickerRow: View {
                         Text("책으로 포함됨")
                     }
                 }
-                .font(.caption2.weight(.semibold))
+                .font(.overline(.caption2, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
                 .lineLimit(1)
             }
@@ -1704,10 +1704,10 @@ private struct PromptChip: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: prompt.systemImage)
-                .font(.callout.weight(.semibold))
+                .font(.overline(.callout, weight: .semibold))
                 .frame(width: 16)
             Text(prompt.title)
-                .font(.caption.weight(.bold))
+                .font(.overline(.caption, weight: .bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
         }
@@ -1731,7 +1731,7 @@ private struct InsightCategoryIcon: View {
 
     var body: some View {
         Image(systemName: prompt.systemImage)
-            .font(.subheadline.weight(.semibold))
+            .font(.overline(.subheadline, weight: .semibold))
             .frame(width: 18)
             .foregroundStyle(Color.overlineAccent)
             .padding(.top, 2)
@@ -1792,22 +1792,22 @@ private struct InsightSourceRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "book.closed")
-                    .font(.caption.weight(.bold))
+                    .font(.overline(.caption, weight: .bold))
                 Text(source.bookTitle)
                 Text(source.highlight.pageReference)
             }
-            .font(.caption2.weight(.semibold))
+            .font(.overline(.caption2, weight: .semibold))
             .foregroundStyle(Color.overlineMutedInk.opacity(0.78))
 
             Text(source.highlight.text)
-                .font(.subheadline.weight(.medium))
+                .font(.overline(.subheadline, weight: .medium))
                 .foregroundStyle(Color.overlineInk)
                 .lineSpacing(4)
                 .lineLimit(5)
 
             if !source.highlight.memo.isEmpty {
                 Text(source.highlight.memo)
-                    .font(.caption)
+                    .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
                     .lineSpacing(3)
                     .lineLimit(3)
@@ -1929,19 +1929,19 @@ private struct InsightDetailSheet: View {
 
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(insight.prompt)
-                                    .font(.title3.weight(.bold))
+                                    .font(.overline(.title3, weight: .bold))
                                     .foregroundStyle(Color.overlineInk)
                                     .fixedSize(horizontal: false, vertical: true)
 
                                 Text(insight.createdAt.overlineShortDate)
-                                    .font(.caption.weight(.semibold))
+                                    .font(.overline(.caption, weight: .semibold))
                                     .foregroundStyle(Color.overlineMutedInk.opacity(0.78))
                             }
                         }
 
                         InsightMarkdownText(
                             text: insight.body,
-                            font: .body,
+                            font: .overline(.body),
                             foregroundStyle: Color.overlineInk,
                             lineSpacing: 6
                         )
@@ -2023,13 +2023,13 @@ private struct SavedInsightCard: View {
                     SearchHighlightedText(
                         text: insight.prompt,
                         query: searchQuery,
-                        font: .headline.weight(.semibold),
+                        font: .overline(.headline, weight: .semibold),
                         foregroundStyle: Color.overlineInk,
                         lineLimit: 2
                     )
 
                     Text(insight.createdAt.overlineShortDate)
-                        .font(.caption.weight(.semibold))
+                        .font(.overline(.caption, weight: .semibold))
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2042,7 +2042,7 @@ private struct SavedInsightCard: View {
             InsightMarkdownText(
                 text: insight.body,
                 searchQuery: searchQuery,
-                font: .subheadline,
+                font: .overline(.subheadline),
                 foregroundStyle: Color.overlineMutedInk,
                 lineSpacing: 4
             )
@@ -2059,7 +2059,7 @@ private struct SavedInsightCard: View {
                     Label("\(insight.sourceCount)조각", systemImage: "doc.text")
                 }
             }
-            .font(.caption2.weight(.semibold))
+            .font(.overline(.caption2, weight: .semibold))
             .foregroundStyle(Color.overlineMutedInk.opacity(0.82))
         }
         .padding(14)

@@ -7,17 +7,17 @@ struct OverlineInlineUndoRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "trash")
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.56))
                 .frame(width: 18)
 
             Text(message)
-                .font(.subheadline.weight(.semibold))
+                .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.88))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button("복구", action: undo)
-                .font(.subheadline.weight(.bold))
+                .font(.overline(.subheadline, weight: .bold))
                 .foregroundStyle(Color.overlineAccent)
                 .buttonStyle(.plain)
         }

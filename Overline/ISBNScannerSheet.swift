@@ -66,7 +66,7 @@ struct ISBNScannerSheet: View {
                     .symbolRenderingMode(.hierarchical)
 
                 Text(message)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .multilineTextAlignment(.center)
             }
             .foregroundStyle(.white)
@@ -87,7 +87,7 @@ struct ISBNScannerSheet: View {
                     .symbolRenderingMode(.hierarchical)
 
                 Text("책 뒤표지의 ISBN 바코드를 프레임 안에 맞춰 주세요.")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .multilineTextAlignment(.center)
             }
             .foregroundStyle(.white)
@@ -119,11 +119,11 @@ struct ISBNScannerSheet: View {
 
             VStack(spacing: 8) {
                 Text("시뮬레이터에서는 카메라 스캔을 사용할 수 없습니다.")
-                    .font(.headline)
+                    .font(.overline(.headline))
                     .foregroundStyle(Color.overlineInk)
 
                 Text("실제 기기에서는 ISBN 바코드를 자동으로 읽습니다.")
-                    .font(.subheadline)
+                    .font(.overline(.subheadline))
                     .foregroundStyle(Color.overlineMutedInk)
                     .multilineTextAlignment(.center)
             }
@@ -148,7 +148,7 @@ struct ISBNScannerSheet: View {
                 dismiss()
             } label: {
                 Label("ISBN 적용", systemImage: "checkmark.circle")
-                    .font(.body.weight(.semibold))
+                    .font(.overline(.body, weight: .semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
