@@ -5,11 +5,10 @@ import UIKit
 
 struct LibraryView: View {
     @Environment(ReadingLibrary.self) private var library
+    @Environment(LLMSettingsStore.self) private var llmSettings
     var rootResetToken = 0
     var isActive = true
     @State private var presentedSheet: LibrarySheet?
-    @State private var showsResetConfirmation = false
-    @State private var showsRestoreResetConfirmation = false
     @State private var activeBookID: ReadingBook.ID?
     @State private var pendingDeletedHighlight: PendingHighlightUndo?
     @State private var undoDismissTask: Task<Void, Never>?
@@ -46,42 +45,9 @@ struct LibraryView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("책 추가")
 
-                    Menu {
-                        Button {
-                            presentedSheet = .mvpReadiness
-                        } label: {
-                            Label("MVP 점검", systemImage: "checkmark.shield")
-                        }
-
-                        Button {
-                            presentedSheet = .ocrValidation
-                        } label: {
-                            Label("OCR 검증 기록", systemImage: "checklist.checked")
-                        }
-
-                        if library.resetBackupAvailable {
-                            Button {
-                                showsRestoreResetConfirmation = true
-                            } label: {
-                                Label("최근 초기화 복구", systemImage: "arrow.uturn.backward.circle")
-                            }
-                        }
-
-                        Button(role: .destructive) {
-                            showsResetConfirmation = true
-                        } label: {
-                            Label("보관함 초기화", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 19, weight: .semibold))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
-                            .frame(width: 34, height: 34)
-                            .contentShape(Rectangle())
+                    OverlineSettingsButton(settings: llmSettings) {
+                        presentedSheet = .settings
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("책장 메뉴")
                 }
 
                 if !library.books.isEmpty {
@@ -180,26 +146,6 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .confirmationDialog("보관함을 초기화할까요?", isPresented: $showsResetConfirmation, titleVisibility: .visible) {
-            Button("모든 책과 글조각 삭제", role: .destructive) {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                    library.resetLibrary()
-                }
-            }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text("삭제 전 최근 상태를 이 기기에 복구 백업으로 남깁니다. 이후 책장 메뉴의 최근 초기화 복구에서 되돌릴 수 있습니다.")
-        }
-        .confirmationDialog("최근 초기화를 복구할까요?", isPresented: $showsRestoreResetConfirmation, titleVisibility: .visible) {
-            Button("복구") {
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                    _ = library.restoreLastResetBackup()
-                }
-            }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
-        }
         .scrollIndicators(.hidden)
         .overlineBottomMenuCompaction()
         .navigationDestination(isPresented: isBookNavigationPresented) {
@@ -236,15 +182,8 @@ struct LibraryView: View {
                 HighlightBrowserSheet()
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
-            case .ocrValidation:
-                OCRValidationSheet(
-                    capturedHighlightCount: library.recentHighlights.filter { $0.source == .capture }.count,
-                    reviewedHighlightCount: library.recentHighlights.filter { $0.source == .capture && $0.reviewedAt != nil }.count
-                )
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-            case .mvpReadiness:
-                MVPReadinessSheet()
+            case .settings:
+                OverlineSettingsSheet(settings: llmSettings)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
@@ -386,8 +325,7 @@ private enum LibrarySheet: Identifiable {
     case editBook(ReadingBook.ID)
     case editHighlight(Highlight.ID)
     case highlightBrowser
-    case ocrValidation
-    case mvpReadiness
+    case settings
 
     var id: String {
         switch self {
@@ -395,8 +333,7 @@ private enum LibrarySheet: Identifiable {
         case .editBook(let id): "editBook-\(id.uuidString)"
         case .editHighlight(let id): "editHighlight-\(id.uuidString)"
         case .highlightBrowser: "highlightBrowser"
-        case .ocrValidation: "ocrValidation"
-        case .mvpReadiness: "mvpReadiness"
+        case .settings: "settings"
         }
     }
 }

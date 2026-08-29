@@ -138,7 +138,7 @@ struct InsightsView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $isLLMSettingsPresented) {
-            LLMSettingsSheet(settings: llmSettings)
+            OverlineSettingsSheet(settings: llmSettings)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -502,16 +502,7 @@ private struct InsightWorkspaceHeader: View {
 
             Spacer()
 
-            Button(action: openSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.overlineMutedInk.opacity(0.84))
-                    .frame(width: 34, height: 34)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("설정")
-            .accessibilityValue("\(settings.provider.title), \(settings.selectedModelTitle)")
+            OverlineSettingsButton(settings: settings, action: openSettings)
         }
     }
 }
@@ -539,12 +530,15 @@ private struct InsightSectionHeader: View {
     }
 }
 
-private struct LLMSettingsSheet: View {
+struct OverlineSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ReadingLibrary.self) private var library
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     let settings: LLMSettingsStore
     @State private var isTestingConnection = false
     @State private var connectionTestResult: LLMConnectionTestResult?
+    @State private var showsResetConfirmation = false
+    @State private var showsRestoreResetConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -687,6 +681,32 @@ private struct LLMSettingsSheet: View {
                     }
                 }
 
+                Section {
+                    Button {
+                        showsRestoreResetConfirmation = true
+                    } label: {
+                        HStack {
+                            Label("최근 초기화 복구", systemImage: "arrow.uturn.backward.circle")
+                            Spacer()
+                            if !library.resetBackupAvailable {
+                                Text("복구 없음")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(!library.resetBackupAvailable)
+
+                    Button(role: .destructive) {
+                        showsResetConfirmation = true
+                    } label: {
+                        Label("보관함 초기화", systemImage: "trash")
+                    }
+                } header: {
+                    Text("보관함")
+                } footer: {
+                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다. 직전 상태는 이 기기에 최근 복구 백업 한 건으로 보관됩니다.")
+                }
+
                 Section("전송 안내") {
                     Text("선택한 글조각과 메모만 현재 AI 제공자로 전송됩니다. Overline은 캡처 내용을 자체 서버에 저장하지 않으며, 캡처 내용은 AI 학습에 사용되지 않습니다.")
                         .font(.caption)
@@ -713,6 +733,26 @@ private struct LLMSettingsSheet: View {
                         dismiss()
                     }
                 }
+            }
+            .confirmationDialog("보관함을 초기화할까요?", isPresented: $showsResetConfirmation, titleVisibility: .visible) {
+                Button("모든 책, 글조각, 인사이트 삭제", role: .destructive) {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                        library.resetLibrary()
+                    }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("삭제 전 최근 상태를 이 기기에 복구 백업으로 남깁니다. 이후 설정의 최근 초기화 복구에서 되돌릴 수 있습니다.")
+            }
+            .confirmationDialog("최근 초기화를 복구할까요?", isPresented: $showsRestoreResetConfirmation, titleVisibility: .visible) {
+                Button("복구") {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                        _ = library.restoreLastResetBackup()
+                    }
+                }
+                Button("취소", role: .cancel) {}
+            } message: {
+                Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
             }
         }
     }
