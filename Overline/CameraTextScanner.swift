@@ -1087,6 +1087,7 @@ enum CameraScannerStatus: Equatable {
 @Observable
 final class CameraTextScanner {
     @ObservationIgnored private let core: CameraTextScannerCore
+    @ObservationIgnored let previewRouter: CameraPreviewRouter
     @ObservationIgnored private var recognitionWindowTask: Task<Void, Never>?
     @ObservationIgnored private var selectedLineCache: [CameraRecognizedTextLine.ID: CameraRecognizedTextLine] = [:]
     @ObservationIgnored private var lifecycleRequestSequence = 0
@@ -1106,6 +1107,7 @@ final class CameraTextScanner {
 
     init(core: CameraTextScannerCore = CameraTextScannerCore()) {
         self.core = core
+        previewRouter = CameraPreviewRouter(session: core.session)
         core.onLines = { [weak self] lines in
             Task { @MainActor in
                 self?.lines = lines
@@ -1497,58 +1499,156 @@ private enum CameraFrozenFrameRecognizer {
     }
 }
 
-struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
-    let owner: String
+@MainActor
+final class CameraPreviewRouter {
+    private final class WeakHost {
+        weak var view: CameraPreviewHostView?
 
-    final class Coordinator {
-        let owner: String
-
-        init(owner: String) {
-            self.owner = owner
+        init(_ view: CameraPreviewHostView) {
+            self.view = view
         }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(owner: owner)
+    private let session: AVCaptureSession
+    private let previewLayer: AVCaptureVideoPreviewLayer
+    private var hosts: [String: WeakHost] = [:]
+    private var preferredOwner = "highlight"
+    private weak var activeHostView: CameraPreviewHostView?
+    private var activeOwner: String?
+
+    init(session: AVCaptureSession) {
+        self.session = session
+        previewLayer = AVCaptureVideoPreviewLayer(session: session)
+        previewLayer.videoGravity = .resizeAspectFill
+        if #available(iOS 26.0, *), previewLayer.isDeferredStartSupported {
+            previewLayer.isDeferredStartEnabled = false
+        }
     }
 
-    func makeUIView(context: Context) -> CameraPreviewView {
-        let view = CameraPreviewView()
-        view.previewLayer.session = session
-        view.previewLayer.videoGravity = .resizeAspectFill
-        if #available(iOS 26.0, *), view.previewLayer.isDeferredStartSupported {
-            view.previewLayer.isDeferredStartEnabled = false
-        }
+    func selectOwner(_ owner: String) {
+        preferredOwner = owner
         cameraLifecycleLogger.info(
-            "camera_preview_attached owner=\(owner, privacy: .public) session_running=\(session.isRunning, privacy: .public)"
+            "camera_preview_owner_selected owner=\(owner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
         )
-        return view
+        activatePreferredHostIfAvailable()
     }
 
-    func updateUIView(_ uiView: CameraPreviewView, context: Context) {
-        if uiView.previewLayer.session !== session {
-            uiView.previewLayer.session = session
-            cameraLifecycleLogger.info(
-                "camera_preview_reassigned owner=\(owner, privacy: .public) session_running=\(session.isRunning, privacy: .public)"
-            )
+    func register(_ hostView: CameraPreviewHostView, owner: String) {
+        if let previousHostView = hosts[owner]?.view, previousHostView !== hostView {
+            previousHostView.managedPreviewLayer = nil
         }
+        hosts[owner] = WeakHost(hostView)
+
+        cameraLifecycleLogger.info(
+            "camera_preview_registered owner=\(owner, privacy: .public) preferred=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+        )
+        activatePreferredHostIfAvailable()
     }
 
-    static func dismantleUIView(_ uiView: CameraPreviewView, coordinator: Coordinator) {
+    func update(_ hostView: CameraPreviewHostView, owner: String) {
+        guard hosts[owner]?.view !== hostView else {
+            hostView.layoutManagedPreviewLayer()
+            return
+        }
+        register(hostView, owner: owner)
+    }
+
+    func unregister(_ hostView: CameraPreviewHostView, owner: String) {
+        if hosts[owner]?.view === hostView {
+            hosts[owner] = nil
+        }
+        hostView.managedPreviewLayer = nil
+
+        if activeHostView === hostView {
+            previewLayer.removeFromSuperlayer()
+            activeHostView = nil
+            activeOwner = nil
+        }
+
         cameraLifecycleLogger.info(
-            "camera_preview_detached owner=\(coordinator.owner, privacy: .public) session_running=\(uiView.previewLayer.session?.isRunning ?? false, privacy: .public)"
+            "camera_preview_unregistered owner=\(owner, privacy: .public) preferred=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) previewing=\(self.previewLayer.isPreviewing, privacy: .public)"
+        )
+        activatePreferredHostIfAvailable()
+    }
+
+    private func activatePreferredHostIfAvailable() {
+        guard let hostView = hosts[preferredOwner]?.view else {
+            if activeHostView != nil {
+                activeHostView?.managedPreviewLayer = nil
+                previewLayer.removeFromSuperlayer()
+                activeHostView = nil
+                activeOwner = nil
+            }
+            cameraLifecycleLogger.info(
+                "camera_preview_waiting owner=\(self.preferredOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+            )
+            return
+        }
+
+        guard activeHostView !== hostView else {
+            hostView.managedPreviewLayer = previewLayer
+            hostView.layoutManagedPreviewLayer()
+            return
+        }
+
+        let previousOwner = activeOwner ?? "none"
+        activeHostView?.managedPreviewLayer = nil
+        previewLayer.removeFromSuperlayer()
+        hostView.managedPreviewLayer = previewLayer
+        hostView.layer.insertSublayer(previewLayer, at: 0)
+        hostView.layoutManagedPreviewLayer()
+        activeHostView = hostView
+        activeOwner = preferredOwner
+
+        cameraLifecycleLogger.info(
+            "camera_preview_attached owner=\(self.preferredOwner, privacy: .public) previous_owner=\(previousOwner, privacy: .public) session_running=\(self.session.isRunning, privacy: .public) previewing=\(self.previewLayer.isPreviewing, privacy: .public)"
         )
     }
 }
 
-final class CameraPreviewView: UIView {
-    override static var layerClass: AnyClass {
-        AVCaptureVideoPreviewLayer.self
+struct CameraPreview: UIViewRepresentable {
+    let router: CameraPreviewRouter
+    let owner: String
+
+    final class Coordinator {
+        let owner: String
+        let router: CameraPreviewRouter
+
+        init(owner: String, router: CameraPreviewRouter) {
+            self.owner = owner
+            self.router = router
+        }
     }
 
-    var previewLayer: AVCaptureVideoPreviewLayer {
-        layer as! AVCaptureVideoPreviewLayer
+    func makeCoordinator() -> Coordinator {
+        Coordinator(owner: owner, router: router)
+    }
+
+    func makeUIView(context: Context) -> CameraPreviewHostView {
+        let view = CameraPreviewHostView()
+        router.register(view, owner: owner)
+        return view
+    }
+
+    func updateUIView(_ uiView: CameraPreviewHostView, context: Context) {
+        router.update(uiView, owner: owner)
+    }
+
+    static func dismantleUIView(_ uiView: CameraPreviewHostView, coordinator: Coordinator) {
+        coordinator.router.unregister(uiView, owner: coordinator.owner)
+    }
+}
+
+final class CameraPreviewHostView: UIView {
+    weak var managedPreviewLayer: AVCaptureVideoPreviewLayer?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutManagedPreviewLayer()
+    }
+
+    func layoutManagedPreviewLayer() {
+        managedPreviewLayer?.frame = bounds
     }
 }
 
@@ -1695,24 +1795,30 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
 
             do {
                 let operationStartedAt = ProcessInfo.processInfo.systemUptime
+                let configurationStartedAt = ProcessInfo.processInfo.systemUptime
                 if !isConfigured {
                     try configureSession()
                     isConfigured = true
                 }
+                let configurationMilliseconds = Self.elapsedMilliseconds(since: configurationStartedAt)
 
+                let startRunningStartedAt = ProcessInfo.processInfo.systemUptime
                 if !session.isRunning {
                     session.startRunning()
                 }
+                let startRunningMilliseconds = Self.elapsedMilliseconds(since: startRunningStartedAt)
 
+                let postStartStartedAt = ProcessInfo.processInfo.systemUptime
                 if let cameraDevice {
                     CameraDeviceSelection.applyPreferredCenterCropZoom(to: cameraDevice)
                     CameraDeviceSelection.logActivePrimaryConstituent(cameraDevice)
                 }
+                let postStartMilliseconds = Self.elapsedMilliseconds(since: postStartStartedAt)
 
                 let operationMilliseconds = Self.elapsedMilliseconds(since: operationStartedAt)
                 let totalMilliseconds = Self.elapsedMilliseconds(since: requestedAt)
                 cameraLifecycleLogger.info(
-                    "camera_start_completed owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) operation_ms=\(operationMilliseconds, privacy: .public) total_ms=\(totalMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
+                    "camera_start_completed owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) configuration_ms=\(configurationMilliseconds, privacy: .public) start_running_ms=\(startRunningMilliseconds, privacy: .public) post_start_ms=\(postStartMilliseconds, privacy: .public) operation_ms=\(operationMilliseconds, privacy: .public) total_ms=\(totalMilliseconds, privacy: .public) session_running=\(self.session.isRunning, privacy: .public)"
                 )
 
                 let warmupDate = Date()

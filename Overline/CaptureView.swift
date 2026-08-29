@@ -240,6 +240,7 @@ struct CaptureView: View {
         pageReaderRequestedAt = ProcessInfo.processInfo.systemUptime
         captureMetricsLogger.info("page_reader_requested")
         captureMetricsLogger.info("camera_handoff from=highlight to=reader")
+        cameraScanner.previewRouter.selectOwner("reader")
         isPageReaderPresented = true
     }
 
@@ -247,10 +248,15 @@ struct CaptureView: View {
         captureMetricsLogger.info(
             "camera_handoff from=reader to=highlight active=\(isActive, privacy: .public) scene=\(String(describing: scenePhase), privacy: .public)"
         )
+        cameraScanner.previewRouter.selectOwner("highlight")
         lastExperienceMode = CaptureExperienceMode.highlight.rawValue
         pageReaderRequestedAt = nil
-        if isActive {
+        if isActive, scenePhase == .active, !cameraScanner.session.isRunning {
             scheduleCameraStart()
+        } else {
+            captureMetricsLogger.info(
+                "camera_handoff session_reused=\(cameraScanner.session.isRunning, privacy: .public)"
+            )
         }
     }
 
@@ -982,7 +988,7 @@ private struct CaptureStage: View {
                     .fill(Color(red: 0.09, green: 0.12, blue: 0.12))
 
                 if cameraScanner.canUseLiveCamera {
-                    CameraPreview(session: cameraScanner.session, owner: "highlight")
+                    CameraPreview(router: cameraScanner.previewRouter, owner: "highlight")
                         .overlay(Color.black.opacity(0.12))
 
                     if let frozenFrameImage = cameraScanner.frozenFrameImage {

@@ -745,6 +745,7 @@ struct PageReaderView: View {
                 "page_reader_view_appeared elapsed_ms=\(elapsedMilliseconds, privacy: .public)"
             )
             quoteSpeechPlayer.stop()
+            cameraScanner.previewRouter.selectOwner("reader")
             readingSession.connectVoiceSettings(quoteSpeechPlayer)
             readingSession.updateSpeechRateMultiplier(Float(speechRateMultiplier))
             scheduleCameraPreparation()
@@ -772,9 +773,6 @@ struct PageReaderView: View {
             readingSession.endSession()
             cameraScanner.stopSwipeRecognition(clearResults: true)
             cameraScanner.clearFrozenFrame()
-            if scenePhase == .active {
-                cameraScanner.start(owner: "reader.on_disappear_handoff")
-            }
         }
         .onChange(of: cameraScanner.frozenFrameImage != nil) { _, hasFrozenFrame in
             guard hasFrozenFrame, isAwaitingFrozenFrame else { return }
@@ -854,7 +852,7 @@ struct PageReaderView: View {
                 .fill(Color.black)
 
             if isCameraPreviewReady, cameraScanner.canUseLiveCamera {
-                CameraPreview(session: cameraScanner.session, owner: "reader")
+                CameraPreview(router: cameraScanner.previewRouter, owner: "reader")
 
                 if let frozenFrameImage = cameraScanner.frozenFrameImage {
                     Image(uiImage: frozenFrameImage)
