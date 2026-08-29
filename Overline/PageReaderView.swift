@@ -1,8 +1,11 @@
 import AVFoundation
 import NaturalLanguage
 import Observation
+import OSLog
 import SwiftUI
 import UIKit
+
+private let pageReaderMetricsLogger = Logger(subsystem: "aib.Overline", category: "PageReaderMetrics")
 
 enum CaptureExperienceMode: String, CaseIterable, Identifiable {
     case highlight
@@ -61,13 +64,13 @@ struct CaptureExperiencePicker: View {
     }
 }
 
-struct ReadingCue: Identifiable {
+nonisolated struct ReadingCue: Identifiable, Sendable {
     let id: Int
     let text: String
     let range: NSRange
 }
 
-struct ReadingPage: Identifiable {
+nonisolated struct ReadingPage: Identifiable, Sendable {
     let id = UUID()
     let text: String
     let language: CaptureLanguage
@@ -89,7 +92,7 @@ struct ReadingPage: Identifiable {
     }
 }
 
-private enum ReadingCueTokenizer {
+nonisolated private enum ReadingCueTokenizer {
     static func cues(in text: String, language: CaptureLanguage) -> [ReadingCue] {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
@@ -644,6 +647,7 @@ struct PageReaderView: View {
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
 
     let cameraScanner: CameraTextScanner
+    let requestedAt: TimeInterval?
 
     @State private var readingSession = PageReadingSession()
     @State private var isAwaitingFrozenFrame = false
@@ -654,6 +658,7 @@ struct PageReaderView: View {
     @State private var cameraPreparationTask: Task<Void, Never>?
     @State private var finishTransitionTask: Task<Void, Never>?
     @State private var initialDraftTask: Task<Void, Never>?
+    @State private var resumeDraftTask: Task<Void, Never>?
     @State private var showsExitConfirmation = false
     @State private var showsStoredDraftPrompt = false
     @State private var showsReplacementConfirmation = false
@@ -735,9 +740,14 @@ struct PageReaderView: View {
                 .presentationDragIndicator(.visible)
         }
         .onAppear {
+            let elapsedMilliseconds = requestElapsedMilliseconds
+            pageReaderMetricsLogger.info(
+                "page_reader_view_appeared elapsed_ms=\(elapsedMilliseconds, privacy: .public)"
+            )
             quoteSpeechPlayer.stop()
             readingSession.connectVoiceSettings(quoteSpeechPlayer)
             readingSession.updateSpeechRateMultiplier(Float(speechRateMultiplier))
+            scheduleCameraPreparation()
             initialDraftTask?.cancel()
             initialDraftTask = Task { @MainActor in
                 await prepareInitialReadingState()
@@ -754,6 +764,8 @@ struct PageReaderView: View {
             finishTransitionTask = nil
             initialDraftTask?.cancel()
             initialDraftTask = nil
+            resumeDraftTask?.cancel()
+            resumeDraftTask = nil
             readingSession.endSession()
             cameraScanner.stopSwipeRecognition(clearResults: true)
             cameraScanner.clearFrozenFrame()
@@ -773,9 +785,7 @@ struct PageReaderView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                if readerStage == .camera,
-                   !showsStoredDraftPrompt,
-                   initialDraftTask == nil {
+                if readerStage == .camera {
                     scheduleCameraPreparation()
                 }
             } else {
@@ -823,7 +833,7 @@ struct PageReaderView: View {
 
     @ViewBuilder
     private var stageContent: some View {
-        if readerStage == .lyrics, !readingSession.pages.isEmpty {
+        if readerStage == .lyrics {
             PageReaderLyricsStage(
                 pages: readingSession.pages,
                 currentPageIndex: readingSession.currentPageIndex,
@@ -995,6 +1005,8 @@ struct PageReaderView: View {
     private var canCapturePage: Bool {
         readerStage == .camera
             && isCameraPreviewReady
+            && initialDraftTask == nil
+            && !showsStoredDraftPrompt
             && cameraScanner.canUseLiveCamera
             && !isAwaitingFrozenFrame
             && !isProcessingPage
@@ -1041,15 +1053,17 @@ struct PageReaderView: View {
             guard
                 !Task.isCancelled,
                 scenePhase == .active,
-                readerStage == .camera,
-                !showsStoredDraftPrompt,
-                initialDraftTask == nil
+                readerStage == .camera
             else {
                 return
             }
 
             prepareCamera()
             isCameraPreviewReady = true
+            let elapsedMilliseconds = requestElapsedMilliseconds
+            pageReaderMetricsLogger.info(
+                "page_reader_camera_ready elapsed_ms=\(elapsedMilliseconds, privacy: .public)"
+            )
             cameraPreparationTask = nil
         }
     }
@@ -1186,15 +1200,18 @@ struct PageReaderView: View {
 
     @MainActor
     private func prepareInitialReadingState() async {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         let draft = await PageReadingDraftStore.shared.load()
         guard !Task.isCancelled else { return }
 
+        let durationMilliseconds = elapsedMilliseconds(since: startedAt)
+        pageReaderMetricsLogger.info(
+            "page_reader_draft_loaded duration_ms=\(durationMilliseconds, privacy: .public) has_draft=\(draft != nil, privacy: .public)"
+        )
         initialDraftTask = nil
         if let draft {
             storedDraft = draft
             showsStoredDraftPrompt = true
-        } else {
-            scheduleCameraPreparation()
         }
     }
 
@@ -1207,40 +1224,58 @@ struct PageReaderView: View {
 
     private func beginNewReading() {
         activeDraftID = nil
+        isLyricsContentReady = false
+        readerStage = .camera
         scheduleCameraPreparation()
     }
 
     private func resumeStoredDraft() {
-        guard let storedDraft else {
+        guard let draft = storedDraft else {
             beginNewReading()
             return
         }
 
-        let pages = storedDraft.pages.map { page in
-            ReadingPage(
-                text: page.text,
-                language: page.language,
-                recognizedLineCount: page.recognizedLineCount,
-                omittedLineCount: page.omittedLineCount
-            )
-        }
-        guard !pages.isEmpty else {
-            beginNewReading()
-            return
-        }
-
-        readingSession.restorePages(
-            pages,
-            currentPageIndex: storedDraft.currentPageIndex,
-            activeCueIndex: storedDraft.activeCueIndex
-        )
-        activeDraftID = storedDraft.id
+        activeDraftID = draft.id
         isCameraPreviewReady = false
         isLyricsContentReady = false
         readerStage = .lyrics
+        cameraPreparationTask?.cancel()
+        cameraPreparationTask = nil
+        cameraScanner.stop(clearRecognitionResults: false)
+        cameraScanner.clearFrozenFrame()
 
-        finishTransitionTask?.cancel()
-        finishTransitionTask = Task { @MainActor in
+        resumeDraftTask?.cancel()
+        resumeDraftTask = Task { @MainActor in
+            defer { resumeDraftTask = nil }
+            let startedAt = ProcessInfo.processInfo.systemUptime
+            let pages = await Task.detached(priority: .userInitiated) {
+                draft.pages.map { page in
+                    ReadingPage(
+                        text: page.text,
+                        language: page.language,
+                        recognizedLineCount: page.recognizedLineCount,
+                        omittedLineCount: page.omittedLineCount
+                    )
+                }
+            }.value
+            guard !Task.isCancelled else { return }
+
+            let durationMilliseconds = elapsedMilliseconds(since: startedAt)
+            let characterCount = draft.pages.reduce(0) { $0 + $1.text.count }
+            pageReaderMetricsLogger.info(
+                "page_reader_draft_tokenized duration_ms=\(durationMilliseconds, privacy: .public) page_count=\(pages.count, privacy: .public) character_count=\(characterCount, privacy: .public)"
+            )
+
+            guard !pages.isEmpty else {
+                beginNewReading()
+                return
+            }
+
+            readingSession.restorePages(
+                pages,
+                currentPageIndex: draft.currentPageIndex,
+                activeCueIndex: draft.activeCueIndex
+            )
             await Task.yield()
             guard !Task.isCancelled, readerStage == .lyrics else { return }
 
@@ -1248,13 +1283,12 @@ struct PageReaderView: View {
             try? await Task.sleep(nanoseconds: 40_000_000)
             guard !Task.isCancelled, readerStage == .lyrics else { return }
 
-            readingSession.beginPlayback(
-                atPageIndex: storedDraft.currentPageIndex,
-                cueIndex: storedDraft.activeCueIndex
-            )
-            cameraScanner.stop(clearRecognitionResults: false)
-            cameraScanner.clearFrozenFrame()
-            finishTransitionTask = nil
+            if scenePhase == .active {
+                readingSession.beginPlayback(
+                    atPageIndex: draft.currentPageIndex,
+                    cueIndex: draft.activeCueIndex
+                )
+            }
         }
     }
 
@@ -1361,6 +1395,8 @@ struct PageReaderView: View {
         cancelPendingRecognition()
         initialDraftTask?.cancel()
         initialDraftTask = nil
+        resumeDraftTask?.cancel()
+        resumeDraftTask = nil
         finishTransitionTask?.cancel()
         finishTransitionTask = nil
         cameraPreparationTask?.cancel()
@@ -1369,6 +1405,15 @@ struct PageReaderView: View {
         cameraScanner.clearFrozenFrame()
         resetCaptureContext()
         dismiss()
+    }
+
+    private var requestElapsedMilliseconds: Int {
+        guard let requestedAt else { return 0 }
+        return elapsedMilliseconds(since: requestedAt)
+    }
+
+    private func elapsedMilliseconds(since start: TimeInterval) -> Int {
+        Int(max(0, (ProcessInfo.processInfo.systemUptime - start) * 1_000).rounded())
     }
 
     private func resetCaptureContext() {

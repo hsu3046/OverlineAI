@@ -33,15 +33,17 @@ struct CaptureView: View {
     @State private var delayedCameraStopTask: Task<Void, Never>?
     @State private var isHighlighterGestureActive = false
     @AppStorage("capture.autoRecognitionEnabled") private var isAutoRecognitionEnabled = true
+    @AppStorage("capture.lastExperienceMode") private var lastExperienceMode = CaptureExperienceMode.highlight.rawValue
     @State private var selectedTone: StickyTone = .yellow
     @State private var memoFocusRequest = 0
-    @State private var captureExperience: CaptureExperienceMode = .highlight
+    @State private var isPageReaderPresented = false
+    @State private var pageReaderRequestedAt: TimeInterval?
 
     var body: some View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 VStack(spacing: 16) {
-                    CaptureExperiencePicker(selection: $captureExperience)
+                    CaptureExperiencePicker(selection: captureExperienceSelection)
 
                     CaptureBookSelector(
                         library: library,
@@ -113,6 +115,7 @@ struct CaptureView: View {
                 prefillTagsFromSelectedBookIfNeeded()
                 if isActive {
                     scheduleCameraStart()
+                    presentRememberedExperienceIfNeeded()
                 }
             }
             .onDisappear {
@@ -125,11 +128,14 @@ struct CaptureView: View {
                 delayedCameraStopTask = nil
                 isHighlighterGestureActive = false
                 speechRecorder.cancel()
-                scheduleCameraStopAfterGrace()
+                if !isPageReaderPresented {
+                    scheduleCameraStopAfterGrace()
+                }
             }
             .onChange(of: isActive) { _, active in
                 if active {
                     scheduleCameraStart()
+                    presentRememberedExperienceIfNeeded()
                 } else {
                     applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
                     delayedCameraStartTask?.cancel()
@@ -183,21 +189,59 @@ struct CaptureView: View {
                         .presentationDragIndicator(.visible)
                 }
             }
-            .fullScreenCover(isPresented: pageReaderPresentation) {
-                PageReaderView(cameraScanner: cameraScanner)
+            .fullScreenCover(isPresented: $isPageReaderPresented, onDismiss: pageReaderDidDismiss) {
+                PageReaderView(
+                    cameraScanner: cameraScanner,
+                    requestedAt: pageReaderRequestedAt
+                )
             }
         }
     }
 
-    private var pageReaderPresentation: Binding<Bool> {
+    private var captureExperienceSelection: Binding<CaptureExperienceMode> {
         Binding(
-            get: { captureExperience == .reader },
-            set: { isPresented in
-                if !isPresented {
-                    captureExperience = .highlight
-                }
+            get: { isPageReaderPresented ? .reader : .highlight },
+            set: { mode in
+                selectCaptureExperience(mode)
             }
         )
+    }
+
+    private var rememberedExperience: CaptureExperienceMode {
+        CaptureExperienceMode(rawValue: lastExperienceMode) ?? .highlight
+    }
+
+    private func selectCaptureExperience(_ mode: CaptureExperienceMode) {
+        lastExperienceMode = mode.rawValue
+        guard mode == .reader else { return }
+        presentPageReader()
+    }
+
+    private func presentRememberedExperienceIfNeeded() {
+        guard rememberedExperience == .reader else { return }
+
+        Task { @MainActor in
+            await Task.yield()
+            guard isActive, rememberedExperience == .reader else { return }
+            presentPageReader()
+        }
+    }
+
+    private func presentPageReader() {
+        guard !isPageReaderPresented else { return }
+        delayedCameraStopTask?.cancel()
+        delayedCameraStopTask = nil
+        pageReaderRequestedAt = ProcessInfo.processInfo.systemUptime
+        captureMetricsLogger.info("page_reader_requested")
+        isPageReaderPresented = true
+    }
+
+    private func pageReaderDidDismiss() {
+        lastExperienceMode = CaptureExperienceMode.highlight.rawValue
+        pageReaderRequestedAt = nil
+        if isActive {
+            scheduleCameraStart()
+        }
     }
 
     private func toggleVoiceMemo() {
