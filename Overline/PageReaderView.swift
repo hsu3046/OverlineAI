@@ -143,11 +143,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     var canAddPage: Bool {
-        pages.count < Self.maximumPageCount || currentPageIndex > 0
-    }
-
-    var canMoveBackward: Bool {
-        currentPageIndex > 0
+        pages.count < Self.maximumPageCount
     }
 
     var canMoveForward: Bool {
@@ -159,23 +155,17 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     @discardableResult
-    func addPage(_ page: ReadingPage) -> Bool {
-        if pages.count >= Self.maximumPageCount, currentPageIndex > 0 {
-            pages.removeFirst()
-            currentPageIndex -= 1
-        }
-
+    func appendPage(_ page: ReadingPage) -> Bool {
         guard pages.count < Self.maximumPageCount else { return false }
-
-        let shouldBeginPlayback = pages.isEmpty || isWaitingForNextPage
         pages.append(page)
-
-        if shouldBeginPlayback {
-            currentPageIndex = pages.count - 1
-            speakCurrentPage()
-        }
-
         return true
+    }
+
+    func beginPlayback(atPageIndex pageIndex: Int = 0) {
+        guard pages.indices.contains(pageIndex) else { return }
+        currentPageIndex = pageIndex
+        pendingStartCueIndex = nil
+        speakCurrentPage()
     }
 
     func togglePlayback() {
@@ -206,18 +196,12 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    func moveBackward() {
-        guard canMoveBackward else { return }
-        pendingStartCueIndex = nil
-        currentPageIndex -= 1
-        speakCurrentPage()
-    }
-
-    func moveForward() {
-        guard canMoveForward else { return }
-        pendingStartCueIndex = nil
-        currentPageIndex += 1
-        speakCurrentPage()
+    func resumeIfPaused() {
+        guard isPaused else { return }
+        if activeSynthesizer().continueSpeaking() {
+            isPaused = false
+            isSpeaking = true
+        }
     }
 
     func updateSpeechRateMultiplier(_ multiplier: Float) {
@@ -464,18 +448,23 @@ private enum PageReaderStage {
     case lyrics
 }
 
+private struct ReadingLyricsCueID: Hashable {
+    let pageID: ReadingPage.ID
+    let cueID: ReadingCue.ID
+}
+
+private struct ReadingLyricsCue: Identifiable {
+    let id: ReadingLyricsCueID
+    let text: String
+}
+
 private struct PageReaderLyricsStage: View {
-    let page: ReadingPage
-    let pageIndex: Int
-    let pageCount: Int
+    let pages: [ReadingPage]
+    let currentPageIndex: Int
     let activeCueIndex: Int
-    let canMoveBackward: Bool
-    let canMoveForward: Bool
     let canAddPage: Bool
-    let moveBackward: () -> Void
-    let moveForward: () -> Void
     let addPage: () -> Void
-    @State private var scrollPosition: ReadingCue.ID?
+    @State private var scrollPosition: ReadingLyricsCue.ID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -490,7 +479,7 @@ private struct PageReaderLyricsStage: View {
                             .frame(height: verticalScrollInset(for: geometry.size.height))
                             .accessibilityHidden(true)
 
-                        ForEach(page.cues) { cue in
+                        ForEach(lyricsCues) { cue in
                             cueText(cue, isActive: cue.id == activeCueID)
                                 .id(cue.id)
                         }
@@ -512,12 +501,6 @@ private struct PageReaderLyricsStage: View {
                         scrollPosition = cueID
                     }
                 }
-                .onChange(of: page.id) { _, _ in
-                    scrollPosition = nil
-                    DispatchQueue.main.async {
-                        scrollPosition = activeCueID
-                    }
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -531,33 +514,11 @@ private struct PageReaderLyricsStage: View {
                 .stroke(Color.overlineMutedInk.opacity(0.20), lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("현재 페이지 낭독")
+        .accessibilityLabel("본문 낭독")
     }
 
     private var stageHeader: some View {
-        HStack(spacing: 8) {
-            if pageCount > 1 {
-                pageNavigationButton(
-                    systemImage: "chevron.left",
-                    label: "이전 페이지",
-                    isEnabled: canMoveBackward,
-                    action: moveBackward
-                )
-            }
-
-            Text("\(pageIndex + 1) / \(pageCount)")
-                .font(.headline.monospacedDigit())
-                .foregroundStyle(Color.overlineMutedInk)
-
-            if pageCount > 1 {
-                pageNavigationButton(
-                    systemImage: "chevron.right",
-                    label: "다음 페이지",
-                    isEnabled: canMoveForward,
-                    action: moveForward
-                )
-            }
-
+        HStack {
             Spacer()
 
             Button(action: addPage) {
@@ -572,38 +533,30 @@ private struct PageReaderLyricsStage: View {
             }
             .buttonStyle(.plain)
             .disabled(!canAddPage)
-            .accessibilityLabel("다음 페이지 촬영")
+            .accessibilityLabel("페이지 추가")
         }
     }
 
-    private func pageNavigationButton(
-        systemImage: String,
-        label: String,
-        isEnabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(isEnabled ? Color.overlineInk : Color.overlineMutedInk.opacity(0.30))
-                .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
+    private var lyricsCues: [ReadingLyricsCue] {
+        pages.flatMap { page in
+            page.cues.map { cue in
+                ReadingLyricsCue(
+                    id: ReadingLyricsCueID(pageID: page.id, cueID: cue.id),
+                    text: cue.text
+                )
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .accessibilityLabel(label)
     }
 
-    private var boundedActiveCueIndex: Int {
-        min(max(activeCueIndex, 0), max(page.cues.count - 1, 0))
+    private var activeCueID: ReadingLyricsCue.ID? {
+        guard pages.indices.contains(currentPageIndex) else { return nil }
+        let page = pages[currentPageIndex]
+        let cueIndex = min(max(activeCueIndex, 0), max(page.cues.count - 1, 0))
+        guard page.cues.indices.contains(cueIndex) else { return nil }
+        return ReadingLyricsCueID(pageID: page.id, cueID: page.cues[cueIndex].id)
     }
 
-    private var activeCueID: ReadingCue.ID? {
-        guard page.cues.indices.contains(boundedActiveCueIndex) else { return nil }
-        return page.cues[boundedActiveCueIndex].id
-    }
-
-    private func cueText(_ cue: ReadingCue, isActive: Bool) -> some View {
+    private func cueText(_ cue: ReadingLyricsCue, isActive: Bool) -> some View {
         Text(cue.text)
             .font(.title2.weight(.bold))
             .foregroundStyle(isActive ? Color.overlineInk : Color.overlineMutedInk)
@@ -639,14 +592,32 @@ private struct PageReaderSpeechSettingsView: View {
     var body: some View {
         NavigationStack {
             VStack {
-                Picker("읽기 속도", selection: $speedMultiplier) {
+                HStack(spacing: 4) {
                     ForEach(PageReadingSpeed.allCases) { speed in
-                        Text(speed.title)
-                            .tag(speed.rawValue)
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) {
+                                speedMultiplier = speed.rawValue
+                            }
+                        } label: {
+                            Text(speed.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.overlineInk)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background {
+                                    if isSelected(speed) {
+                                        Capsule(style: .continuous)
+                                            .fill(Color.white.opacity(0.88))
+                                    }
+                                }
+                                .contentShape(Capsule(style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected(speed) ? [.isSelected] : [])
                     }
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 28)
+                .padding(4)
+                .background(Color.overlineMutedInk.opacity(0.12), in: Capsule(style: .continuous))
+                .padding(.horizontal, 24)
                 .padding(.top, 24)
 
                 Spacer()
@@ -665,6 +636,10 @@ private struct PageReaderSpeechSettingsView: View {
                 }
             }
         }
+    }
+
+    private func isSelected(_ speed: PageReadingSpeed) -> Bool {
+        abs(speedMultiplier - speed.rawValue) < 0.001
     }
 }
 
@@ -686,6 +661,9 @@ struct PageReaderView: View {
     @State private var showsSpeechSettings = false
     @State private var readerStage: PageReaderStage = .camera
     @State private var isCameraPreviewReady = false
+    @State private var pageCountBeforeCapture = 0
+    @State private var resumesPlaybackAfterCapture = false
+    @State private var wasWaitingForNextPageBeforeCapture = false
     @AppStorage("pageReader.speechRateMultiplier") private var speechRateMultiplier = 1.0
 
     var body: some View {
@@ -702,11 +680,18 @@ struct PageReaderView: View {
 
                 if let errorMessage {
                     readerStatus(message: errorMessage, systemImage: "exclamationmark.triangle")
-                } else if readingSession.pages.isEmpty {
-                    readerStatus(message: "인식 내용은 저장되지 않습니다", systemImage: "lock")
+                } else if readerStage == .camera {
+                    if readingSession.pages.isEmpty {
+                        readerStatus(message: "인식 내용은 저장되지 않습니다", systemImage: "lock")
+                    } else {
+                        readerStatus(
+                            message: "\(readingSession.pages.count)쪽 준비됨",
+                            systemImage: "doc.on.doc"
+                        )
+                    }
                 }
 
-                if !readingSession.pages.isEmpty {
+                if readerStage == .lyrics, !readingSession.pages.isEmpty {
                     readingControls
                 }
             }
@@ -777,6 +762,7 @@ struct PageReaderView: View {
             cancelPendingRecognition()
             readingSession.endSession()
             cameraScanner.clearFrozenFrame()
+            resetCaptureContext()
             readerStage = .camera
             scheduleCameraPreparation()
             errorMessage = "메모리 보호를 위해 읽기 세션을 종료했습니다."
@@ -798,17 +784,12 @@ struct PageReaderView: View {
 
     @ViewBuilder
     private var stageContent: some View {
-        if readerStage == .lyrics, let currentPage = readingSession.currentPage {
+        if readerStage == .lyrics, !readingSession.pages.isEmpty {
             PageReaderLyricsStage(
-                page: currentPage,
-                pageIndex: readingSession.currentPageIndex,
-                pageCount: readingSession.pages.count,
+                pages: readingSession.pages,
+                currentPageIndex: readingSession.currentPageIndex,
                 activeCueIndex: readingSession.activeCueIndex,
-                canMoveBackward: readingSession.canMoveBackward,
-                canMoveForward: readingSession.canMoveForward,
                 canAddPage: readingSession.canAddPage,
-                moveBackward: readingSession.moveBackward,
-                moveForward: readingSession.moveForward,
                 addPage: openCameraForNextPage
             )
             .transition(.opacity)
@@ -856,8 +837,9 @@ struct PageReaderView: View {
                 .accessibilityLabel(cameraScanner.isTorchOn ? "조명 끄기" : "조명 켜기")
             }
 
-            captureButton
+            captureControls
                 .padding(.bottom, 18)
+                .padding(.horizontal, 14)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -868,6 +850,18 @@ struct PageReaderView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("페이지 촬영")
+    }
+
+    private var captureControls: some View {
+        ZStack {
+            captureButton
+
+            HStack {
+                Spacer()
+                finishCaptureButton
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 78)
     }
 
     private var captureButton: some View {
@@ -883,16 +877,28 @@ struct PageReaderView: View {
                 if isProcessingPage || isAwaitingFrozenFrame {
                     ProgressView()
                         .tint(Color.overlineAccent)
-                } else if !readingSession.pages.isEmpty {
-                    Image(systemName: "plus")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(Color.overlineAccent)
                 }
             }
         }
         .buttonStyle(.plain)
         .disabled(!canCapturePage)
-        .accessibilityLabel(readingSession.pages.isEmpty ? "페이지 촬영" : "다음 페이지 추가")
+        .accessibilityLabel("페이지 촬영")
+    }
+
+    private var finishCaptureButton: some View {
+        Button(action: finishCapture) {
+            Image(systemName: "checkmark")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(
+                    canFinishCapture ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.36),
+                    in: Circle()
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canFinishCapture)
+        .accessibilityLabel("촬영 완료")
     }
 
     private var unavailableCameraView: some View {
@@ -948,6 +954,13 @@ struct PageReaderView: View {
             && readingSession.canAddPage
     }
 
+    private var canFinishCapture: Bool {
+        readerStage == .camera
+            && !readingSession.pages.isEmpty
+            && !isAwaitingFrozenFrame
+            && !isProcessingPage
+    }
+
     private var cameraUnavailableMessage: String {
         switch cameraScanner.status {
         case .unavailable(let message): message
@@ -999,10 +1012,37 @@ struct PageReaderView: View {
         }
 
         errorMessage = nil
+        pageCountBeforeCapture = readingSession.pages.count
+        resumesPlaybackAfterCapture = readingSession.isSpeaking && !readingSession.isPaused
+        wasWaitingForNextPageBeforeCapture = readingSession.isWaitingForNextPage
+        readingSession.pauseIfNeeded()
         withAnimation(.easeInOut(duration: 0.22)) {
             readerStage = .camera
         }
         scheduleCameraPreparation()
+    }
+
+    private func finishCapture() {
+        guard canFinishCapture else { return }
+
+        let addedPages = readingSession.pages.count - pageCountBeforeCapture
+        isCameraPreviewReady = false
+        cameraScanner.stop(clearRecognitionResults: false)
+        cameraScanner.clearFrozenFrame()
+
+        withAnimation(.easeInOut(duration: 0.22)) {
+            readerStage = .lyrics
+        }
+
+        if pageCountBeforeCapture == 0 {
+            readingSession.beginPlayback()
+        } else if wasWaitingForNextPageBeforeCapture, addedPages > 0 {
+            readingSession.beginPlayback(atPageIndex: pageCountBeforeCapture)
+        } else if resumesPlaybackAfterCapture {
+            readingSession.resumeIfPaused()
+        }
+
+        resetCaptureContext()
     }
 
     private func capturePage() {
@@ -1050,17 +1090,12 @@ struct PageReaderView: View {
                 omittedLineCount: textResult.omittedLineCount
             )
 
-            guard readingSession.addPage(page) else {
+            guard readingSession.appendPage(page) else {
                 errorMessage = "한 번에 최대 \(PageReadingSession.maximumPageCount)쪽까지 준비할 수 있습니다."
                 return
             }
 
             errorMessage = nil
-            isCameraPreviewReady = false
-            cameraScanner.stop(clearRecognitionResults: false)
-            withAnimation(.easeInOut(duration: 0.22)) {
-                readerStage = .lyrics
-            }
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch is CancellationError {
             return
@@ -1087,7 +1122,14 @@ struct PageReaderView: View {
         cameraPreparationTask = nil
         readingSession.endSession()
         cameraScanner.clearFrozenFrame()
+        resetCaptureContext()
         dismiss()
+    }
+
+    private func resetCaptureContext() {
+        pageCountBeforeCapture = 0
+        resumesPlaybackAfterCapture = false
+        wasWaitingForNextPageBeforeCapture = false
     }
 
     private func cancelPendingRecognition() {
