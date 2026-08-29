@@ -161,11 +161,25 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         return true
     }
 
-    func beginPlayback(atPageIndex pageIndex: Int = 0) {
+    func beginPlayback(atPageIndex pageIndex: Int = 0, cueIndex: Int = 0) {
         guard pages.indices.contains(pageIndex) else { return }
         currentPageIndex = pageIndex
         pendingStartCueIndex = nil
-        speakCurrentPage()
+        speakCurrentPage(startingAtCueIndex: cueIndex)
+    }
+
+    func restorePages(
+        _ pages: [ReadingPage],
+        currentPageIndex: Int,
+        activeCueIndex: Int
+    ) {
+        stopPlayback()
+        self.pages = Array(pages.prefix(Self.maximumPageCount))
+        self.currentPageIndex = min(max(currentPageIndex, 0), max(self.pages.count - 1, 0))
+        let cueCount = currentPage?.cues.count ?? 0
+        self.activeCueIndex = min(max(activeCueIndex, 0), max(cueCount - 1, 0))
+        isWaitingForNextPage = false
+        pendingStartCueIndex = self.activeCueIndex
     }
 
     func togglePlayback() {
@@ -639,7 +653,10 @@ struct PageReaderView: View {
     @State private var recognitionTask: Task<Void, Never>?
     @State private var cameraPreparationTask: Task<Void, Never>?
     @State private var finishTransitionTask: Task<Void, Never>?
+    @State private var initialDraftTask: Task<Void, Never>?
     @State private var showsExitConfirmation = false
+    @State private var showsStoredDraftPrompt = false
+    @State private var showsReplacementConfirmation = false
     @State private var showsSpeechSettings = false
     @State private var readerStage: PageReaderStage = .camera
     @State private var isCameraPreviewReady = false
@@ -647,6 +664,8 @@ struct PageReaderView: View {
     @State private var pageCountBeforeCapture = 0
     @State private var resumesPlaybackAfterCapture = false
     @State private var wasWaitingForNextPageBeforeCapture = false
+    @State private var storedDraft: PageReadingDraft?
+    @State private var activeDraftID: PageReadingDraft.ID?
     @AppStorage("pageReader.speechRateMultiplier") private var speechRateMultiplier = 1.0
 
     var body: some View {
@@ -665,7 +684,7 @@ struct PageReaderView: View {
                     readerStatus(message: errorMessage, systemImage: "exclamationmark.triangle")
                 } else if readerStage == .camera {
                     if readingSession.pages.isEmpty {
-                        readerStatus(message: "인식 내용은 저장되지 않습니다", systemImage: "lock")
+                        readerStatus(message: "촬영한 사진은 저장되지 않습니다", systemImage: "lock")
                     } else {
                         readerStatus(
                             message: "\(readingSession.pages.count)쪽 준비됨",
@@ -683,14 +702,32 @@ struct PageReaderView: View {
         }
         .interactiveDismissDisabled(!readingSession.pages.isEmpty)
         .confirmationDialog(
-            "읽기를 종료할까요?",
+            "읽던 내용을 임시로 보관할까요?",
             isPresented: $showsExitConfirmation,
             titleVisibility: .visible
         ) {
-            Button("읽기 종료", role: .destructive, action: closeReader)
+            Button("7일간 임시 보관", action: requestTemporarySave)
+            Button("지금 지우기", role: .destructive, action: discardCurrentAndClose)
             Button("계속 읽기", role: .cancel) {}
         } message: {
-            Text("인식한 내용은 저장되지 않고 바로 삭제됩니다.")
+            Text("임시 보관한 글은 7일간 저장됩니다.")
+        }
+        .confirmationDialog(
+            "어떤 글을 임시로 보관할까요?",
+            isPresented: $showsReplacementConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("새 글로 바꾸기", role: .destructive, action: saveTemporaryDraftAndClose)
+            Button("이전 글 유지", action: closeReader)
+            Button("계속 읽기", role: .cancel) {}
+        } message: {
+            Text("새 글을 보관하면 이전에 보관한 글은 지워집니다.")
+        }
+        .alert("임시 보관한 글이 있어요", isPresented: $showsStoredDraftPrompt) {
+            Button("이어서 듣기", action: resumeStoredDraft)
+            Button("새로 시작", action: beginNewReading)
+        } message: {
+            Text(storedDraftRemainingMessage)
         }
         .sheet(isPresented: $showsSpeechSettings) {
             PageReaderSpeechSettingsView(speedMultiplier: $speechRateMultiplier)
@@ -701,7 +738,10 @@ struct PageReaderView: View {
             quoteSpeechPlayer.stop()
             readingSession.connectVoiceSettings(quoteSpeechPlayer)
             readingSession.updateSpeechRateMultiplier(Float(speechRateMultiplier))
-            scheduleCameraPreparation()
+            initialDraftTask?.cancel()
+            initialDraftTask = Task { @MainActor in
+                await prepareInitialReadingState()
+            }
         }
         .onChange(of: speechRateMultiplier) { _, multiplier in
             readingSession.updateSpeechRateMultiplier(Float(multiplier))
@@ -712,6 +752,8 @@ struct PageReaderView: View {
             cameraPreparationTask = nil
             finishTransitionTask?.cancel()
             finishTransitionTask = nil
+            initialDraftTask?.cancel()
+            initialDraftTask = nil
             readingSession.endSession()
             cameraScanner.stopSwipeRecognition(clearResults: true)
             cameraScanner.clearFrozenFrame()
@@ -731,10 +773,13 @@ struct PageReaderView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                if readerStage == .camera {
+                if readerStage == .camera,
+                   !showsStoredDraftPrompt,
+                   initialDraftTask == nil {
                     scheduleCameraPreparation()
                 }
             } else {
+                updateStoredDraftProgress()
                 cancelPendingRecognition()
                 finishTransitionTask?.cancel()
                 finishTransitionTask = nil
@@ -757,6 +802,7 @@ struct PageReaderView: View {
             resetCaptureContext()
             isLyricsContentReady = false
             readerStage = .camera
+            activeDraftID = nil
             scheduleCameraPreparation()
             errorMessage = "메모리 보호를 위해 읽기 세션을 종료했습니다."
         }
@@ -995,7 +1041,9 @@ struct PageReaderView: View {
             guard
                 !Task.isCancelled,
                 scenePhase == .active,
-                readerStage == .camera
+                readerStage == .camera,
+                !showsStoredDraftPrompt,
+                initialDraftTask == nil
             else {
                 return
             }
@@ -1136,8 +1184,183 @@ struct PageReaderView: View {
         }
     }
 
+    @MainActor
+    private func prepareInitialReadingState() async {
+        let draft = await PageReadingDraftStore.shared.load()
+        guard !Task.isCancelled else { return }
+
+        initialDraftTask = nil
+        if let draft {
+            storedDraft = draft
+            showsStoredDraftPrompt = true
+        } else {
+            scheduleCameraPreparation()
+        }
+    }
+
+    private var storedDraftRemainingMessage: String {
+        guard let storedDraft else { return "" }
+        let remainingSeconds = max(storedDraft.expiresAt.timeIntervalSinceNow, 1)
+        let remainingDays = max(1, Int(ceil(remainingSeconds / (24 * 60 * 60))))
+        return "\(remainingDays)일 남았어요."
+    }
+
+    private func beginNewReading() {
+        activeDraftID = nil
+        scheduleCameraPreparation()
+    }
+
+    private func resumeStoredDraft() {
+        guard let storedDraft else {
+            beginNewReading()
+            return
+        }
+
+        let pages = storedDraft.pages.map { page in
+            ReadingPage(
+                text: page.text,
+                language: page.language,
+                recognizedLineCount: page.recognizedLineCount,
+                omittedLineCount: page.omittedLineCount
+            )
+        }
+        guard !pages.isEmpty else {
+            beginNewReading()
+            return
+        }
+
+        readingSession.restorePages(
+            pages,
+            currentPageIndex: storedDraft.currentPageIndex,
+            activeCueIndex: storedDraft.activeCueIndex
+        )
+        activeDraftID = storedDraft.id
+        isCameraPreviewReady = false
+        isLyricsContentReady = false
+        readerStage = .lyrics
+
+        finishTransitionTask?.cancel()
+        finishTransitionTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled, readerStage == .lyrics else { return }
+
+            isLyricsContentReady = true
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            guard !Task.isCancelled, readerStage == .lyrics else { return }
+
+            readingSession.beginPlayback(
+                atPageIndex: storedDraft.currentPageIndex,
+                cueIndex: storedDraft.activeCueIndex
+            )
+            cameraScanner.stop(clearRecognitionResults: false)
+            cameraScanner.clearFrozenFrame()
+            finishTransitionTask = nil
+        }
+    }
+
+    private func requestTemporarySave() {
+        if let storedDraft, activeDraftID != storedDraft.id {
+            Task { @MainActor in
+                await Task.yield()
+                showsReplacementConfirmation = true
+            }
+        } else {
+            saveTemporaryDraftAndClose()
+        }
+    }
+
+    private func saveTemporaryDraftAndClose() {
+        guard let draft = makeTemporaryDraft() else {
+            errorMessage = "임시 보관할 글이 없습니다."
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await PageReadingDraftStore.shared.save(draft)
+                storedDraft = draft
+                activeDraftID = draft.id
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                closeReader()
+            } catch {
+                errorMessage = "글을 임시 보관하지 못했습니다. 다시 시도해 주세요."
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
+    private func makeTemporaryDraft(now: Date = .now) -> PageReadingDraft? {
+        guard !readingSession.pages.isEmpty else { return nil }
+        return PageReadingDraft(
+            id: activeDraftID ?? UUID(),
+            createdAt: now,
+            expiresAt: now.addingTimeInterval(PageReadingDraftStore.retentionInterval),
+            currentPageIndex: readingSession.currentPageIndex,
+            activeCueIndex: readingSession.activeCueIndex,
+            pages: readingSession.pages.map { page in
+                PageReadingDraftPage(
+                    text: page.text,
+                    language: page.language,
+                    recognizedLineCount: page.recognizedLineCount,
+                    omittedLineCount: page.omittedLineCount
+                )
+            }
+        )
+    }
+
+    private func updateStoredDraftProgress() {
+        guard
+            let storedDraft,
+            activeDraftID == storedDraft.id,
+            !readingSession.pages.isEmpty
+        else {
+            return
+        }
+
+        let updatedDraft = PageReadingDraft(
+            id: storedDraft.id,
+            createdAt: storedDraft.createdAt,
+            expiresAt: storedDraft.expiresAt,
+            currentPageIndex: readingSession.currentPageIndex,
+            activeCueIndex: readingSession.activeCueIndex,
+            pages: readingSession.pages.map { page in
+                PageReadingDraftPage(
+                    text: page.text,
+                    language: page.language,
+                    recognizedLineCount: page.recognizedLineCount,
+                    omittedLineCount: page.omittedLineCount
+                )
+            }
+        )
+        self.storedDraft = updatedDraft
+
+        Task {
+            try? await PageReadingDraftStore.shared.save(updatedDraft)
+        }
+    }
+
+    private func discardCurrentAndClose() {
+        guard activeDraftID == storedDraft?.id else {
+            closeReader()
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await PageReadingDraftStore.shared.delete()
+                storedDraft = nil
+                activeDraftID = nil
+                closeReader()
+            } catch {
+                errorMessage = "임시 보관한 글을 지우지 못했습니다. 다시 시도해 주세요."
+            }
+        }
+    }
+
     private func closeReader() {
         cancelPendingRecognition()
+        initialDraftTask?.cancel()
+        initialDraftTask = nil
         finishTransitionTask?.cancel()
         finishTransitionTask = nil
         cameraPreparationTask?.cancel()
