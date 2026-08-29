@@ -130,13 +130,11 @@ enum LLMAuthMode: String, CaseIterable, Codable, Identifiable {
 
 struct LLMSubscriptionToken: Codable, Equatable {
     var accessToken: String
-    var refreshToken: String
     var accountID: String
     var expiresAt: Date?
 
     static let empty = LLMSubscriptionToken(
         accessToken: "",
-        refreshToken: "",
         accountID: "",
         expiresAt: nil
     )
@@ -298,7 +296,7 @@ final class LLMSettingsStore {
         subscriptionTokens[provider] = token
         clearCredentialRejection(for: provider, mode: .subscription)
 
-        guard token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty else {
+        guard token.hasAccessToken || !token.accountID.trimmed.isEmpty else {
             Self.subscriptionKeychain.delete(account: provider.rawValue)
             return
         }

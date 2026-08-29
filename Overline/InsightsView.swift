@@ -544,6 +544,45 @@ struct OverlineSettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    LLMActiveModelSummary(settings: settings)
+
+                    Button {
+                        Task {
+                            await testConnection()
+                        }
+                    } label: {
+                        HStack {
+                            Label("AI 연결 확인", systemImage: "checkmark.circle")
+                            Spacer()
+
+                            if isTestingConnection {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else if let connectionTestResult, connectionTestResult.isSuccess {
+                                Label(connectionTestResult.message, systemImage: "checkmark.circle.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Color.overlineAccent)
+                            }
+                        }
+                    }
+                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
+
+                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
+                        Text(connectionSetupHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let connectionTestResult, !connectionTestResult.isSuccess {
+                        Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(Color.overlineCoral)
+                    }
+                } header: {
+                    Text("현재 사용 중인 AI")
+                }
+
+                Section {
                     Picker("제공자", selection: providerBinding) {
                         ForEach(LLMProvider.settingsOrder) { provider in
                             HStack(spacing: 10) {
@@ -595,6 +634,8 @@ struct OverlineSettingsSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                } header: {
+                    Text("AI 설정")
                 }
 
                 Section {
@@ -603,7 +644,12 @@ struct OverlineSettingsSheet: View {
                             provider: provider,
                             apiKey: Binding(
                                 get: { settings.apiKey(for: provider) },
-                                set: { settings.setAPIKey($0, for: provider) }
+                                set: {
+                                    settings.setAPIKey($0, for: provider)
+                                    if provider == settings.provider {
+                                        connectionTestResult = nil
+                                    }
+                                }
                             )
                         )
                     }
@@ -617,51 +663,17 @@ struct OverlineSettingsSheet: View {
                             provider: provider,
                             token: Binding(
                                 get: { settings.subscriptionToken(for: provider) },
-                                set: { settings.setSubscriptionToken($0, for: provider) }
+                                set: {
+                                    settings.setSubscriptionToken($0, for: provider)
+                                    if provider == settings.provider {
+                                        connectionTestResult = nil
+                                    }
+                                }
                             )
                         )
                     }
                 } header: {
-                    Text("구독 연동 테스트")
-                } footer: {
-                    Text("OpenAI와 Claude 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다. 브라우저 OAuth 자동 로그인은 다음 단계에서 붙일 수 있도록 호출 경로를 먼저 분리했습니다.")
-                }
-
-                Section {
-                    LLMActiveModelSummary(settings: settings)
-                }
-
-                Section("연결 테스트") {
-                    Button {
-                        Task {
-                            await testConnection()
-                        }
-                    } label: {
-                        HStack {
-                            Label("현재 모델 테스트", systemImage: "network")
-                            Spacer()
-                            if isTestingConnection {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
-
-                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
-                        Text(connectionSetupHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let connectionTestResult {
-                        Label(
-                            connectionTestResult.message,
-                            systemImage: connectionTestResult.isSuccess ? "checkmark.circle.fill" : "exclamationmark.circle"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(connectionTestResult.isSuccess ? Color.overlineAccent : Color.overlineCoral)
-                    }
+                    Text("구독 플랜 토큰")
                 }
 
                 Section("읽어주기") {
@@ -761,21 +773,30 @@ struct OverlineSettingsSheet: View {
     private var providerBinding: Binding<LLMProvider> {
         Binding(
             get: { settings.provider },
-            set: { settings.provider = $0 }
+            set: {
+                settings.provider = $0
+                connectionTestResult = nil
+            }
         )
     }
 
     private var modelBinding: Binding<String> {
         Binding(
             get: { settings.selectedModelID },
-            set: { settings.setSelectedModelID($0) }
+            set: {
+                settings.setSelectedModelID($0)
+                connectionTestResult = nil
+            }
         )
     }
 
     private var authModeBinding: Binding<LLMAuthMode> {
         Binding(
             get: { settings.authMode(for: settings.provider) },
-            set: { settings.setAuthMode($0, for: settings.provider) }
+            set: {
+                settings.setAuthMode($0, for: settings.provider)
+                connectionTestResult = nil
+            }
         )
     }
 
@@ -803,13 +824,11 @@ struct OverlineSettingsSheet: View {
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
-        let modelTitle = settings.selectedModelTitle
         let configuration = LLMTagProviderConfiguration(
             provider: provider,
             modelID: modelID,
             credential: settings.credential(for: provider)
         )
-        let authMode = configuration.credential.mode
         let startedAt = Date()
 
         isTestingConnection = true
@@ -819,7 +838,7 @@ struct OverlineSettingsSheet: View {
         )
 
         do {
-            let response = try await LLMInsightClient().generateInsight(
+            _ = try await LLMInsightClient().generateInsight(
                 LLMInsightRequest(
                     provider: provider,
                     modelID: modelID,
@@ -839,11 +858,15 @@ struct OverlineSettingsSheet: View {
                 )
             )
 
-            let preview = String(response.trimmed.prefix(120))
+            guard isCurrentConnectionTest(configuration) else {
+                isTestingConnection = false
+                return
+            }
+
             settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(preview.isEmpty ? "연결 확인 완료" : preview)"
+                message: "정상"
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -853,10 +876,15 @@ struct OverlineSettingsSheet: View {
                 "llm_connection_test_completed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public)"
             )
         } catch {
+            guard isCurrentConnectionTest(configuration) else {
+                isTestingConnection = false
+                return
+            }
+
             settings.handleRequestError(error, configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: false,
-                message: "\(provider.title) · \(modelTitle) · \(authMode.title)\n\(error.localizedDescription)"
+                message: error.localizedDescription
             )
             insightMetricsLogger.error(
                 "llm_connection_test_failed provider=\(provider.rawValue, privacy: .public) duration_ms=\(Int((Date().timeIntervalSince(startedAt) * 1000).rounded()), privacy: .public) error_code=\(error.insightMetricsCode, privacy: .public)"
@@ -864,6 +892,12 @@ struct OverlineSettingsSheet: View {
         }
 
         isTestingConnection = false
+    }
+
+    private func isCurrentConnectionTest(_ configuration: LLMTagProviderConfiguration) -> Bool {
+        settings.provider == configuration.provider
+            && settings.selectedModelID == configuration.modelID
+            && settings.credential(for: configuration.provider) == configuration.credential
     }
 }
 
@@ -1137,7 +1171,7 @@ private struct LLMSubscriptionTokenRow: View {
 
                 Spacer()
 
-                if token.hasAccessToken || !token.refreshToken.trimmed.isEmpty || !token.accountID.trimmed.isEmpty {
+                if token.hasAccessToken || !token.accountID.trimmed.isEmpty {
                     Button {
                         token = .empty
                     } label: {
@@ -1158,18 +1192,19 @@ private struct LLMSubscriptionTokenRow: View {
 
             switch provider {
             case .openai:
-                TextField("ChatGPT account id (선택)", text: $token.accountID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .anthropic:
-                SecureField("Refresh token (선택)", text: $token.refreshToken)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.caption)
-                    .privacySensitive()
-            case .openrouter, .gemini:
+                DisclosureGroup("고급 설정") {
+                    TextField("ChatGPT account ID", text: $token.accountID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("여러 ChatGPT 워크스페이스를 사용하는 경우에만 필요합니다.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            case .anthropic, .openrouter, .gemini:
                 EmptyView()
             }
         }
@@ -1197,11 +1232,6 @@ private struct LLMActiveModelSummary: View {
             }
 
             Spacer()
-
-            Image(systemName: settings.isReady(for: settings.provider) ? "checkmark.circle.fill" : "exclamationmark.circle")
-                .font(.body.weight(.semibold))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(settings.isReady(for: settings.provider) ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.68))
         }
         .accessibilityElement(children: .combine)
     }

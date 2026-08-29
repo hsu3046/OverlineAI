@@ -12,6 +12,8 @@ Overline의 인사이트 기능은 API 키 방식 외에 사용자가 본인의 
 - 현재 구현은 브라우저 OAuth 자동 로그인 전 단계다.
   - 앱 안 설정 화면에 token을 직접 붙여넣어 테스트한다.
   - token은 iOS Keychain에 이 기기 전용으로 저장된다.
+  - Claude의 장기 OAuth token은 별도 refresh token 입력 없이 사용한다.
+  - OpenAI account ID는 여러 ChatGPT 워크스페이스를 사용할 때를 위한 고급 설정으로만 제공한다.
   - 배포용 UX에서는 직접 token 입력을 숨기고 `OpenAI로 연결`, `Claude로 연결`, `연결 해제`만 보여주는 방향이 맞다.
 
 ## 현재 앱 구현
@@ -37,7 +39,7 @@ Overline의 인사이트 기능은 API 키 방식 외에 사용자가 본인의 
 | OpenAI | 지원 | 지원 | Codex/ChatGPT 구독 경로 |
 | Claude | 지원 | 지원 | Claude Code OAuth 경로 |
 | OpenRouter | 지원 | 미지원 | OpenRouter는 구독 모델이 아님 |
-| Gemini | 지원 | 미지원 | 아직 구독 OAuth 미구현 |
+| Google | 지원 | 미지원 | Gemini 구독 OAuth 미구현 |
 
 ## 자동 태그와 LLM
 
@@ -45,7 +47,7 @@ Overline의 인사이트 기능은 API 키 방식 외에 사용자가 본인의 
 
 자동 태그 보강은 AI 설정에서 현재 선택한 provider, 모델, 인증 방식만 사용한다. 저장된 다른 provider credential로 자동 fallback하지 않으며, OpenRouter를 포함한 모든 provider가 현재 선택된 경우 동일한 호출 경로를 사용한다. 이 규칙은 인사이트 생성, 자동 태그, 수동 태그 재생성, OCR 교정에 공통 적용된다.
 
-앱 전역에서 하나의 `LLMSettingsStore`를 공유하므로 설정 화면에서 변경한 토큰과 모델이 캡처 및 글조각 편집 화면에도 즉시 반영된다. `401` 또는 `403` 응답은 현재 인증 또는 모델 접근 거부 상태로 저장된다. 토큰·API 키나 모델을 다시 설정하거나 같은 선택으로 `현재 모델 테스트`에 성공하면 거부 상태를 해제한다.
+앱 전역에서 하나의 `LLMSettingsStore`를 공유하므로 설정 화면에서 변경한 토큰과 모델이 캡처 및 글조각 편집 화면에도 즉시 반영된다. `401` 또는 `403` 응답은 현재 인증 또는 모델 접근 거부 상태로 저장된다. 토큰·API 키나 모델을 다시 설정하거나 같은 선택으로 `AI 연결 확인`에 성공하면 거부 상태를 해제한다.
 
 자동 태그 요청에는 책 제목, 저자, 책 소개, 선택된 글조각 텍스트, 메모, 기존 태그만 보낸다. 페이지 번호와 생성 날짜는 태그 생성 근거로 보내지 않는다.
 
@@ -124,7 +126,7 @@ jq -r '.tokens.account_id // .account_id // empty' ~/.codex/auth.json
 ```text
 OpenAI > 인증: 구독
 Access token: 2번에서 복사한 값
-ChatGPT account id: 3번 값이 있으면 입력
+고급 설정 > ChatGPT account ID: 여러 워크스페이스를 사용하며 3번 값이 있을 때만 입력
 ```
 
 주의:
@@ -214,7 +216,7 @@ claude setup-token
 - `claude setup-token`은 token을 자동 저장하지 않고 터미널에 출력한다.
 - 이 token은 Claude 구독을 인증한다.
 - token은 비밀번호처럼 취급한다.
-- 현재 Overline은 Claude refresh token 자동 갱신을 아직 구현하지 않았다.
+- 이 장기 token을 사용할 때 Overline에 별도의 refresh token을 입력할 필요는 없다.
 
 ### Overline의 현재 Claude 호출 경로
 
@@ -251,9 +253,9 @@ subscription 경로에서는 system payload를 block 배열로 보낸다.
 2. `인사이트` 탭을 연다.
 3. 오른쪽 위 설정을 연다.
 4. provider를 `OpenAI` 또는 `Anthropic`으로 선택한다.
-5. 인증을 `구독`으로 바꾼다.
+5. 인증을 `구독 플랜 사용`으로 바꾼다.
 6. 발급받은 access token을 붙여넣는다.
-7. `현재 모델 테스트`를 누른다.
+7. 설정 상단의 `AI 연결 확인`을 누른다.
 8. 성공하면 실제 글조각을 선택하고 인사이트 생성을 실행한다.
 
 2026-06-27 확인 결과:
