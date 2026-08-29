@@ -476,6 +476,12 @@ private extension View {
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
     }
+
+    func settingsRowSeparator() -> some View {
+        self
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
+    }
 }
 
 private struct PendingInsightUndo: Identifiable {
@@ -545,6 +551,7 @@ struct OverlineSettingsSheet: View {
             Form {
                 Section {
                     LLMActiveModelSummary(settings: settings)
+                        .settingsRowSeparator()
 
                     Button {
                         Task {
@@ -563,11 +570,13 @@ struct OverlineSettingsSheet: View {
                     }
                     .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
                     .listRowSeparator(.hidden, edges: .bottom)
+                    .settingsRowSeparator()
 
                     if let connectionTestResult, !connectionTestResult.isSuccess {
                         Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
                             .font(.caption)
                             .foregroundStyle(Color.overlineCoral)
+                            .settingsRowSeparator()
                     }
                 } header: {
                     Text("현재 사용 중인 AI")
@@ -584,6 +593,7 @@ struct OverlineSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
                     Picker("모델 선택", selection: modelBinding) {
                         ForEach(settings.provider.modelOptions) { model in
@@ -597,6 +607,7 @@ struct OverlineSettingsSheet: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
                     LabeledContent("모델 ID 직접 입력") {
                         TextField(settings.provider.defaultModelID, text: modelBinding)
@@ -607,10 +618,12 @@ struct OverlineSettingsSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     .listRowSeparator(.hidden, edges: .bottom)
+                    .settingsRowSeparator()
 
                     Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .settingsRowSeparator()
 
                     if settings.provider.supportsSubscriptionAuth {
                         Picker("인증", selection: authModeBinding) {
@@ -620,11 +633,13 @@ struct OverlineSettingsSheet: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .settingsRowSeparator()
                     } else {
                         LabeledContent("인증") {
                             Text("API 키")
                                 .foregroundStyle(.secondary)
                         }
+                        .settingsRowSeparator()
                     }
                 } header: {
                     Text("AI 설정")
@@ -644,6 +659,7 @@ struct OverlineSettingsSheet: View {
                                 }
                             )
                         )
+                        .settingsRowSeparator()
                     }
                 } header: {
                     Text("API 키")
@@ -663,6 +679,7 @@ struct OverlineSettingsSheet: View {
                                 }
                             )
                         )
+                        .settingsRowSeparator()
                     }
                 } header: {
                     Text("구독 플랜 토큰")
@@ -684,6 +701,7 @@ struct OverlineSettingsSheet: View {
                             Image(systemName: "speaker.wave.2")
                         }
                     }
+                    .settingsRowSeparator()
                 }
 
                 Section {
@@ -700,34 +718,34 @@ struct OverlineSettingsSheet: View {
                         }
                     }
                     .disabled(!library.resetBackupAvailable)
+                    .settingsRowSeparator()
 
                     Button(role: .destructive) {
                         showsResetConfirmation = true
                     } label: {
                         Label("보관함 초기화", systemImage: "trash")
                     }
+                    .settingsRowSeparator()
                 } header: {
                     Text("보관함")
                 } footer: {
                     Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다.")
                 }
 
-                Section("개인정보와 AI") {
-                    Text("AI 기능을 사용할 때 필요한 글조각과 책 정보가 선택한 AI 제공자로 전송됩니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+                Section("개인 정보와 이용 조건") {
                     NavigationLink {
                         PrivacyTransmissionPolicyView()
                     } label: {
                         Label("AI 데이터 처리", systemImage: "lock.shield")
                     }
+                    .settingsRowSeparator()
 
                     NavigationLink {
                         OverlineTermsView()
                     } label: {
                         Label("이용 조건", systemImage: "doc.text")
                     }
+                    .settingsRowSeparator()
                 }
             }
             .navigationTitle("설정")
@@ -908,6 +926,7 @@ private struct QuoteSpeechSettingsView: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
 
                     Button {
                         player.togglePreview(for: language)
@@ -917,15 +936,14 @@ private struct QuoteSpeechSettingsView: View {
                             systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
                         )
                     }
+                    .settingsRowSeparator()
                 }
             }
 
             Section {
-                Label("다운로드된 고품질 음성을 우선 표시합니다.", systemImage: "iphone")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                EmptyView()
             } footer: {
-                Text("고품질 음성이 보이지 않으면 iPhone 설정의 음성 콘텐츠에서 해당 언어 음성 팩을 다운로드하세요. Siri 음성은 앱에서 선택할 수 없습니다.")
+                Text("고품질 음성은 iPhone 설정 → 손쉬운 사용 → 읽기 및 말하기 → 음성 → 한국어 → 음성에서 다운로드할 수 있습니다.")
             }
         }
         .navigationTitle("텍스트 낭독")
@@ -1026,6 +1044,7 @@ private struct PrivacyTransmissionPolicyView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .settingsRowSeparator()
                 }
             }
         }
@@ -1082,6 +1101,7 @@ private struct OverlineTermsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .settingsRowSeparator()
                 }
             }
         }
