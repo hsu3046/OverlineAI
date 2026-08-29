@@ -552,26 +552,17 @@ struct OverlineSettingsSheet: View {
                         }
                     } label: {
                         HStack {
-                            Label("AI 연결 확인", systemImage: "checkmark.circle")
+                            Label(connectionTestTitle, systemImage: connectionTestSystemImage)
                             Spacer()
 
                             if isTestingConnection {
                                 ProgressView()
                                     .controlSize(.small)
-                            } else if let connectionTestResult, connectionTestResult.isSuccess {
-                                Label(connectionTestResult.message, systemImage: "checkmark.circle.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.overlineAccent)
                             }
                         }
                     }
                     .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
-
-                    if !settings.hasCredential(for: settings.provider) || settings.isCredentialRejected(for: settings.provider) {
-                        Text(connectionSetupHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    .listRowSeparator(.hidden, edges: .bottom)
 
                     if let connectionTestResult, !connectionTestResult.isSuccess {
                         Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
@@ -615,6 +606,7 @@ struct OverlineSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    .listRowSeparator(.hidden, edges: .bottom)
 
                     Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
                         .font(.caption)
@@ -676,7 +668,7 @@ struct OverlineSettingsSheet: View {
                     Text("구독 플랜 토큰")
                 }
 
-                Section("읽어주기") {
+                Section("텍스트 낭독") {
                     NavigationLink {
                         QuoteSpeechSettingsView(player: quoteSpeechPlayer)
                     } label: {
@@ -717,18 +709,18 @@ struct OverlineSettingsSheet: View {
                 } header: {
                     Text("보관함")
                 } footer: {
-                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다. 직전 상태는 이 기기에 최근 복구 백업 한 건으로 보관됩니다.")
+                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다.")
                 }
 
-                Section("전송 안내") {
-                    Text("선택한 글조각과 메모만 현재 AI 제공자로 전송됩니다. Overline은 캡처 내용을 자체 서버에 저장하지 않으며, 캡처 내용은 AI 학습에 사용되지 않습니다.")
+                Section("개인정보와 AI") {
+                    Text("AI 기능을 사용할 때 필요한 글조각과 책 정보가 선택한 AI 제공자로 전송됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     NavigationLink {
                         PrivacyTransmissionPolicyView()
                     } label: {
-                        Label("개인정보와 AI 전송", systemImage: "lock.shield")
+                        Label("AI 데이터 처리", systemImage: "lock.shield")
                     }
 
                     NavigationLink {
@@ -804,17 +796,18 @@ struct OverlineSettingsSheet: View {
         settings.provider.modelOptions.contains { $0.id == settings.selectedModelID }
     }
 
-    private var connectionSetupHint: String {
-        if settings.isCredentialRejected(for: settings.provider) {
-            return "\(settings.provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. 토큰·API 키 또는 모델을 다시 확인해 주세요."
+    private var connectionTestTitle: String {
+        if isTestingConnection {
+            return "AI 연결 테스트 중"
         }
+        if connectionTestResult?.isSuccess == true {
+            return "AI 연결 테스트 완료"
+        }
+        return "AI 연결 테스트"
+    }
 
-        switch settings.authMode(for: settings.provider) {
-        case .apiKey:
-            return "\(settings.provider.title) API 키를 입력하면 연결을 확인할 수 있습니다."
-        case .subscription:
-            return "\(settings.provider.title) 구독 토큰을 연결하면 현재 모델을 테스트할 수 있습니다."
-        }
+    private var connectionTestSystemImage: String {
+        connectionTestResult?.isSuccess == true ? "checkmark.circle.fill" : "checkmark.circle"
     }
 
     @MainActor
@@ -866,7 +859,7 @@ struct OverlineSettingsSheet: View {
             settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: "정상"
+                message: "AI 연결 테스트 완료"
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -935,7 +928,7 @@ private struct QuoteSpeechSettingsView: View {
                 Text("고품질 음성이 보이지 않으면 iPhone 설정의 음성 콘텐츠에서 해당 언어 음성 팩을 다운로드하세요. Siri 음성은 앱에서 선택할 수 없습니다.")
             }
         }
-        .navigationTitle("읽어주기")
+        .navigationTitle("텍스트 낭독")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             player.logVoiceCatalog()
@@ -991,33 +984,23 @@ private struct PrivacyTransmissionPolicyView: View {
     private let policies: [PrivacyTransmissionPolicy] = [
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
-            title: "로컬 저장",
-            body: "OCR로 저장한 글조각과 메모만 이 기기 안에 저장됩니다. 캡처 사진은 OCR 완료 후 폐기합니다."
+            title: "기기 내 저장",
+            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "key",
-            title: "API 키 보관",
-            body: "API 키와 구독 토큰은 iOS Keychain에 이 기기 전용으로 저장됩니다."
+            title: "인증 정보 보호",
+            body: "API 키와 구독 토큰은 이 기기의 iOS Keychain에 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
-            title: "AI 전송 범위",
-            body: "선택한 글조각과 메모만 현재 선택한 AI 제공자로 전송됩니다. 자동 분석이나 백그라운드 전송은 하지 않습니다."
+            title: "AI로 전송되는 정보",
+            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
-            title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용을 AI 학습 데이터로 사용하지 않습니다. 외부 제공자의 처리 조건은 사용자가 연결한 계정 약관을 따릅니다."
-        ),
-        PrivacyTransmissionPolicy(
-            systemImage: "book.closed",
-            title: "표지 이미지",
-            body: "도서 표지는 Kakao 또는 Aladin API가 제공한 URL만 참조하며, 앱 안에 표지 이미지를 복사 저장하지 않습니다."
-        ),
-        PrivacyTransmissionPolicy(
-            systemImage: "square.and.arrow.up",
-            title: "공유",
-            body: "공유 버튼은 사용자가 선택한 글조각이나 책 메모를 iOS 공유 시트로 넘길 때만 동작합니다. 책 원문 공유는 사적 이용 범위를 넘을 수 있어 매번 확인을 거칩니다."
+            title: "Overline의 처리",
+            body: "Overline은 전송 내용을 자체 서버에 저장하거나 학습에 사용하지 않습니다. 외부 AI에서 처리되는 방식은 연결한 서비스의 정책을 따릅니다."
         )
     ]
 
@@ -1044,11 +1027,9 @@ private struct PrivacyTransmissionPolicyView: View {
                     }
                     .padding(.vertical, 4)
                 }
-            } footer: {
-                Text("클라우드 동기화는 v1 범위에 포함하지 않습니다.")
             }
         }
-        .navigationTitle("개인정보와 AI")
+        .navigationTitle("AI 데이터 처리")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -1064,28 +1045,18 @@ private struct OverlineTermsView: View {
     private let terms: [OverlineTerm] = [
         OverlineTerm(
             systemImage: "person.crop.circle",
-            title: "개인 독서 메모",
-            body: "OCR 캡처 결과는 글조각과 메모로만 저장됩니다. 원문 사진은 개인 기록에도 남기지 않습니다."
+            title: "개인 독서 기록",
+            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
         ),
         OverlineTerm(
             systemImage: "sparkles",
-            title: "요청할 때만 AI 전송",
-            body: "인사이트 생성이나 연결 테스트를 누른 경우에만 선택한 글조각, 메모, 책 정보가 현재 선택한 AI 제공자로 전송됩니다."
-        ),
-        OverlineTerm(
-            systemImage: "nosign",
-            title: "학습 데이터 미사용",
-            body: "Overline은 캡처 내용과 메모를 자체 AI 학습 데이터로 사용하지 않으며 별도 서버에 저장하지 않습니다."
+            title: "AI 기능 사용",
+            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         OverlineTerm(
             systemImage: "square.and.arrow.up",
-            title: "공유 주의",
-            body: "책 원문을 공개 채널이나 다른 사람에게 보내는 공유는 사적 이용 범위를 넘을 수 있습니다. 공유 전 직접 작성한 메모나 짧은 인용인지 확인해야 합니다."
-        ),
-        OverlineTerm(
-            systemImage: "icloud.slash",
-            title: "v1 로컬 우선",
-            body: "v1에는 iCloud 동기화, 서버 저장, 소셜 공유, 전자책 연동을 포함하지 않습니다."
+            title: "공유 전 확인",
+            body: "책의 원문을 공유할 때에는 저작권과 인용 범위를 확인해 주세요."
         )
     ]
 
@@ -1112,8 +1083,6 @@ private struct OverlineTermsView: View {
                     }
                     .padding(.vertical, 4)
                 }
-            } footer: {
-                Text("이 화면은 앱 사용 원칙 안내이며 법률 자문을 대체하지 않습니다.")
             }
         }
         .navigationTitle("이용 조건")
