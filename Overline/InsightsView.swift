@@ -1030,13 +1030,14 @@ private struct QuoteSpeechSettingsView: View {
             .settingsRowSeparator()
 
         case .installed:
-            Picker("음색", selection: supertonicVoiceBinding) {
-                ForEach(SupertonicVoicePreset.allCases) { voice in
-                    Text(voice.pickerTitle)
-                        .tag(voice)
+            NavigationLink {
+                SupertonicVoiceSelectionView(player: player)
+            } label: {
+                LabeledContent("음성") {
+                    Text(player.selectedSupertonicVoice.pickerTitle)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .pickerStyle(.navigationLink)
             .settingsRowSeparator()
 
             Picker("음질", selection: supertonicQualityBinding) {
@@ -1047,8 +1048,6 @@ private struct QuoteSpeechSettingsView: View {
             }
             .pickerStyle(.segmented)
             .settingsRowSeparator()
-
-            previewButton(for: .korean)
 
             Button(role: .destructive) {
                 showsRemovalConfirmation = true
@@ -1074,28 +1073,22 @@ private struct QuoteSpeechSettingsView: View {
 
     @ViewBuilder
     private func systemVoiceSettings(for language: CaptureLanguage) -> some View {
-        Picker("음성", selection: voiceBinding(for: language)) {
-            ForEach(player.voiceOptions(for: language)) { option in
-                Text(option.pickerTitle)
-                    .tag(option.id)
+        NavigationLink {
+            SystemVoiceSelectionView(player: player, language: language)
+        } label: {
+            LabeledContent("음성") {
+                Text(selectedSystemVoiceTitle(for: language))
+                    .foregroundStyle(.secondary)
             }
         }
-        .pickerStyle(.navigationLink)
         .settingsRowSeparator()
-
-        previewButton(for: language)
     }
 
-    private func previewButton(for language: CaptureLanguage) -> some View {
-        Button {
-            player.togglePreview(for: language)
-        } label: {
-            Label(
-                player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
-                systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
-            )
-        }
-        .settingsRowSeparator()
+    private func selectedSystemVoiceTitle(for language: CaptureLanguage) -> String {
+        let identifier = player.selectedVoiceIdentifier(for: language)
+        return player.voiceOptions(for: language)
+            .first(where: { $0.id == identifier })?
+            .pickerTitle ?? player.selectedVoiceName(for: language)
     }
 
     private var engineBinding: Binding<SpeechEngineChoice> {
@@ -1111,13 +1104,6 @@ private struct QuoteSpeechSettingsView: View {
         )
     }
 
-    private var supertonicVoiceBinding: Binding<SupertonicVoicePreset> {
-        Binding(
-            get: { player.selectedSupertonicVoice },
-            set: { player.setSelectedSupertonicVoice($0) }
-        )
-    }
-
     private var supertonicQualityBinding: Binding<SupertonicQuality> {
         Binding(
             get: { player.supertonicQuality },
@@ -1125,11 +1111,88 @@ private struct QuoteSpeechSettingsView: View {
         )
     }
 
-    private func voiceBinding(for language: CaptureLanguage) -> Binding<String> {
-        Binding(
-            get: { player.selectedVoiceIdentifier(for: language) },
-            set: { player.setSelectedVoiceIdentifier($0, for: language) }
-        )
+}
+
+private struct SupertonicVoiceSelectionView: View {
+    let player: QuoteSpeechPlayer
+
+    var body: some View {
+        List(SupertonicVoicePreset.allCases) { voice in
+            VoiceSelectionRow(
+                title: voice.pickerTitle,
+                isSelected: player.selectedSupertonicVoice == voice,
+                isPreviewing: player.isPreviewing(voice),
+                select: { player.setSelectedSupertonicVoice(voice) },
+                togglePreview: { player.togglePreview(voice) }
+            )
+        }
+        .navigationTitle("음성")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            player.stop()
+        }
+    }
+}
+
+private struct SystemVoiceSelectionView: View {
+    let player: QuoteSpeechPlayer
+    let language: CaptureLanguage
+
+    var body: some View {
+        List(player.voiceOptions(for: language)) { option in
+            VoiceSelectionRow(
+                title: option.pickerTitle,
+                isSelected: player.selectedVoiceIdentifier(for: language) == option.id,
+                isPreviewing: player.isPreviewing(option, for: language),
+                select: { player.setSelectedVoiceIdentifier(option.id, for: language) },
+                togglePreview: { player.togglePreview(option, for: language) }
+            )
+        }
+        .navigationTitle("음성")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            player.stop()
+        }
+    }
+}
+
+private struct VoiceSelectionRow: View {
+    let title: String
+    let isSelected: Bool
+    let isPreviewing: Bool
+    let select: () -> Void
+    let togglePreview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: select) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .foregroundStyle(isSelected ? Color.overlineAccent : .primary)
+
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.overline(.caption, weight: .semibold))
+                            .foregroundStyle(Color.overlineAccent)
+                    }
+
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: togglePreview) {
+                Image(systemName: isPreviewing ? "stop.fill" : "play.fill")
+                    .font(.overline(.body, weight: .semibold))
+                    .foregroundStyle(Color.overlineAccent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPreviewing ? "미리 듣기 중지" : "\(title) 미리 듣기")
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
