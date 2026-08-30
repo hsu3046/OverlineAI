@@ -269,7 +269,7 @@ private struct OverlineBottomMenuItem: View {
                 .frame(height: isCompact ? 24 : 26)
 
             Text(tab.title)
-                .font(.caption.weight(.bold))
+                .font(.overline(.caption, weight: .bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .opacity(isCompact ? 0 : 1)
@@ -421,14 +421,14 @@ struct SectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .font(.headline)
+                .font(.overline(.headline))
                 .foregroundStyle(Color.overlineAccent)
             Text(title)
-                .font(.headline)
+                .font(.overline(.headline))
                 .foregroundStyle(Color.overlineInk)
             if let trailingText {
                 Text(trailingText)
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
             }
             Spacer()
@@ -468,10 +468,10 @@ struct CapsuleMetric: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
             Text(value)
-                .font(.title3.weight(.bold))
+                .font(.overline(.title3, weight: .bold))
                 .foregroundStyle(Color.overlineInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

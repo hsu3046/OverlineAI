@@ -8,7 +8,7 @@ struct OverlineDoneToolbarButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "checkmark")
-                .font(.body.weight(.semibold))
+                .font(.overline(.body, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(isDisabled ? Color.overlineMutedInk.opacity(0.38) : Color.overlineAccent)
                 .frame(width: 34, height: 34)
@@ -51,7 +51,7 @@ struct OverlineSheetHeader<Leading: View, Trailing: View>: View {
             Spacer(minLength: 0)
 
             Text(title)
-                .font(.title3.weight(.bold))
+                .font(.overline(.title3, weight: .bold))
                 .foregroundStyle(Color.overlineInk)
 
             Spacer(minLength: 0)
@@ -93,7 +93,7 @@ struct OverlineEditorLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.headline.weight(.bold))
+            .font(.overline(.headline, weight: .bold))
             .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
             .padding(.leading, 18)
     }
@@ -105,15 +105,15 @@ struct OverlineBookSelectorButton: View {
     var systemImage = "book.closed"
     var height: CGFloat = 52
     var cornerRadius: CGFloat = 26
-    var titleFont: Font = .subheadline.weight(.semibold)
-    var subtitleFont: Font = .caption.weight(.semibold)
+    var titleFont: Font = .overline(.subheadline, weight: .semibold)
+    var subtitleFont: Font = .overline(.caption, weight: .semibold)
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Color.overlineAccent)
                     .frame(width: 20)
@@ -137,7 +137,7 @@ struct OverlineBookSelectorButton: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption2.weight(.bold))
+                    .font(.overline(.caption2, weight: .bold))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.58))
             }
@@ -256,21 +256,21 @@ private struct OverlineBookPickerRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: isSelected ? "checkmark.circle.fill" : systemImage)
-                .font(.title3.weight(.semibold))
+                .font(.overline(.title3, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(iconColor)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
-                    .font(.body.weight(.semibold))
+                    .font(.overline(.body, weight: .semibold))
                     .foregroundStyle(isAddAction ? Color.overlineAccent : Color.overlineInk)
                     .lineLimit(2)
                     .truncationMode(.tail)
 
                 if let subtitle, !subtitle.trimmed.isEmpty {
                     Text(subtitle)
-                        .font(.caption.weight(.medium))
+                        .font(.overline(.caption, weight: .medium))
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -281,7 +281,7 @@ private struct OverlineBookPickerRow: View {
 
             if let trailingText {
                 Text(trailingText)
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
                     .lineLimit(1)
             }

@@ -91,7 +91,7 @@ struct LibraryView: View {
                         presentedSheet = .highlightBrowser
                     } label: {
                         Text("모두 보기")
-                            .font(.caption.weight(.semibold))
+                            .font(.overline(.caption, weight: .semibold))
                             .foregroundStyle(Color.overlineAccent.opacity(0.86))
                     }
                     .buttonStyle(.plain)
@@ -276,23 +276,23 @@ private struct LibraryEmptyStateCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: systemImage)
-                .font(.title3.weight(.semibold))
+                .font(.overline(.title3, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color.overlineAccent)
 
             Text(title)
-                .font(.headline.weight(.semibold))
+                .font(.overline(.headline, weight: .semibold))
                 .foregroundStyle(Color.overlineInk)
 
             Text(message)
-                .font(.subheadline)
+                .font(.overline(.subheadline))
                 .foregroundStyle(Color.overlineMutedInk)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let actionTitle, let action {
                 Button(action: action) {
                     Label(actionTitle, systemImage: "plus")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.overline(.subheadline, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
                 .padding(.top, 4)
@@ -575,7 +575,7 @@ private struct BookCoverCard: View {
             .aspectRatio(0.72, contentMode: .fit)
             .overlay(alignment: .topTrailing) {
                 Text("\(book.highlights.count)")
-                    .font(.caption.weight(.bold))
+                    .font(.overline(.caption, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
@@ -599,7 +599,7 @@ private struct HighlightRow: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(highlight.text)
-                        .font(.body.weight(.medium))
+                        .font(.overline(.body, weight: .medium))
                         .foregroundStyle(Color.overlineInk)
                         .lineSpacing(5)
                         .fixedSize(horizontal: false, vertical: true)
@@ -613,7 +613,7 @@ private struct HighlightRow: View {
                         }
                         Text(highlight.createdAt.overlineShortDate)
                     }
-                    .font(.caption)
+                    .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -850,7 +850,7 @@ private struct ScrapbookHeader: View {
 
             if !book.summary.trimmed.isEmpty {
                 Text(book.summary)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.overline(size: 15, relativeTo: .subheadline, weight: .medium))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -926,7 +926,7 @@ private struct ScrapbookMemoNote: View {
         SearchHighlightedText(
             text: memo,
             query: searchQuery,
-            font: .subheadline,
+            font: .overline(.subheadline),
             foregroundStyle: Color.overlineInk.opacity(0.82),
             lineSpacing: 4
         )
@@ -954,7 +954,7 @@ private struct BookMetaLine: View {
                 .foregroundStyle(Color.overlineAccent)
 
             Text(text)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.overline(size: 15, relativeTo: .subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
                 .lineLimit(lineLimit)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -982,13 +982,13 @@ struct ScrapbookCard: View {
                     if let bookTitle = visibleBookTitle {
                         HStack(alignment: .center, spacing: 6) {
                             Image(systemName: "book.closed")
-                                .font(.caption.weight(.bold))
+                                .font(.overline(.caption, weight: .bold))
                                 .symbolRenderingMode(.hierarchical)
 
                             SearchHighlightedText(
                                 text: bookTitle,
                                 query: searchQuery,
-                                font: .caption.weight(.semibold),
+                                font: .overline(.caption, weight: .semibold),
                                 foregroundStyle: Color.overlineMutedInk.opacity(0.76),
                                 lineSpacing: 0
                             )
@@ -1001,7 +1001,7 @@ struct ScrapbookCard: View {
                     SearchHighlightedText(
                         text: highlight.text,
                         query: searchQuery,
-                        font: .body.weight(.semibold),
+                        font: .overline(.body, weight: .semibold),
                         foregroundStyle: Color.overlineInk,
                         lineSpacing: 5
                     )
@@ -1310,10 +1310,10 @@ private struct HighlightMetaItem: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: systemImage)
-                .font(.caption2.weight(.bold))
+                .font(.overline(.caption2, weight: .bold))
                 .frame(width: 12)
             Text(text)
-                .font(.caption2.weight(.semibold))
+                .font(.overline(.caption2, weight: .semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }

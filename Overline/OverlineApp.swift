@@ -21,6 +21,7 @@ struct OverlineApp: App {
                 .environment(intentRouter)
                 .environment(quoteSpeechPlayer)
                 .environment(llmSettings)
+                .font(.overline(.body))
                 .preferredColorScheme(.light)
         }
     }

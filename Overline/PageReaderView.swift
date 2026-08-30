@@ -38,7 +38,7 @@ struct CaptureExperiencePicker: View {
                     selection = mode
                 } label: {
                     Label(mode.title, systemImage: mode.systemImage)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.overline(.subheadline, weight: .semibold))
                         .foregroundStyle(selection == mode ? Color.overlineInk : Color.overlineMutedInk)
                         .frame(maxWidth: .infinity, minHeight: 42)
                         .contentShape(Rectangle())
@@ -561,7 +561,7 @@ private struct PageReaderLyricsStage: View {
 
     private func cueText(_ cue: ReadingLyricsCue, isActive: Bool) -> some View {
         Text(cue.text)
-            .font(.title2.weight(.bold))
+            .font(.overline(.title2, weight: .bold))
             .foregroundStyle(isActive ? Color.overlineInk : Color.overlineMutedInk)
             .lineSpacing(6)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -603,7 +603,7 @@ private struct PageReaderSpeechSettingsView: View {
                             }
                         } label: {
                             Text(speed.title)
-                                .font(.subheadline.weight(.semibold))
+                                .font(.overline(.subheadline, weight: .semibold))
                                 .foregroundStyle(Color.overlineInk)
                                 .frame(maxWidth: .infinity, minHeight: 48)
                                 .background {
@@ -633,7 +633,7 @@ private struct PageReaderSpeechSettingsView: View {
                         dismiss()
                     } label: {
                         Image(systemName: "checkmark")
-                            .font(.headline.weight(.semibold))
+                            .font(.overline(.headline, weight: .semibold))
                     }
                     .accessibilityLabel("완료")
                 }
@@ -881,7 +881,7 @@ struct PageReaderView: View {
                     cameraScanner.toggleTorch()
                 } label: {
                     Image(systemName: cameraScanner.isTorchOn ? "bolt.fill" : "bolt.slash")
-                        .font(.headline)
+                        .font(.overline(.headline))
                         .foregroundStyle(.white)
                         .frame(width: 44, height: 44)
                         .background(.black.opacity(0.36), in: Circle())
@@ -943,7 +943,7 @@ struct PageReaderView: View {
     private var finishCaptureButton: some View {
         Button(action: finishCapture) {
             Image(systemName: "checkmark")
-                .font(.title3.weight(.bold))
+                .font(.overline(.title3, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
                 .background(
@@ -959,9 +959,9 @@ struct PageReaderView: View {
     private var unavailableCameraView: some View {
         VStack(spacing: 10) {
             Image(systemName: "camera.fill")
-                .font(.title)
+                .font(.overline(.title))
             Text(cameraUnavailableMessage)
-                .font(.subheadline)
+                .font(.overline(.subheadline))
                 .multilineTextAlignment(.center)
         }
         .foregroundStyle(.white.opacity(0.82))
@@ -972,7 +972,7 @@ struct PageReaderView: View {
         ZStack {
             Button(action: readingSession.togglePlayback) {
                 Image(systemName: readingSession.isSpeaking && !readingSession.isPaused ? "pause.fill" : "play.fill")
-                    .font(.title2.weight(.bold))
+                    .font(.overline(.title2, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 58, height: 58)
                     .background(Color.overlineAccent, in: Circle())
@@ -983,7 +983,7 @@ struct PageReaderView: View {
             HStack {
                 Button(action: openCameraForNextPage) {
                     Image(systemName: "plus")
-                        .font(.title3.weight(.semibold))
+                        .font(.overline(.title3, weight: .semibold))
                         .foregroundStyle(Color.overlineMutedInk)
                         .frame(width: 48, height: 48)
                 }
@@ -998,7 +998,7 @@ struct PageReaderView: View {
                     showsSpeechSettings = true
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.title3.weight(.semibold))
+                        .font(.overline(.title3, weight: .semibold))
                         .foregroundStyle(Color.overlineMutedInk)
                         .frame(width: 48, height: 48)
                 }
@@ -1039,7 +1039,7 @@ struct PageReaderView: View {
 
     private func readerStatus(message: String, systemImage: String) -> some View {
         Label(message, systemImage: systemImage)
-            .font(.footnote.weight(.medium))
+            .font(.overline(.footnote, weight: .medium))
             .foregroundStyle(Color.overlineMutedInk)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)

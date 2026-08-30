@@ -140,7 +140,7 @@ struct BookEditorSheet: View {
                     isISBNScannerPresented = true
                 } label: {
                     Label("ISBN 스캔", systemImage: "barcode.viewfinder")
-                        .font(.title3.weight(.medium))
+                        .font(.overline(.title3, weight: .medium))
                         .foregroundStyle(Color.overlineAccent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -153,7 +153,7 @@ struct BookEditorSheet: View {
 
                 HStack(spacing: 10) {
                     TextField("제목, 저자, ISBN", text: $searchQuery)
-                        .font(.title3.weight(.medium))
+                        .font(.overline(.title3, weight: .medium))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .submitLabel(.search)
@@ -173,7 +173,7 @@ struct BookEditorSheet: View {
                                 .controlSize(.small)
                         } else {
                             Image(systemName: "magnifyingglass")
-                                .font(.title3.weight(.semibold))
+                                .font(.overline(.title3, weight: .semibold))
                         }
                     }
                     .buttonStyle(.plain)
@@ -184,7 +184,7 @@ struct BookEditorSheet: View {
 
                 if let searchErrorMessage {
                     Text(searchErrorMessage)
-                        .font(.caption)
+                        .font(.overline(.caption))
                         .foregroundStyle(Color.overlineCoral)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -232,7 +232,7 @@ struct BookEditorSheet: View {
         autocorrectionDisabled: Bool = false
     ) -> some View {
         TextField(prompt, text: text, axis: axis)
-            .font(.title3.weight(.medium))
+            .font(.overline(.title3, weight: .medium))
             .lineLimit(lineLimit)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled(autocorrectionDisabled)
@@ -254,7 +254,7 @@ struct BookEditorSheet: View {
             showsDeleteConfirmation = true
         } label: {
             Image(systemName: "trash")
-                .font(.title2.weight(.semibold))
+                .font(.overline(.title2, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(Color.overlineCoral)
                 .frame(width: 48, height: 48)
@@ -393,23 +393,23 @@ private struct BookSearchResultRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: sourceSystemImage)
-                .font(.title3.weight(.semibold))
+                .font(.overline(.title3, weight: .semibold))
                 .foregroundStyle(Color.overlineAccent)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(result.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.overline(.subheadline, weight: .semibold))
                     .foregroundStyle(Color.overlineInk)
                     .lineLimit(2)
 
                 Text(result.author.isEmpty ? result.publisher : result.author)
-                    .font(.caption)
+                    .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
                     .lineLimit(1)
 
                 Text([result.publishedDate, result.sourceTitle].filter { !$0.trimmed.isEmpty }.joined(separator: " · "))
-                    .font(.caption2.weight(.semibold))
+                    .font(.overline(.caption2, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.68))
             }
 

@@ -2555,12 +2555,12 @@ private struct CameraCaptureFeedbackPill: View {
                         .frame(width: 16, height: 16)
                 } else {
                     Image(systemName: phase.systemImage)
-                        .font(.caption.weight(.semibold))
+                        .font(.overline(.caption, weight: .semibold))
                         .frame(width: 16, height: 16)
                 }
 
                 Text(phase.text)
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .lineLimit(1)
             }
             .foregroundStyle(Color.white.opacity(0.88))
@@ -2583,7 +2583,7 @@ private struct NewCameraCaptureButton: View {
     var body: some View {
         Button(action: action) {
             Label("새 글조각", systemImage: "camera")
-                .font(.caption.weight(.bold))
+                .font(.overline(.caption, weight: .bold))
                 .foregroundStyle(Color.white.opacity(0.90))
                 .lineLimit(1)
                 .padding(.horizontal, 15)
@@ -2605,7 +2605,7 @@ private struct ManualCameraRecognitionControls: View {
         HStack(spacing: 8) {
             Button(action: resetAction) {
                 Image(systemName: "xmark")
-                    .font(.caption.weight(.bold))
+                    .font(.overline(.caption, weight: .bold))
                     .foregroundStyle(Color.white.opacity(0.86))
                     .frame(width: 34, height: 34)
                     .cameraCaptureFeedbackSurface()
@@ -2616,7 +2616,7 @@ private struct ManualCameraRecognitionControls: View {
             if canRecognize {
                 Button(action: recognizeAction) {
                     Label("인식", systemImage: "text.viewfinder")
-                        .font(.caption.weight(.bold))
+                        .font(.overline(.caption, weight: .bold))
                         .foregroundStyle(Color.white.opacity(0.90))
                         .lineLimit(1)
                         .padding(.horizontal, 14)
@@ -2799,7 +2799,7 @@ private struct CaptureStatusStrip: View {
     var body: some View {
         HStack(spacing: 10) {
             Label(message.text, systemImage: message.systemImage)
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(message.color)
                 .lineLimit(2)
 
@@ -2808,7 +2808,7 @@ private struct CaptureStatusStrip: View {
             if let deleteAction {
                 Button(action: deleteAction) {
                     Image(systemName: "trash")
-                        .font(.caption.weight(.bold))
+                        .font(.overline(.caption, weight: .bold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(Color.overlineCoral.opacity(0.82))
                         .frame(width: 28, height: 28)
@@ -3038,7 +3038,7 @@ private struct MemoComposerCard: View {
             HStack(spacing: 2) {
                 Button(action: toggleVoiceMemo) {
                     Image(systemName: isListening ? "stop.circle.fill" : "mic")
-                        .font(.subheadline.weight(.bold))
+                        .font(.overline(.subheadline, weight: .bold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(isListening ? Color.overlineCoral.opacity(0.82) : Color.overlineInk.opacity(0.54))
                         .frame(width: 34, height: 34)
@@ -3048,7 +3048,7 @@ private struct MemoComposerCard: View {
 
                 Button(action: save) {
                     Image(systemName: "checkmark")
-                        .font(.subheadline.weight(.bold))
+                        .font(.overline(.subheadline, weight: .bold))
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(canSave ? Color.overlineInk.opacity(0.66) : Color.overlineInk.opacity(0.24))
                         .frame(width: 34, height: 34)
@@ -3064,14 +3064,14 @@ private struct MemoComposerCard: View {
             if let voiceErrorMessage {
                 HStack(alignment: .bottom, spacing: 8) {
                     Text(voiceErrorMessage)
-                        .font(.caption2.weight(.semibold))
+                        .font(.overline(.caption2, weight: .semibold))
                         .foregroundStyle(Color.overlineCoral)
                         .lineLimit(2)
 
                     if showsVoiceSettingsButton {
                         Button(action: openSettings) {
                             Label("설정", systemImage: "gearshape")
-                                .font(.caption2.weight(.bold))
+                                .font(.overline(.caption2, weight: .bold))
                                 .foregroundStyle(Color.overlineInk.opacity(0.66))
                         }
                         .buttonStyle(.plain)
@@ -3156,13 +3156,13 @@ private struct PageReferenceField: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "text.book.closed")
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineInk.opacity(0.38))
                 .frame(width: 15)
 
             HStack(spacing: 0) {
                 Text("p.")
-                    .font(.caption.weight(.semibold))
+                    .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineInk.opacity(0.52))
 
                 TextField("42", text: $pageNumber)
@@ -3173,7 +3173,7 @@ private struct PageReferenceField: View {
                         pageNumber = filteredValue
                     }
             }
-            .font(.caption.weight(.semibold))
+            .font(.overline(.caption, weight: .semibold))
             .foregroundStyle(Color.overlineInk.opacity(0.68))
             .tint(Color.overlineAccent)
             .lineLimit(1)
@@ -3189,12 +3189,12 @@ private struct TagEntryField: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: "tag")
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineInk.opacity(0.38))
                 .frame(width: 15)
 
             TextField("태그", text: $tagsText)
-                .font(.caption.weight(.semibold))
+                .font(.overline(.caption, weight: .semibold))
                 .foregroundStyle(Color.overlineInk.opacity(0.68))
                 .tint(Color.overlineAccent)
                 .textInputAutocapitalization(.never)
