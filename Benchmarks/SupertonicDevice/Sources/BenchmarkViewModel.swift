@@ -5,14 +5,30 @@ import OSLog
 private let benchmarkLogger = Logger(subsystem: "aib.Overline.SupertonicBenchmark", category: "Performance")
 
 enum SupertonicVoice: String, CaseIterable, Identifiable {
-    case female = "F1"
-    case male = "M1"
+    case female1 = "F1"
+    case female2 = "F2"
+    case female3 = "F3"
+    case female4 = "F4"
+    case female5 = "F5"
+    case male1 = "M1"
+    case male2 = "M2"
+    case male3 = "M3"
+    case male4 = "M4"
+    case male5 = "M5"
 
     var id: String { rawValue }
-    var title: String { self == .female ? "여성 F1" : "남성 M1" }
+
+    var title: String {
+        rawValue.hasPrefix("F")
+            ? "여성 \(rawValue.dropFirst()) · \(rawValue)"
+            : "남성 \(rawValue.dropFirst()) · \(rawValue)"
+    }
 }
 
 struct BenchmarkMetrics {
+    let voice: SupertonicVoice
+    let steps: Int
+    let speed: Double
     let prepareMilliseconds: Int?
     let synthesisMilliseconds: Int
     let audioDuration: Double
@@ -31,7 +47,7 @@ struct BenchmarkMetrics {
 @Observable
 final class BenchmarkViewModel {
     var text = "여름의 향기를 느낀 건 오랜만의 일이었다. 바다 내음과 먼 기적 소리, 석양 무렵의 바람이 오래된 기억을 천천히 불러냈다. 그러나 모든 것은 예전과 조금씩 달라져 있었다."
-    var voice: SupertonicVoice = .female
+    var voice: SupertonicVoice = .female1
     var steps = 8
     var speed = 1.0
     private(set) var isBusy = false
@@ -124,6 +140,9 @@ final class BenchmarkViewModel {
                 isBusy = false
                 status = "재생 중입니다."
                 metrics = BenchmarkMetrics(
+                    voice: selectedVoice,
+                    steps: selectedSteps,
+                    speed: Double(selectedSpeed),
                     prepareMilliseconds: loadDuration ?? prepareMilliseconds,
                     synthesisMilliseconds: synthesisDuration,
                     audioDuration: audio.duration,

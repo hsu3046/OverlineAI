@@ -50,7 +50,15 @@ download "$MODEL_BASE/onnx/vocoder.onnx?download=true" "$ONNX_DIR/vocoder.onnx" 
 download "$MODEL_BASE/onnx/tts.json?download=true" "$ONNX_DIR/tts.json" 8253
 download "$MODEL_BASE/onnx/unicode_indexer.json?download=true" "$ONNX_DIR/unicode_indexer.json" 277676
 download "$MODEL_BASE/voice_styles/F1.json?download=true" "$VOICE_DIR/F1.json" 292046
+download "$MODEL_BASE/voice_styles/F2.json?download=true" "$VOICE_DIR/F2.json" 292423
+download "$MODEL_BASE/voice_styles/F3.json?download=true" "$VOICE_DIR/F3.json" 290794
+download "$MODEL_BASE/voice_styles/F4.json?download=true" "$VOICE_DIR/F4.json" 291808
+download "$MODEL_BASE/voice_styles/F5.json?download=true" "$VOICE_DIR/F5.json" 291479
 download "$MODEL_BASE/voice_styles/M1.json?download=true" "$VOICE_DIR/M1.json" 291748
+download "$MODEL_BASE/voice_styles/M2.json?download=true" "$VOICE_DIR/M2.json" 292055
+download "$MODEL_BASE/voice_styles/M3.json?download=true" "$VOICE_DIR/M3.json" 290198
+download "$MODEL_BASE/voice_styles/M4.json?download=true" "$VOICE_DIR/M4.json" 291522
+download "$MODEL_BASE/voice_styles/M5.json?download=true" "$VOICE_DIR/M5.json" 291469
 
 if ! command -v xcodegen >/dev/null 2>&1; then
     printf 'XcodeGen is required. Install it with: brew install xcodegen\n' >&2

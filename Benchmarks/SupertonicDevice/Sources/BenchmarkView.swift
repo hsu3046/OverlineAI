@@ -59,6 +59,9 @@ struct BenchmarkView: View {
 
                 if let metrics = model.metrics {
                     Section("측정 결과") {
+                        metricRow("음성", metrics.voice.title)
+                        metricRow("품질 단계", "\(metrics.steps)")
+                        metricRow("속도", metrics.speed.formatted(.number.precision(.fractionLength(1))) + "x")
                         metricRow("모델 준비", metrics.prepareMilliseconds.map { "\($0) ms" })
                         metricRow("합성", "\(metrics.synthesisMilliseconds) ms")
                         metricRow("오디오", metrics.audioDuration.formatted(.number.precision(.fractionLength(2))) + " s")

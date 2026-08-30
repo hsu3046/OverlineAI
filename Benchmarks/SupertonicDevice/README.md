@@ -16,7 +16,9 @@ open SupertonicDeviceBenchmark.xcodeproj
 - Supertonic 3 model: `3cadd1ee6394adea1bd021217a0e650ede09a323`
 - ONNX Runtime Swift package: `1.24.2`
 
-모델 다운로드는 약 399MB이며, 빌드된 테스트 앱은 약 412MB입니다. `Generated/`와 XcodeGen 생성물은 Git에서 제외됩니다.
+모델 다운로드는 약 401MB이며, 빌드된 테스트 앱은 약 414MB입니다. `Generated/`와 XcodeGen 생성물은 Git에서 제외됩니다.
+
+공식 기본 음색 10개(`F1`~`F5`, `M1`~`M5`)를 모두 포함합니다. 음색 파일 전체는 약 2.9MB이며 하나의 공통 ONNX 모델을 공유합니다.
 
 ## 실기기 실행
 
@@ -24,7 +26,7 @@ open SupertonicDeviceBenchmark.xcodeproj
 2. 연결된 iPhone을 실행 대상으로 선택합니다. 시뮬레이터 수치는 판단에 사용하지 않습니다.
 3. `모델 준비`를 눌러 초기 로딩 시간과 메모리를 확인합니다.
 4. 동일한 문단을 iPhone 고품질 음성과 비교해 듣습니다.
-5. 5, 8, 12단계와 속도별로 `생성 및 재생`을 반복합니다.
+5. 같은 문장으로 10개 음색을 비교하고, 5, 8, 12단계와 속도별로 `생성 및 재생`을 반복합니다.
 
 ## 기록할 항목
 
