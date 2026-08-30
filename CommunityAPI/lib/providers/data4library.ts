@@ -20,6 +20,8 @@ interface WrappedDocument {
 interface Data4LibraryResponse {
   response?: {
     docs?: WrappedDocument[];
+    errCode?: string | number;
+    error?: string;
   };
 }
 
@@ -41,8 +43,19 @@ export async function fetchPopularLoans(
   url.searchParams.set("pageSize", "20");
   url.searchParams.set("format", "json");
 
-  const response = await fetchJSON<Data4LibraryResponse>(url);
-  return normalizePopularLoans(response.response?.docs ?? [], page);
+  // This provider returns 406 for an explicit application/json Accept header.
+  const response = await fetchJSON<Data4LibraryResponse>(url, {
+    headers: { Accept: "*/*" },
+  });
+  return normalizePopularLoans(documentsFromData4LibraryResponse(response), page);
+}
+
+export function documentsFromData4LibraryResponse(response: Data4LibraryResponse): WrappedDocument[] {
+  if (cleanText(response.response?.error)) {
+    const code = cleanText(String(response.response?.errCode ?? "unknown"));
+    throw new Error(`data4library_provider_error_${code}`);
+  }
+  return response.response?.docs ?? [];
 }
 
 export function normalizePopularLoans(

@@ -3,8 +3,12 @@ import test from "node:test";
 
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
 import { cleanText, safeHTTPURL } from "../.build/lib/http.js";
-import { normalizePopularLoans } from "../.build/lib/providers/data4library.js";
+import {
+  documentsFromData4LibraryResponse,
+  normalizePopularLoans,
+} from "../.build/lib/providers/data4library.js";
 import { normalizeKakaoPlaces } from "../.build/lib/providers/kakao.js";
+import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
 
 test("cleanText strips provider markup and decodes entities", () => {
   assert.equal(cleanText("<b>바람</b>&nbsp;의 노래 &amp; 기억"), "바람 의 노래 & 기억");
@@ -48,6 +52,13 @@ test("loan rankings preserve provider rank and count", () => {
   assert.equal(items[0]?.loanCount, 1234);
 });
 
+test("data4library provider errors are not treated as an empty ranking", () => {
+  assert.throws(
+    () => documentsFromData4LibraryResponse({ response: { errCode: "AUTH", error: "not active" } }),
+    /data4library_provider_error_AUTH/,
+  );
+});
+
 test("article query uses the stored book and author", () => {
   assert.equal(buildBookQuery("[개정판] 바람의 노래", "무라카미 하루키"), "개정판 바람의 노래 무라카미 하루키 책");
   assert.equal(buildBookQuery("어린 왕자", "Unknown"), "어린 왕자 책");
@@ -69,4 +80,16 @@ test("relevance results alternate sources", () => {
   ], "relevance");
 
   assert.deepEqual(items.map((entry) => entry.id), ["n1", "d1", "n2"]);
+});
+
+test("NAVER blog search uses the Developers API credentials", () => {
+  const request = buildNaverBlogRequest("소년이 온다", "relevance", 2, "client-id", "client-secret");
+
+  assert.equal(request.url.origin, "https://openapi.naver.com");
+  assert.equal(request.url.pathname, "/v1/search/blog.json");
+  assert.equal(request.url.searchParams.get("start"), "21");
+  assert.deepEqual(request.init.headers, {
+    "X-Naver-Client-Id": "client-id",
+    "X-Naver-Client-Secret": "client-secret",
+  });
 });

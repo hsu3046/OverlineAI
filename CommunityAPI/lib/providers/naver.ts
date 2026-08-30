@@ -20,19 +20,9 @@ export async function searchNaverArticles(
   clientID: string,
   clientSecret: string,
 ): Promise<CommunityArticle[]> {
-  const url = new URL("https://naverapihub.apigw.ntruss.com/search/v1/blog");
-  url.searchParams.set("query", query);
-  url.searchParams.set("display", "20");
-  url.searchParams.set("start", String(((page - 1) * 20) + 1));
-  url.searchParams.set("sort", sort === "latest" ? "date" : "sim");
-  url.searchParams.set("format", "json");
+  const { url, init } = buildNaverBlogRequest(query, sort, page, clientID, clientSecret);
 
-  const response = await fetchJSON<NaverBlogResponse>(url, {
-    headers: {
-      "X-NCP-APIGW-API-KEY-ID": clientID,
-      "X-NCP-APIGW-API-KEY": clientSecret,
-    },
-  });
+  const response = await fetchJSON<NaverBlogResponse>(url, init);
 
   return (response.items ?? []).flatMap((item) => {
     const title = cleanText(item.title);
@@ -51,6 +41,27 @@ export async function searchNaverArticles(
       ...(publishedAt ? { publishedAt } : {}),
     }];
   });
+}
+
+export function buildNaverBlogRequest(
+  query: string,
+  sort: "relevance" | "latest",
+  page: number,
+  clientID: string,
+  clientSecret: string,
+): { url: URL; init: RequestInit } {
+  const url = new URL("https://openapi.naver.com/v1/search/blog.json");
+  url.searchParams.set("query", query);
+  url.searchParams.set("display", "20");
+  url.searchParams.set("start", String(((page - 1) * 20) + 1));
+  url.searchParams.set("sort", sort === "latest" ? "date" : "sim");
+
+  return { url, init: {
+    headers: {
+      "X-Naver-Client-Id": clientID,
+      "X-Naver-Client-Secret": clientSecret,
+    },
+  } };
 }
 
 function normalizeNaverDate(value: string | undefined): string | undefined {
