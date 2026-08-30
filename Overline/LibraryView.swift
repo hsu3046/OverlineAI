@@ -1122,6 +1122,28 @@ private struct QuoteSpeechButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isSpeaking ? "글조각 낭독 중지" : "글조각 듣기")
+        .alert("글조각을 읽지 못했습니다", isPresented: speechErrorIsPresented) {
+            Button("확인", role: .cancel) {
+                quoteSpeechPlayer.clearSpeechError()
+            }
+        } message: {
+            Text(quoteSpeechPlayer.speechErrorMessage ?? "잠시 후 다시 시도해주세요.")
+        }
+    }
+
+    private var speechErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: {
+                quoteSpeechPlayer.speechErrorHighlightID == highlight.id
+                    && quoteSpeechPlayer.speechErrorMessage != nil
+            },
+            set: { isPresented in
+                if !isPresented,
+                   quoteSpeechPlayer.speechErrorHighlightID == highlight.id {
+                    quoteSpeechPlayer.clearSpeechError()
+                }
+            }
+        )
     }
 }
 

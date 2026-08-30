@@ -704,6 +704,12 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
             self.currentUtterance = nil
             currentUtteranceSourceLocation = 0
         }
+
+        guard systemUtteranceOrder.isEmpty else { return }
+        refreshSystemQueueAfterCurrentSentence = false
+        pendingStartCueIndex = activeCueIndex
+        isSpeaking = false
+        isPaused = false
     }
 
     private func updateActiveCue(

@@ -46,6 +46,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var speechRateMultiplier = SpeechPlaybackPreferences.defaultRate
     private(set) var sentencePause = SpeechPlaybackPreferences.defaultSentencePause
     private(set) var speechErrorMessage: String?
+    private(set) var speechErrorHighlightID: Highlight.ID?
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var cachedVoices: [AVSpeechSynthesisVoice]?
@@ -231,7 +232,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func installSupertonicPack() async {
-        speechErrorMessage = nil
+        clearSpeechError()
         await supertonicAssetStore.install { [weak self] state in
             self?.supertonicAssetState = state
         }
@@ -244,6 +245,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func removeSupertonicPack() async {
+        clearSpeechError()
         stop()
         await supertonicEngine.unload()
         do {
@@ -257,6 +259,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     func clearSpeechError() {
         speechErrorMessage = nil
+        speechErrorHighlightID = nil
     }
 
     func synthesizeSupertonic(
@@ -270,18 +273,18 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
         let voice = voice ?? selectedSupertonicVoice
         let quality = supertonicQuality
-        return try await supertonicEngine.synthesize(
+        let normalizedPause = SpeechPlaybackPreferences.normalizedSentencePause(
+            sentencePause ?? self.sentencePause
+        )
+        let audio = try await supertonicEngine.synthesize(
             text: text,
             voice: voice,
             quality: quality,
             speed: min(max(speedMultiplier, 0.8), 1.6),
-            silenceDuration: Float(
-                SpeechPlaybackPreferences.normalizedSentencePause(
-                    sentencePause ?? self.sentencePause
-                )
-            ),
+            silenceDuration: Float(normalizedPause),
             paths: paths
         )
+        return audio.appendingSilence(duration: normalizedPause)
     }
 
     func releaseSupertonicRuntime() {
@@ -470,7 +473,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         supertonicCueIndex = 0
         supertonicPlaybackLanguage = language
         supertonicPlaybackVoice = voice
-        speechErrorMessage = nil
+        clearSpeechError()
 
         startSupertonicCue(at: 0, token: token)
     }
@@ -509,6 +512,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
                 quoteSpeechLogger.error(
                     "supertonic_playback_failed language=\(language.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
                 )
+                speechErrorHighlightID = activeHighlightID
                 speechErrorMessage = error.localizedDescription
                 finishSupertonicPlayback(token: token)
             }

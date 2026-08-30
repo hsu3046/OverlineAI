@@ -89,6 +89,16 @@ struct SupertonicAudio: Sendable {
         guard sampleRate > 0 else { return 0 }
         return Double(samples.count) / sampleRate
     }
+
+    func appendingSilence(duration: TimeInterval) -> SupertonicAudio {
+        guard duration > 0, sampleRate > 0 else { return self }
+        let silenceSampleCount = Int((duration * sampleRate).rounded())
+        guard silenceSampleCount > 0 else { return self }
+
+        var samplesWithSilence = samples
+        samplesWithSilence.append(contentsOf: repeatElement(0, count: silenceSampleCount))
+        return SupertonicAudio(samples: samplesWithSilence, sampleRate: sampleRate)
+    }
 }
 
 enum SupertonicError: LocalizedError {
