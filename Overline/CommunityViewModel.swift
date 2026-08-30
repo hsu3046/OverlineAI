@@ -306,6 +306,7 @@ final class CommunityViewModel {
             articles = []
             articleWarnings = []
             articleError = nil
+            loadedArticleKey = nil
             latestArticleRequestKey = nil
             articleRequestID = nil
             isLoadingArticles = false
