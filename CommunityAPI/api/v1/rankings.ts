@@ -1,4 +1,4 @@
-import { createGETHandler, enumQuery, numberQuery, requiredEnvironment } from "../../lib/http.js";
+import { createGETHandler, enumQuery, integerQuery, requiredEnvironment } from "../../lib/http.js";
 import { fetchAladinBestsellers } from "../../lib/providers/aladin.js";
 import { fetchPopularLoans } from "../../lib/providers/data4library.js";
 import type { CommunityRankingItem, ListResponse } from "../../lib/types.js";
@@ -13,7 +13,7 @@ const loanCategories = [
 export default createGETHandler(async (url) => {
   const kind = enumQuery(url, "kind", ["bestseller", "loans"] as const, "bestseller");
   const page = url.searchParams.has("page")
-    ? numberQuery(url, "page", { minimum: 1, maximum: 5 })
+    ? integerQuery(url, "page", { minimum: 1, maximum: 5 })
     : 1;
 
   const items = kind === "bestseller"

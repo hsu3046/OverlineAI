@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
-import { cleanText, integerValue, numberQuery, safeHTTPURL } from "../.build/lib/http.js";
+import { cleanText, integerQuery, integerValue, numberQuery, safeHTTPURL } from "../.build/lib/http.js";
 import {
   data4LibraryKDC,
   data4LibraryLoanDateRange,
@@ -10,7 +10,7 @@ import {
   normalizePopularLoans,
 } from "../.build/lib/providers/data4library.js";
 import { aladinBestsellerCategoryID } from "../.build/lib/providers/aladin.js";
-import { matchesPlaceCategory, normalizeKakaoPlaces } from "../.build/lib/providers/kakao.js";
+import { matchesPlaceCategory, normalizeKakaoPlaces, searchKakaoPlaces } from "../.build/lib/providers/kakao.js";
 import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
 
 test("cleanText strips provider markup and decodes entities", () => {
@@ -28,6 +28,13 @@ test("numeric parsing rejects explicitly empty values", () => {
   assert.throws(() => numberQuery(url, "lng", { minimum: -180, maximum: 180 }));
   assert.equal(integerValue(""), undefined);
   assert.equal(integerValue("  "), undefined);
+});
+
+test("integer query rejects fractional pagination values", () => {
+  const fractional = new URL("https://example.com/articles?page=1.5");
+  const valid = new URL("https://example.com/articles?page=2");
+  assert.throws(() => integerQuery(fractional, "page", { minimum: 1, maximum: 5 }));
+  assert.equal(integerQuery(valid, "page", { minimum: 1, maximum: 5 }), 2);
 });
 
 test("Kakao places require a usable address and distance", () => {
@@ -60,6 +67,34 @@ test("place category matching excludes keyword-only businesses", () => {
   assert.equal(matchesPlaceCategory("음식점 > 카페 > 커피전문점", "bookstore"), false);
   assert.equal(matchesPlaceCategory("교육,학문 > 학습시설 > 도서관 > 작은도서관", "library"), true);
   assert.equal(matchesPlaceCategory("교육,학문 > 학교부속시설", "library"), false);
+});
+
+test("Kakao all-kind place search marks one-provider results as incomplete", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.searchParams.get("query") === "도서관") {
+      return new Response("unavailable", { status: 503 });
+    }
+    return Response.json({
+      documents: [{
+        id: "bookstore-1",
+        place_name: "동네 서점",
+        category_name: "문화,예술 > 도서 > 서점",
+        road_address_name: "서울시 어딘가 1",
+        distance: "100",
+      }],
+      meta: { is_end: true, pageable_count: 1 },
+    });
+  };
+
+  try {
+    const result = await searchKakaoPlaces(37.5, 127, 5_000, "all", "test-key");
+    assert.equal(result.items.length, 1);
+    assert.equal(result.isComplete, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("loan rankings preserve provider rank and count", () => {

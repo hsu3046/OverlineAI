@@ -34,13 +34,18 @@ interface KakaoBookResponse {
   documents?: KakaoBookDocument[];
 }
 
+export interface KakaoPlaceSearchResult {
+  items: CommunityPlace[];
+  isComplete: boolean;
+}
+
 export async function searchKakaoPlaces(
   latitude: number,
   longitude: number,
   radius: number,
   kind: PlaceKind | "all",
   apiKey: string,
-): Promise<CommunityPlace[]> {
+): Promise<KakaoPlaceSearchResult> {
   const queries: PlaceKind[] = kind === "all" ? ["bookstore", "library"] : [kind];
   const outcomes = await Promise.allSettled(queries.map((queryKind) => searchKakaoPlaceKind(
     latitude,
@@ -56,16 +61,21 @@ export async function searchKakaoPlaces(
   }
 
   const uniquePlaces = new Map<string, CommunityPlace>();
-  for (const place of responses.flat()) {
+  for (const place of responses.flatMap((response) => response.items)) {
     const existing = uniquePlaces.get(place.id);
     if (!existing || place.distanceMeters < existing.distanceMeters) {
       uniquePlaces.set(place.id, place);
     }
   }
 
-  return [...uniquePlaces.values()]
-    .sort((left, right) => left.distanceMeters - right.distanceMeters)
-    .slice(0, 30);
+  return {
+    items: [...uniquePlaces.values()]
+      .sort((left, right) => left.distanceMeters - right.distanceMeters)
+      .slice(0, 30),
+    isComplete: outcomes.every((outcome) => (
+      outcome.status === "fulfilled" && outcome.value.isComplete
+    )),
+  };
 }
 
 export function normalizeKakaoPlaces(
@@ -166,10 +176,12 @@ async function searchKakaoPlaceKind(
   radius: number,
   kind: PlaceKind,
   apiKey: string,
-): Promise<CommunityPlace[]> {
+): Promise<KakaoPlaceSearchResult> {
   const firstPage = await requestKakaoPlacePage(latitude, longitude, radius, kind, apiKey, 1);
   const places = normalizeKakaoPlaces(firstPage.documents ?? [], kind);
-  if (places.length >= 15 || firstPage.meta?.is_end !== false) return places.slice(0, 15);
+  if (places.length >= 15 || firstPage.meta?.is_end !== false) {
+    return { items: places.slice(0, 15), isComplete: true };
+  }
 
   // Kakao exposes at most 45 keyword results, so pages 2 and 3 cover every pageable candidate.
   const availableCount = Math.min(45, Math.max(15, firstPage.meta?.pageable_count ?? 45));
@@ -183,7 +195,10 @@ async function searchKakaoPlaceKind(
       places.push(...normalizeKakaoPlaces(outcome.value.documents ?? [], kind));
     }
   }
-  return places.slice(0, 15);
+  return {
+    items: places.slice(0, 15),
+    isComplete: outcomes.every((outcome) => outcome.status === "fulfilled"),
+  };
 }
 
 async function requestKakaoPlacePage(

@@ -1,7 +1,7 @@
 import {
   createGETHandler,
   enumQuery,
-  numberQuery,
+  integerQuery,
   optionalQuery,
   requiredEnvironment,
   requiredQuery,
@@ -15,7 +15,7 @@ export default createGETHandler(async (url) => {
   const source = enumQuery(url, "source", ["all", "naver", "daum"] as const, "all");
   const sort = enumQuery(url, "sort", ["relevance", "latest"] as const, "relevance");
   const page = url.searchParams.has("page")
-    ? numberQuery(url, "page", { minimum: 1, maximum: 5 })
+    ? integerQuery(url, "page", { minimum: 1, maximum: 5 })
     : 1;
 
   const result = await searchCommunityArticles({

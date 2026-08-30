@@ -78,6 +78,18 @@ export function numberQuery(
   return value;
 }
 
+export function integerQuery(
+  url: URL,
+  name: string,
+  range: { minimum: number; maximum: number },
+): number {
+  const value = numberQuery(url, name, range);
+  if (!Number.isInteger(value)) {
+    throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
+  }
+  return value;
+}
+
 export function enumQuery<const T extends readonly string[]>(
   url: URL,
   name: string,
