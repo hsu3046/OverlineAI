@@ -370,6 +370,21 @@ private extension CGImagePropertyOrientation {
     }
 }
 
+nonisolated enum OCRBoundaryTrimming: Sendable {
+    case all
+    case leading
+    case trailing
+    case none
+
+    var trimsLeading: Bool {
+        self == .all || self == .leading
+    }
+
+    var trimsTrailing: Bool {
+        self == .all || self == .trailing
+    }
+}
+
 struct OCRTextAssembler {
     private struct LayoutMetrics {
         let bodyLeft: CGFloat
@@ -398,7 +413,7 @@ struct OCRTextAssembler {
 
     let pageLines: [CameraRecognizedTextLine]
     let selectedLines: [CameraRecognizedTextLine]
-    var trimsBoundaryFragments = true
+    var boundaryTrimming: OCRBoundaryTrimming = .all
 
     func assembledText() -> String {
         let selectedLines = sortedUnique(selectedLines)
@@ -429,7 +444,7 @@ struct OCRTextAssembler {
                 selectedEnd: selectedEnd
             )
         }
-        if trimsBoundaryFragments {
+        if boundaryTrimming != .none {
             includedSpans = trimmingBoundaryFragments(includedSpans, documentText: document.text)
         }
 
@@ -547,6 +562,7 @@ struct OCRTextAssembler {
         var spans = spans
 
         if
+            boundaryTrimming.trimsLeading,
             spans.count > 1,
             let firstSpan = spans.first,
             isLeadingTailFragment(substring(in: documentText, from: firstSpan.start, to: firstSpan.end))
@@ -555,6 +571,7 @@ struct OCRTextAssembler {
         }
 
         if
+            boundaryTrimming.trimsTrailing,
             spans.count > 1,
             let lastSpan = spans.last,
             !lastSpan.isClosed,
@@ -1362,10 +1379,14 @@ final class CameraTextScanner {
         selectedLines(for: selectedIDs)
     }
 
-    func text(for selectedIDs: Set<CameraRecognizedTextLine.ID>) -> String {
+    func text(
+        for selectedIDs: Set<CameraRecognizedTextLine.ID>,
+        boundaryTrimming: OCRBoundaryTrimming = .all
+    ) -> String {
         OCRTextAssembler(
             pageLines: lines,
-            selectedLines: selectedLines(for: selectedIDs)
+            selectedLines: selectedLines(for: selectedIDs),
+            boundaryTrimming: boundaryTrimming
         )
         .assembledText()
     }

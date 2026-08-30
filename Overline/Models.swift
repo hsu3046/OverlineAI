@@ -1969,7 +1969,12 @@ final class ReadingLibrary {
     }
 
     @discardableResult
-    func appendCapturedText(_ text: String, to highlightID: Highlight.ID) -> Highlight? {
+    func applyCaptureContinuation(
+        firstPageText: String,
+        secondPageText: String,
+        to highlightID: Highlight.ID,
+        expectedOriginalText: String
+    ) -> Highlight? {
         guard
             let location = highlightLocationByID[highlightID],
             books.indices.contains(location.bookIndex),
@@ -1978,13 +1983,18 @@ final class ReadingLibrary {
             return nil
         }
 
-        let appendedText = text.normalizedQuotesForStorage.trimmed
-        guard !appendedText.isEmpty else { return nil }
+        let currentText = books[location.bookIndex].highlights[location.highlightIndex].text
+            .normalizedQuotesForStorage
+            .trimmed
+        let expectedText = expectedOriginalText.normalizedQuotesForStorage.trimmed
+        guard currentText == expectedText else { return nil }
 
-        let existingText = books[location.bookIndex].highlights[location.highlightIndex].text.trimmed
-        let combinedText = [existingText, appendedText]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        let firstPageText = firstPageText.normalizedQuotesForStorage.trimmed
+        let secondPageText = secondPageText.normalizedQuotesForStorage.trimmed
+        guard !firstPageText.isEmpty, !secondPageText.isEmpty else { return nil }
+
+        let separator = OCRLineJoiner.inlineSeparator(between: firstPageText, and: secondPageText)
+        let combinedText = "\(firstPageText)\(separator)\(secondPageText)".trimmed
 
         books[location.bookIndex].highlights[location.highlightIndex].text = combinedText
         books[location.bookIndex].highlights[location.highlightIndex].language = CaptureLanguage.detect(from: combinedText)

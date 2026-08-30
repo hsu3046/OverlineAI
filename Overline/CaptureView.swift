@@ -26,6 +26,7 @@ struct CaptureView: View {
     @State private var amendTargetHighlightID: Highlight.ID?
     @State private var continuationAvailableHighlightID: Highlight.ID?
     @State private var continuationCaptureTargetID: Highlight.ID?
+    @State private var continuationSeed: CaptureContinuationSeed?
     @State private var amendDebounceTask: Task<Void, Never>?
     @State private var captureMessage: CaptureMessage?
     @State private var isRecognizingText = false
@@ -37,13 +38,11 @@ struct CaptureView: View {
     @AppStorage("capture.autoRecognitionEnabled") private var isAutoRecognitionEnabled = true
     @AppStorage("capture.lastExperienceMode") private var lastExperienceMode = CaptureExperienceMode.highlight.rawValue
     @State private var selectedTone: StickyTone = .yellow
-    @State private var memoFocusRequest = 0
     @State private var isPageReaderPresented = false
     @State private var pageReaderRequestedAt: TimeInterval?
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView {
+        ScrollView {
                 VStack(spacing: 16) {
                     CaptureExperiencePicker(selection: captureExperienceSelection)
 
@@ -95,7 +94,6 @@ struct CaptureView: View {
                         tone: selectedTone,
                         hasPendingCapture: amendTargetHighlightID != nil,
                         canSave: amendTargetHighlightID != nil || !memo.trimmed.isEmpty,
-                        focusRequest: memoFocusRequest,
                         isListening: speechRecorder.isRecording,
                         voiceErrorMessage: speechRecorder.errorMessage,
                         toggleVoiceMemo: toggleVoiceMemo,
@@ -105,7 +103,6 @@ struct CaptureView: View {
 
                     Color.clear
                         .frame(height: CaptureViewMetrics.memoKeyboardComfortSpacing)
-                        .id(CaptureScrollTarget.memoKeyboardComfort)
                         .accessibilityHidden(true)
 
                 }
@@ -182,9 +179,6 @@ struct CaptureView: View {
                 }
                 prefillTagsFromSelectedBookIfNeeded()
             }
-            .onChange(of: memoFocusRequest) { _, _ in
-                scrollMemoIntoKeyboardComfort(using: scrollProxy)
-            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     if isActive {
@@ -213,7 +207,6 @@ struct CaptureView: View {
                     requestedAt: pageReaderRequestedAt
                 )
             }
-        }
     }
 
     private var captureExperienceSelection: Binding<CaptureExperienceMode> {
@@ -344,25 +337,6 @@ struct CaptureView: View {
         }
     }
 
-    private func scrollMemoIntoKeyboardComfort(using scrollProxy: ScrollViewProxy) {
-        let requestID = memoFocusRequest
-        let target = CaptureScrollTarget.memoKeyboardComfort
-
-        DispatchQueue.main.async {
-            guard requestID == memoFocusRequest else { return }
-            withAnimation(.smooth(duration: 0.30, extraBounce: 0.02)) {
-                scrollProxy.scrollTo(target, anchor: .bottom)
-            }
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
-            guard requestID == memoFocusRequest else { return }
-            withAnimation(.smooth(duration: 0.24, extraBounce: 0.02)) {
-                scrollProxy.scrollTo(target, anchor: .bottom)
-            }
-        }
-    }
-
     private func commitSelection() {
         guard !isRecognizingText else { return }
 
@@ -375,7 +349,13 @@ struct CaptureView: View {
     private func commitSelectionAsync() async {
         let continuationTargetID = continuationCaptureTargetID
         applyAmendIfNeeded(clearAfterSave: continuationTargetID == nil, showConfirmation: false)
-        let liveText = cameraScanner.text(for: selectedCameraLineIDs)
+        let liveText = cameraScanner.text(
+            for: selectedCameraLineIDs,
+            boundaryTrimming: continuationTargetID == nil ? .all : .trailing
+        )
+        let firstPageContinuationText = continuationTargetID == nil
+            ? cameraScanner.text(for: selectedCameraLineIDs, boundaryTrimming: .leading)
+            : ""
         let isLiveCapture = !liveText.isEmpty
         let selectedLineCount = isLiveCapture ? selectedCameraLineIDs.count : selectedLineIDs.count
         let averageConfidence = isLiveCapture ? cameraScanner.averageConfidence(for: selectedCameraLineIDs) : nil
@@ -446,9 +426,25 @@ struct CaptureView: View {
         var savedHighlightID: Highlight.ID?
         var savedPageReference: String?
         if let continuationTargetID {
-            guard let highlight = library.appendCapturedText(refinedText, to: continuationTargetID) else {
+            guard
+                let continuationSeed,
+                continuationSeed.highlightID == continuationTargetID
+            else {
                 continuationCaptureTargetID = nil
                 continuationAvailableHighlightID = nil
+                self.continuationSeed = nil
+                captureMessage = .error("이어 붙일 첫 번째 글조각 정보를 찾지 못했어요.")
+                return
+            }
+            guard let highlight = library.applyCaptureContinuation(
+                firstPageText: continuationSeed.firstPageText,
+                secondPageText: refinedText,
+                to: continuationTargetID,
+                expectedOriginalText: continuationSeed.persistedText
+            ) else {
+                continuationCaptureTargetID = nil
+                continuationAvailableHighlightID = nil
+                self.continuationSeed = nil
                 captureMessage = .error("이어 붙일 글조각을 찾지 못했어요.")
                 return
             }
@@ -458,6 +454,7 @@ struct CaptureView: View {
                 amendTargetHighlightID = highlight.id
                 continuationCaptureTargetID = nil
                 continuationAvailableHighlightID = nil
+                self.continuationSeed = nil
                 savedHighlightID = highlight.id
                 savedPageReference = highlight.pageReference
                 let updatedTagsText = highlight.tags.joined(separator: " ")
@@ -483,7 +480,17 @@ struct CaptureView: View {
                 )
                 lastSaved = highlight
                 amendTargetHighlightID = highlight.id
-                continuationAvailableHighlightID = isLiveCapture ? highlight.id : nil
+                if isLiveCapture, !firstPageContinuationText.trimmed.isEmpty {
+                    continuationAvailableHighlightID = highlight.id
+                    continuationSeed = CaptureContinuationSeed(
+                        highlightID: highlight.id,
+                        persistedText: highlight.text,
+                        firstPageText: firstPageContinuationText
+                    )
+                } else {
+                    continuationAvailableHighlightID = nil
+                    continuationSeed = nil
+                }
                 savedHighlightID = highlight.id
                 savedPageReference = highlight.pageReference
                 composerTagsBaseline = tagsText
@@ -500,7 +507,6 @@ struct CaptureView: View {
         if let savedHighlightID {
             scheduleAutomaticTagGeneration(for: savedHighlightID)
         }
-        memoFocusRequest += 1
         cameraScanner.stopSwipeRecognition()
         logCaptureSaved(
             source: source,
@@ -542,6 +548,7 @@ struct CaptureView: View {
     private var canContinueLastSavedHighlight: Bool {
         guard
             let continuationAvailableHighlightID,
+            continuationSeed?.highlightID == continuationAvailableHighlightID,
             amendTargetHighlightID == continuationAvailableHighlightID,
             lastSaved?.id == continuationAvailableHighlightID,
             library.highlight(with: continuationAvailableHighlightID) != nil,
@@ -553,7 +560,13 @@ struct CaptureView: View {
     }
 
     private func continueLastSavedHighlight() {
-        guard canContinueLastSavedHighlight, let targetID = continuationAvailableHighlightID else { return }
+        guard
+            canContinueLastSavedHighlight,
+            let targetID = continuationAvailableHighlightID,
+            continuationSeed?.highlightID == targetID
+        else {
+            return
+        }
         applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
 
         withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
@@ -621,6 +634,7 @@ struct CaptureView: View {
         amendTargetHighlightID = nil
         continuationAvailableHighlightID = nil
         continuationCaptureTargetID = nil
+        continuationSeed = nil
         lastSaved = nil
 
         withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
@@ -651,6 +665,7 @@ struct CaptureView: View {
             if clearAfterSave {
                 continuationAvailableHighlightID = nil
                 continuationCaptureTargetID = nil
+                continuationSeed = nil
             }
             return
         }
@@ -678,6 +693,7 @@ struct CaptureView: View {
             self.amendTargetHighlightID = nil
             continuationAvailableHighlightID = nil
             continuationCaptureTargetID = nil
+            continuationSeed = nil
             clearComposerInputs()
             if showConfirmation {
                 captureMessage = .memoSaved
@@ -758,7 +774,6 @@ struct CaptureView: View {
             if let savedHighlightID {
                 scheduleAutomaticTagGeneration(for: savedHighlightID)
             }
-            memoFocusRequest += 1
             logCaptureSaved(
                 source: "photo",
                 lineCount: recognitionResult.lineCount,
@@ -1003,8 +1018,10 @@ private enum CaptureSheet: Identifiable {
     }
 }
 
-private enum CaptureScrollTarget: Hashable {
-    case memoKeyboardComfort
+private struct CaptureContinuationSeed {
+    let highlightID: Highlight.ID
+    let persistedText: String
+    let firstPageText: String
 }
 
 private enum CaptureViewMetrics {
@@ -3152,7 +3169,6 @@ private struct MemoComposerCard: View {
     let tone: StickyTone
     let hasPendingCapture: Bool
     let canSave: Bool
-    let focusRequest: Int
     let isListening: Bool
     let voiceErrorMessage: String?
     let toggleVoiceMemo: () -> Void
@@ -3258,9 +3274,6 @@ private struct MemoComposerCard: View {
         }
         .shadow(color: Color.overlineInk.opacity(0.12), radius: 10, y: 5)
         .frame(height: noteHeight)
-        .onChange(of: focusRequest) { _, _ in
-            isMemoFocused = true
-        }
         .animation(.smooth(duration: 0.22, extraBounce: 0.02), value: tone)
     }
 

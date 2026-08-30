@@ -757,7 +757,7 @@ struct PageReadingTextProcessor {
         let text = OCRTextAssembler(
             pageLines: bodyLines,
             selectedLines: bodyLines,
-            trimsBoundaryFragments: false
+            boundaryTrimming: .none
         )
         .assembledText()
         .trimmed
