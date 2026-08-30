@@ -1969,6 +1969,30 @@ final class ReadingLibrary {
     }
 
     @discardableResult
+    func appendCapturedText(_ text: String, to highlightID: Highlight.ID) -> Highlight? {
+        guard
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
+        else {
+            return nil
+        }
+
+        let appendedText = text.normalizedQuotesForStorage.trimmed
+        guard !appendedText.isEmpty else { return nil }
+
+        let existingText = books[location.bookIndex].highlights[location.highlightIndex].text.trimmed
+        let combinedText = [existingText, appendedText]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        books[location.bookIndex].highlights[location.highlightIndex].text = combinedText
+        books[location.bookIndex].highlights[location.highlightIndex].language = CaptureLanguage.detect(from: combinedText)
+        persist()
+        return books[location.bookIndex].highlights[location.highlightIndex]
+    }
+
+    @discardableResult
     func addQuickThought(
         _ thought: String,
         pageReference: String = "",

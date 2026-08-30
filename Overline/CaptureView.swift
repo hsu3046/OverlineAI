@@ -24,6 +24,8 @@ struct CaptureView: View {
     @State private var memoBeforeSpeech = ""
     @State private var lastSaved: Highlight?
     @State private var amendTargetHighlightID: Highlight.ID?
+    @State private var continuationAvailableHighlightID: Highlight.ID?
+    @State private var continuationCaptureTargetID: Highlight.ID?
     @State private var amendDebounceTask: Task<Void, Never>?
     @State private var captureMessage: CaptureMessage?
     @State private var isRecognizingText = false
@@ -58,14 +60,21 @@ struct CaptureView: View {
                         cameraScanner: cameraScanner,
                         isRecognizingText: isRecognizingText,
                         selectedTone: selectedTone,
+                        canContinueCapture: canContinueLastSavedHighlight,
                         onCommit: commitSelection,
                         onRestartCapture: startNewCameraCapture,
+                        onContinueCapture: continueLastSavedHighlight,
                         onMiss: showCaptureGuidance,
                         openSettings: openAppSettings,
                         onHighlighterGestureActiveChanged: { isActive in
                             isHighlighterGestureActive = isActive
                         }
                     )
+
+                    if continuationCaptureTargetID != nil {
+                        ContinuationCaptureStrip(cancel: cancelContinuationCapture)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
                     if let captureMessage {
                         CaptureStatusStrip(
@@ -168,6 +177,9 @@ struct CaptureView: View {
                 scheduleAmendIfNeeded()
             }
             .onChange(of: library.selectedBookID) { _, _ in
+                if continuationAvailableHighlightID != nil || continuationCaptureTargetID != nil {
+                    applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
+                }
                 prefillTagsFromSelectedBookIfNeeded()
             }
             .onChange(of: memoFocusRequest) { _, _ in
@@ -361,7 +373,8 @@ struct CaptureView: View {
 
     @MainActor
     private func commitSelectionAsync() async {
-        applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
+        let continuationTargetID = continuationCaptureTargetID
+        applyAmendIfNeeded(clearAfterSave: continuationTargetID == nil, showConfirmation: false)
         let liveText = cameraScanner.text(for: selectedCameraLineIDs)
         let isLiveCapture = !liveText.isEmpty
         let selectedLineCount = isLiveCapture ? selectedCameraLineIDs.count : selectedLineIDs.count
@@ -432,29 +445,57 @@ struct CaptureView: View {
 
         var savedHighlightID: Highlight.ID?
         var savedPageReference: String?
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
-            let highlight = library.addCapturedHighlight(
-                text: refinedText,
-                memo: memo,
-                language: CaptureLanguage.detect(from: refinedText),
-                pageReference: liveText.isEmpty ? "p.42" : (inferredPageReference ?? ""),
-                explicitPageReference: pageReferenceText,
-                tagsText: tagsText,
-                stickyTone: selectedTone
+        if let continuationTargetID {
+            guard let highlight = library.appendCapturedText(refinedText, to: continuationTargetID) else {
+                continuationCaptureTargetID = nil
+                continuationAvailableHighlightID = nil
+                captureMessage = .error("이어 붙일 글조각을 찾지 못했어요.")
+                return
+            }
+
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
+                lastSaved = highlight
+                amendTargetHighlightID = highlight.id
+                continuationCaptureTargetID = nil
+                continuationAvailableHighlightID = nil
+                savedHighlightID = highlight.id
+                savedPageReference = highlight.pageReference
+                let updatedTagsText = highlight.tags.joined(separator: " ")
+                tagsText = updatedTagsText
+                composerTagsBaseline = updatedTagsText
+                selectedLineIDs.removeAll()
+                selectedCameraLineIDs.removeAll()
+                captureMessage = .continued
+            }
+            captureMetricsLogger.info(
+                "capture_continuation_saved page_count=2 line_count=\(selectedLineCount, privacy: .public)"
             )
-            lastSaved = highlight
-            amendTargetHighlightID = highlight.id
-            savedHighlightID = highlight.id
-            savedPageReference = highlight.pageReference
-            composerTagsBaseline = tagsText
-            prefillPageReferenceIfNeeded(from: highlight.pageReference)
-            selectedLineIDs.removeAll()
-            selectedCameraLineIDs.removeAll()
-            captureMessage = .saved(
-                lineCount: selectedLineCount,
-                confidence: averageConfidence,
-                durationMilliseconds: durationMilliseconds
-            )
+        } else {
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
+                let highlight = library.addCapturedHighlight(
+                    text: refinedText,
+                    memo: memo,
+                    language: CaptureLanguage.detect(from: refinedText),
+                    pageReference: liveText.isEmpty ? "p.42" : (inferredPageReference ?? ""),
+                    explicitPageReference: pageReferenceText,
+                    tagsText: tagsText,
+                    stickyTone: selectedTone
+                )
+                lastSaved = highlight
+                amendTargetHighlightID = highlight.id
+                continuationAvailableHighlightID = isLiveCapture ? highlight.id : nil
+                savedHighlightID = highlight.id
+                savedPageReference = highlight.pageReference
+                composerTagsBaseline = tagsText
+                prefillPageReferenceIfNeeded(from: highlight.pageReference)
+                selectedLineIDs.removeAll()
+                selectedCameraLineIDs.removeAll()
+                captureMessage = .saved(
+                    lineCount: selectedLineCount,
+                    confidence: averageConfidence,
+                    durationMilliseconds: durationMilliseconds
+                )
+            }
         }
         if let savedHighlightID {
             scheduleAutomaticTagGeneration(for: savedHighlightID)
@@ -498,6 +539,46 @@ struct CaptureView: View {
         resetCaptureTimer()
     }
 
+    private var canContinueLastSavedHighlight: Bool {
+        guard
+            let continuationAvailableHighlightID,
+            amendTargetHighlightID == continuationAvailableHighlightID,
+            lastSaved?.id == continuationAvailableHighlightID,
+            library.highlight(with: continuationAvailableHighlightID) != nil,
+            library.bookID(containing: continuationAvailableHighlightID) == library.selectedBookID
+        else {
+            return false
+        }
+        return true
+    }
+
+    private func continueLastSavedHighlight() {
+        guard canContinueLastSavedHighlight, let targetID = continuationAvailableHighlightID else { return }
+        applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
+
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+            continuationAvailableHighlightID = nil
+            continuationCaptureTargetID = targetID
+            selectedLineIDs.removeAll()
+            selectedCameraLineIDs.removeAll()
+            captureMessage = nil
+        }
+
+        cameraScanner.clearSelectedLineCache()
+        cameraScanner.clearFrozenFrame()
+        cameraScanner.stopSwipeRecognition(clearResults: true)
+        cameraScanner.start(owner: "highlight.continuation")
+        resetCaptureTimer()
+    }
+
+    private func cancelContinuationCapture() {
+        applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+            captureMessage = .guidance("첫 번째 글조각은 그대로 저장되어 있어요.")
+        }
+        resetCaptureTimer()
+    }
+
     private func saveQuickThought() {
         guard !memo.trimmed.isEmpty else { return }
 
@@ -538,6 +619,8 @@ struct CaptureView: View {
 
         library.deleteHighlight(targetID)
         amendTargetHighlightID = nil
+        continuationAvailableHighlightID = nil
+        continuationCaptureTargetID = nil
         lastSaved = nil
 
         withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
@@ -565,6 +648,10 @@ struct CaptureView: View {
             let highlight = library.highlight(with: amendTargetHighlightID)
         else {
             self.amendTargetHighlightID = nil
+            if clearAfterSave {
+                continuationAvailableHighlightID = nil
+                continuationCaptureTargetID = nil
+            }
             return
         }
 
@@ -589,6 +676,8 @@ struct CaptureView: View {
 
         if clearAfterSave {
             self.amendTargetHighlightID = nil
+            continuationAvailableHighlightID = nil
+            continuationCaptureTargetID = nil
             clearComposerInputs()
             if showConfirmation {
                 captureMessage = .memoSaved
@@ -790,7 +879,9 @@ struct CaptureView: View {
                     composerTagsBaseline = updatedTagsText
                     tagsText = updatedTagsText
                 }
-                captureMessage = .tagsSuggested
+                if continuationCaptureTargetID != highlightID {
+                    captureMessage = .tagsSuggested
+                }
                 captureMetricsLogger.info(
                     "auto_tags_applied provider=\(configuration.provider.rawValue, privacy: .public) count=\(generatedTags.count, privacy: .public)"
                 )
@@ -964,8 +1055,10 @@ private struct CaptureStage: View {
     let cameraScanner: CameraTextScanner
     let isRecognizingText: Bool
     let selectedTone: StickyTone
+    let canContinueCapture: Bool
     let onCommit: () -> Void
     let onRestartCapture: () -> Void
+    let onContinueCapture: () -> Void
     let onMiss: () -> Void
     let openSettings: () -> Void
     let onHighlighterGestureActiveChanged: (Bool) -> Void
@@ -1096,7 +1189,11 @@ private struct CaptureStage: View {
                 }
 
                 if isCaptureLocked {
-                    NewCameraCaptureButton(action: restartLiveCameraCapture)
+                    CompletedCameraCaptureActions(
+                        canContinue: canContinueCapture,
+                        startNew: restartLiveCameraCapture,
+                        continueCapture: continueLiveCameraCapture
+                    )
                         .padding(.bottom, 22)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         .transition(
@@ -1478,6 +1575,17 @@ private struct CaptureStage: View {
     }
 
     private func restartLiveCameraCapture() {
+        resetLockedCameraCapture()
+        onRestartCapture()
+    }
+
+    private func continueLiveCameraCapture() {
+        guard canContinueCapture else { return }
+        resetLockedCameraCapture()
+        onContinueCapture()
+    }
+
+    private func resetLockedCameraCapture() {
         cancelPendingCameraCommit()
         cancelPendingCameraMiss()
         cancelDelayedCameraRecognition()
@@ -1498,8 +1606,6 @@ private struct CaptureStage: View {
         withAnimation(.smooth(duration: 0.22, extraBounce: 0.02)) {
             isCaptureLocked = false
         }
-
-        onRestartCapture()
     }
 
     private func cancelPendingCameraCommit() {
@@ -2577,12 +2683,25 @@ private struct CameraCaptureFeedbackPill: View {
     }
 }
 
-private struct NewCameraCaptureButton: View {
-    let action: () -> Void
+private struct CompletedCameraCaptureActions: View {
+    let canContinue: Bool
+    let startNew: () -> Void
+    let continueCapture: () -> Void
 
     var body: some View {
+        HStack(spacing: 8) {
+            actionButton("새 글조각", systemImage: "camera", action: startNew)
+
+            if canContinue {
+                actionButton("이어 밑줄긋기", systemImage: "text.append", action: continueCapture)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+    }
+
+    private func actionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label("새 글조각", systemImage: "camera")
+            Label(title, systemImage: systemImage)
                 .font(.overline(.caption, weight: .bold))
                 .foregroundStyle(Color.white.opacity(0.90))
                 .lineLimit(1)
@@ -2591,7 +2710,39 @@ private struct NewCameraCaptureButton: View {
                 .cameraCaptureFeedbackSurface()
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("새 글조각 캡쳐")
+        .accessibilityLabel(title)
+    }
+}
+
+private struct ContinuationCaptureStrip: View {
+    let cancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("직전 글조각에 이어 붙이는 중", systemImage: "text.append")
+                .font(.overline(.caption, weight: .semibold))
+                .foregroundStyle(Color.overlineAccent)
+
+            Spacer(minLength: 8)
+
+            Button(action: cancel) {
+                Image(systemName: "xmark")
+                    .font(.overline(.caption, weight: .bold))
+                    .foregroundStyle(Color.overlineMutedInk)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("이어 밑줄긋기 취소")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.46), lineWidth: 1)
+        }
     }
 }
 
@@ -2728,6 +2879,7 @@ private enum CaptureMessage: Equatable {
     case processing
     case captured(lineCount: Int)
     case saved(lineCount: Int, confidence: Float?, durationMilliseconds: Int?)
+    case continued
     case memoSaved
     case tagsSuggested
     case guidance(String)
@@ -2739,7 +2891,7 @@ private enum CaptureMessage: Equatable {
             return "text.viewfinder"
         case .captured:
             return "square.and.pencil"
-        case .saved, .memoSaved:
+        case .saved, .continued, .memoSaved:
             return "checkmark.circle.fill"
         case .tagsSuggested:
             return "tag.fill"
@@ -2758,6 +2910,8 @@ private enum CaptureMessage: Equatable {
             return lineCount > 0 ? "\(lineCount)줄 준비됨 · 메모 추가 또는 바로 저장" : "글조각 준비됨 · 메모 추가 또는 바로 저장"
         case .saved:
             return "글조각 저장됨"
+        case .continued:
+            return "두 페이지가 한 글조각으로 저장됨"
         case .memoSaved:
             return "메모 반영됨"
         case .tagsSuggested:
@@ -2773,7 +2927,7 @@ private enum CaptureMessage: Equatable {
         switch self {
         case .processing, .captured:
             return Color.overlineAccent
-        case .saved, .memoSaved, .tagsSuggested:
+        case .saved, .continued, .memoSaved, .tagsSuggested:
             return Color.overlineAccent
         case .guidance:
             return Color.overlineMutedInk
@@ -2784,7 +2938,7 @@ private enum CaptureMessage: Equatable {
 
     var allowsLastSavedDeletion: Bool {
         switch self {
-        case .saved, .memoSaved, .tagsSuggested:
+        case .saved, .continued, .memoSaved, .tagsSuggested:
             return true
         case .processing, .captured, .guidance, .error:
             return false
