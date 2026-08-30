@@ -2028,6 +2028,35 @@ final class ReadingLibrary {
     }
 
     @discardableResult
+    func applyAutomaticOCRCorrection(
+        _ correctedText: String,
+        to highlightID: Highlight.ID,
+        expectedOriginalText: String
+    ) -> Highlight? {
+        guard
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
+        else {
+            return nil
+        }
+
+        let currentText = books[location.bookIndex].highlights[location.highlightIndex].text
+            .normalizedQuotesForStorage
+            .trimmed
+        let expectedText = expectedOriginalText.normalizedQuotesForStorage.trimmed
+        let correctedText = correctedText.normalizedQuotesForStorage.trimmed
+        guard currentText == expectedText, !correctedText.isEmpty, correctedText != currentText else {
+            return nil
+        }
+
+        books[location.bookIndex].highlights[location.highlightIndex].text = correctedText
+        books[location.bookIndex].highlights[location.highlightIndex].language = CaptureLanguage.detect(from: correctedText)
+        persist()
+        return books[location.bookIndex].highlights[location.highlightIndex]
+    }
+
+    @discardableResult
     func addQuickThought(
         _ thought: String,
         pageReference: String = "",
