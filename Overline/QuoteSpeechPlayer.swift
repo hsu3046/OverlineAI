@@ -38,15 +38,28 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var activeHighlightID: Highlight.ID?
     private(set) var previewLanguage: CaptureLanguage?
     private(set) var selectedVoiceIdentifiers: [String: String] = [:]
+    private(set) var speechEngineChoice: SpeechEngineChoice = .system
+    private(set) var selectedSupertonicVoice: SupertonicVoicePreset = .f1
+    private(set) var supertonicQuality: SupertonicQuality = .balanced
+    private(set) var supertonicAssetState: SupertonicAssetState = .unavailable
+    private(set) var speechErrorMessage: String?
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var cachedVoices: [AVSpeechSynthesisVoice]?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
+    @ObservationIgnored private var supertonicPlaybackTask: Task<Void, Never>?
+    @ObservationIgnored private var supertonicPlaybackToken: UUID?
     @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let supertonicAssetStore: SupertonicAssetStore
+    @ObservationIgnored private let supertonicEngine = SupertonicSpeechEngine()
+    @ObservationIgnored private let supertonicAudioPlayer = SupertonicAudioPlayer()
 
     override init() {
+        supertonicAssetStore = SupertonicAssetStore()
         super.init()
         loadVoiceSelections()
+        supertonicAssetState = supertonicAssetStore.state
+        loadSupertonicSelections()
     }
 
     func toggle(_ highlight: Highlight) {
@@ -59,6 +72,15 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         guard !text.isEmpty else { return }
 
         stop()
+
+        if usesSupertonic(for: highlight.language) {
+            activeHighlightID = highlight.id
+            startSupertonicPlayback(
+                text: text,
+                language: highlight.language
+            )
+            return
+        }
 
         let utterance = AVSpeechUtterance(string: text)
         configure(utterance, for: highlight.language)
@@ -75,6 +97,15 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
 
         stop()
+
+        if usesSupertonic(for: language) {
+            previewLanguage = language
+            startSupertonicPlayback(
+                text: language.speechPreviewText,
+                language: language
+            )
+            return
+        }
 
         let utterance = AVSpeechUtterance(string: language.speechPreviewText)
         configure(utterance, for: language)
@@ -128,8 +159,91 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func selectedVoiceName(for language: CaptureLanguage) -> String {
+        if language == .korean, speechEngineChoice == .supertonic {
+            if supertonicAssetState.isInstalled {
+                return "고품질 온디바이스 · \(selectedSupertonicVoice.title)"
+            }
+            return "고품질 온디바이스 · 받기 필요"
+        }
         let identifier = selectedVoiceIdentifier(for: language)
         return voiceOptions(for: language).first(where: { $0.id == identifier })?.name ?? "기본 음성"
+    }
+
+    func usesSupertonic(for language: CaptureLanguage) -> Bool {
+        language == .korean
+            && speechEngineChoice == .supertonic
+            && supertonicAssetState.isInstalled
+    }
+
+    func setSpeechEngineChoice(_ choice: SpeechEngineChoice) {
+        stop()
+        speechEngineChoice = choice
+        defaults.set(choice.rawValue, forKey: Self.supertonicEngineDefaultsKey)
+    }
+
+    func setSelectedSupertonicVoice(_ voice: SupertonicVoicePreset) {
+        stop()
+        selectedSupertonicVoice = voice
+        defaults.set(voice.rawValue, forKey: Self.supertonicVoiceDefaultsKey)
+    }
+
+    func setSupertonicQuality(_ quality: SupertonicQuality) {
+        stop()
+        supertonicQuality = quality
+        defaults.set(quality.rawValue, forKey: Self.supertonicQualityDefaultsKey)
+    }
+
+    func installSupertonicPack() async {
+        speechErrorMessage = nil
+        await supertonicAssetStore.install { [weak self] state in
+            self?.supertonicAssetState = state
+        }
+        supertonicAssetState = supertonicAssetStore.state
+        if supertonicAssetState.isInstalled {
+            setSpeechEngineChoice(.supertonic)
+        } else if case .failed(let message) = supertonicAssetState {
+            speechErrorMessage = message
+        }
+    }
+
+    func removeSupertonicPack() async {
+        stop()
+        await supertonicEngine.unload()
+        do {
+            try supertonicAssetStore.remove()
+            supertonicAssetState = supertonicAssetStore.state
+            setSpeechEngineChoice(.system)
+        } catch {
+            speechErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearSpeechError() {
+        speechErrorMessage = nil
+    }
+
+    func synthesizeSupertonic(
+        text: String,
+        speedMultiplier: Float
+    ) async throws -> SupertonicAudio {
+        guard let paths = supertonicAssetStore.modelPaths else {
+            throw SupertonicError.packNotInstalled
+        }
+        let voice = selectedSupertonicVoice
+        let quality = supertonicQuality
+        return try await supertonicEngine.synthesize(
+            text: text,
+            voice: voice,
+            quality: quality,
+            speed: min(max(speedMultiplier, 0.8), 1.4),
+            paths: paths
+        )
+    }
+
+    func releaseSupertonicRuntime() {
+        Task { [supertonicEngine] in
+            await supertonicEngine.unload()
+        }
     }
 
     func setSelectedVoiceIdentifier(_ identifier: String, for language: CaptureLanguage) {
@@ -166,6 +280,11 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func stop() {
+        let wasUsingSupertonic = supertonicPlaybackToken != nil
+        supertonicPlaybackTask?.cancel()
+        supertonicPlaybackTask = nil
+        supertonicPlaybackToken = nil
+        supertonicAudioPlayer.stop()
         if let synthesizer,
            synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
@@ -173,6 +292,9 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         currentUtterance = nil
         activeHighlightID = nil
         previewLanguage = nil
+        if wasUsingSupertonic {
+            releaseSupertonicRuntime()
+        }
     }
 
     func isSpeaking(_ highlightID: Highlight.ID) -> Bool {
@@ -219,6 +341,44 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         currentUtterance = nil
         activeHighlightID = nil
         previewLanguage = nil
+    }
+
+    private func startSupertonicPlayback(
+        text: String,
+        language: CaptureLanguage
+    ) {
+        let token = UUID()
+        supertonicPlaybackToken = token
+        speechErrorMessage = nil
+        supertonicPlaybackTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let audio = try await synthesizeSupertonic(text: text, speedMultiplier: 1)
+                try Task.checkCancellation()
+                guard supertonicPlaybackToken == token else { return }
+                try supertonicAudioPlayer.play(audio) { [weak self] in
+                    self?.finishSupertonicPlayback(token: token)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard supertonicPlaybackToken == token else { return }
+                quoteSpeechLogger.error(
+                    "supertonic_playback_failed language=\(language.rawValue, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+                speechErrorMessage = error.localizedDescription
+                finishSupertonicPlayback(token: token)
+            }
+        }
+    }
+
+    private func finishSupertonicPlayback(token: UUID) {
+        guard supertonicPlaybackToken == token else { return }
+        supertonicPlaybackTask = nil
+        supertonicPlaybackToken = nil
+        activeHighlightID = nil
+        previewLanguage = nil
+        releaseSupertonicRuntime()
     }
 
     private func configure(_ utterance: AVSpeechUtterance, for language: CaptureLanguage) {
@@ -282,6 +442,31 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
+    private func loadSupertonicSelections() {
+        if
+            let rawEngine = defaults.string(forKey: Self.supertonicEngineDefaultsKey),
+            let engine = SpeechEngineChoice(rawValue: rawEngine)
+        {
+            speechEngineChoice = engine
+        }
+        if
+            let rawVoice = defaults.string(forKey: Self.supertonicVoiceDefaultsKey),
+            let voice = SupertonicVoicePreset(rawValue: rawVoice)
+        {
+            selectedSupertonicVoice = voice
+        }
+        if
+            defaults.object(forKey: Self.supertonicQualityDefaultsKey) != nil,
+            let quality = SupertonicQuality(rawValue: defaults.integer(forKey: Self.supertonicQualityDefaultsKey))
+        {
+            supertonicQuality = quality
+        }
+
+        if speechEngineChoice == .supertonic, !supertonicAssetState.isInstalled {
+            speechEngineChoice = .system
+        }
+    }
+
     private func activeSynthesizer() -> AVSpeechSynthesizer {
         if let synthesizer {
             return synthesizer
@@ -341,6 +526,10 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private func voiceDefaultsKey(for language: CaptureLanguage) -> String {
         "overline.quoteSpeech.voice.\(language.rawValue)"
     }
+
+    private static let supertonicEngineDefaultsKey = "overline.quoteSpeech.supertonic.engine"
+    private static let supertonicVoiceDefaultsKey = "overline.quoteSpeech.supertonic.voice"
+    private static let supertonicQualityDefaultsKey = "overline.quoteSpeech.supertonic.quality"
 }
 
 private extension CaptureLanguage {

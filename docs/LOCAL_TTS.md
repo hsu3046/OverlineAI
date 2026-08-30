@@ -1,10 +1,31 @@
-# Local Quote TTS
+# 로컬 텍스트 낭독
 
 ## Scope
 
-Overline reads only the saved quote body with `AVSpeechSynthesizer`. Notes and book metadata are not spoken, and no text is sent to a server for narration.
+Overline은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독한다. 메모와 책 정보는 읽지 않으며, 낭독할 텍스트를 서버로 전송하지 않는다.
 
-## Voice Selection
+한국어는 다음 두 방식을 선택할 수 있다.
+
+- `iPhone 음성`: 기존 `AVSpeechSynthesizer`와 설치된 iOS 음성 팩을 사용한다.
+- `고품질 온디바이스`: 선택 설치한 Supertonic 3 모델을 ONNX Runtime으로 기기에서 실행한다.
+
+영어와 일본어는 iPhone 음성을 사용한다.
+
+## 고품질 온디바이스 음성
+
+- 음성 팩은 앱에 포함하지 않고 사용자가 선택했을 때 약 401MB를 내려받는다.
+- 모델과 음색 파일은 고정된 리비전과 SHA-256으로 검증한 뒤 `Application Support`에 저장한다.
+- 다운로드 파일은 iCloud 및 기기 백업에서 제외하고 완전 파일 보호를 적용한다.
+- 다운로드 후에는 인터넷 연결 없이 합성한다. 낭독 본문은 외부로 전송하지 않는다.
+- 여성 5종(`F1`~`F5`)과 남성 5종(`M1`~`M5`)을 모두 제공하며 기본은 `F1`이다.
+- 생성 단계는 `균형` 8단계를 기본으로 하고, 사용자가 `고음질` 12단계를 선택할 수 있다.
+- 모델은 앱 시작이나 카메라 전환 때 준비하지 않는다. 실제 고품질 낭독 요청 시 지연 로드하고 낭독 세션이 끝나면 메모리에서 해제한다.
+- 페이지 읽어주기는 문장 단위로 합성한다. 현재 문장을 재생하는 동안 다음 문장을 미리 합성해 문장 사이 대기를 줄인다.
+- 고품질 음성 팩이 없거나 한국어가 아닌 경우 기존 iPhone 음성 경로를 유지한다.
+
+의존성은 ONNX Runtime Swift Package `1.24.2`에 고정한다. 모델은 Supertonic 3 리비전 `3cadd1ee6394adea1bd021217a0e650ede09a323`, Swift 추론 도우미는 Supertonic 저장소 커밋 `7e2804f96016a7028cb1ed627353c61c1e9dd281`을 기준으로 한다.
+
+## iPhone 음성 선택
 
 - Settings exposes separate voice choices for Korean, English, and Japanese.
 - `Best Quality Auto Select` is the initial choice. Overline ranks the voices exposed for the quote language and selects Premium, then Enhanced, then Default quality.
@@ -28,14 +49,27 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 
 `AVAudioBuffer` zero-byte warnings may still appear in the device console. They were also observed while speech played successfully, so they are not treated as the cause of compact-voice quality.
 
-## Audio Session
+## 오디오 세션
 
 `AVSpeechSynthesizer.usesApplicationAudioSession` remains `false`. Overline does not create a separate spoken-audio processing session for quote playback.
 
-## Device Test
+## 실제 기기 검증
 
 1. On iPhone, install a high-quality or premium voice from Settings > Accessibility > Read & Speak > Voices. Siri voices are not selectable by third-party apps.
 2. In Overline, open Insights > Settings > Read Aloud. Confirm that `SpeechVoice` logs contain the catalog returned by the device.
 3. Start with Best Quality Auto Select, then preview the explicit Enhanced or Premium choices returned to Overline.
 4. Open a saved quote and confirm that playback uses the chosen voice.
 5. Relaunch the app and confirm that the selection is retained.
+6. 한국어에서 `고품질 온디바이스`를 선택하고 약 401MB 다운로드 안내와 진행률이 표시되는지 확인한다.
+7. 다운로드 후 여성 5종과 남성 5종을 각각 미리 듣고 선택값이 재실행 뒤 유지되는지 확인한다.
+8. `균형`과 `고음질`을 바꿔 미리 듣기와 페이지 읽어주기에 적용되는지 확인한다.
+9. 고품질 음성을 선택한 상태에서 한국어 페이지를 읽고, 첫 문장 준비 표시 뒤 다음 문장들이 연속 재생되는지 확인한다.
+10. 영어와 일본어 페이지가 기존 iPhone 음성으로 재생되는지 확인한다.
+11. 음성 팩을 삭제하면 iPhone 음성으로 돌아가고 다시 받을 수 있는지 확인한다.
+
+## 라이선스
+
+- Supertonic Swift 추론 도우미: MIT License
+- Supertonic 3 모델: OpenRAIL-M
+- 모델 다운로드 시 원본 `LICENSE`도 함께 저장한다.
+- 출처와 고정 버전은 `docs/THIRD_PARTY_NOTICES.md`에 기록한다.

@@ -914,29 +914,31 @@ struct OverlineSettingsSheet: View {
 
 private struct QuoteSpeechSettingsView: View {
     let player: QuoteSpeechPlayer
+    @State private var showsDownloadConfirmation = false
+    @State private var showsRemovalConfirmation = false
 
     var body: some View {
         Form {
-            ForEach(CaptureLanguage.allCases) { language in
-                Section(language.title) {
-                    Picker("음성", selection: voiceBinding(for: language)) {
-                        ForEach(player.voiceOptions(for: language)) { option in
-                            Text(option.pickerTitle)
-                                .tag(option.id)
-                        }
+            Section("한국어") {
+                Picker("음성 방식", selection: engineBinding) {
+                    ForEach(SpeechEngineChoice.allCases) { engine in
+                        Text(engine.title)
+                            .tag(engine)
                     }
-                    .pickerStyle(.navigationLink)
-                    .settingsRowSeparator()
+                }
+                .pickerStyle(.segmented)
+                .settingsRowSeparator()
 
-                    Button {
-                        player.togglePreview(for: language)
-                    } label: {
-                        Label(
-                            player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
-                            systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
-                        )
-                    }
-                    .settingsRowSeparator()
+                if player.speechEngineChoice == .supertonic {
+                    supertonicSettings
+                } else {
+                    systemVoiceSettings(for: .korean)
+                }
+            }
+
+            ForEach([CaptureLanguage.english, .japanese]) { language in
+                Section(language.title) {
+                    systemVoiceSettings(for: language)
                 }
             }
 
@@ -948,12 +950,179 @@ private struct QuoteSpeechSettingsView: View {
         }
         .navigationTitle("텍스트 낭독")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "고품질 음성 팩을 받을까요?",
+            isPresented: $showsDownloadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("받기 · \(SupertonicAssetStore.downloadSizeDescription)") {
+                player.setSpeechEngineChoice(.supertonic)
+                Task {
+                    await player.installSupertonicPack()
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("한 번 받으면 인터넷 없이 사용할 수 있습니다.")
+        }
+        .confirmationDialog(
+            "고품질 음성 팩을 삭제할까요?",
+            isPresented: $showsRemovalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("음성 팩 삭제", role: .destructive) {
+                Task {
+                    await player.removeSupertonicPack()
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("필요할 때 다시 받을 수 있습니다.")
+        }
+        .alert(
+            "음성 팩을 준비하지 못했습니다",
+            isPresented: Binding(
+                get: { player.speechErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { player.clearSpeechError() }
+                }
+            )
+        ) {
+            Button("확인", role: .cancel) {
+                player.clearSpeechError()
+            }
+        } message: {
+            Text(player.speechErrorMessage ?? "잠시 후 다시 시도해주세요.")
+        }
         .onAppear {
             player.logVoiceCatalog()
         }
         .onDisappear {
             player.stop()
         }
+    }
+
+    @ViewBuilder
+    private var supertonicSettings: some View {
+        switch player.supertonicAssetState {
+        case .unavailable:
+            Button {
+                showsDownloadConfirmation = true
+            } label: {
+                LabeledContent {
+                    Text(SupertonicAssetStore.downloadSizeDescription)
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("고품질 음성 받기", systemImage: "arrow.down.circle")
+                }
+            }
+            .settingsRowSeparator()
+
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 10) {
+                LabeledContent("고품질 음성 받는 중") {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: progress)
+                    .tint(Color.overlineAccent)
+            }
+            .settingsRowSeparator()
+
+        case .installed:
+            Picker("음색", selection: supertonicVoiceBinding) {
+                ForEach(SupertonicVoicePreset.allCases) { voice in
+                    Text(voice.pickerTitle)
+                        .tag(voice)
+                }
+            }
+            .pickerStyle(.navigationLink)
+            .settingsRowSeparator()
+
+            Picker("음질", selection: supertonicQualityBinding) {
+                ForEach(SupertonicQuality.allCases) { quality in
+                    Text(quality.title)
+                        .tag(quality)
+                }
+            }
+            .pickerStyle(.segmented)
+            .settingsRowSeparator()
+
+            previewButton(for: .korean)
+
+            Button(role: .destructive) {
+                showsRemovalConfirmation = true
+            } label: {
+                Label("고품질 음성 팩 삭제", systemImage: "trash")
+            }
+            .settingsRowSeparator()
+
+        case .failed(let message):
+            Text(message)
+                .font(.overline(.footnote))
+                .foregroundStyle(.red)
+                .settingsRowSeparator()
+
+            Button {
+                showsDownloadConfirmation = true
+            } label: {
+                Label("다시 받기", systemImage: "arrow.clockwise")
+            }
+            .settingsRowSeparator()
+        }
+    }
+
+    @ViewBuilder
+    private func systemVoiceSettings(for language: CaptureLanguage) -> some View {
+        Picker("음성", selection: voiceBinding(for: language)) {
+            ForEach(player.voiceOptions(for: language)) { option in
+                Text(option.pickerTitle)
+                    .tag(option.id)
+            }
+        }
+        .pickerStyle(.navigationLink)
+        .settingsRowSeparator()
+
+        previewButton(for: language)
+    }
+
+    private func previewButton(for language: CaptureLanguage) -> some View {
+        Button {
+            player.togglePreview(for: language)
+        } label: {
+            Label(
+                player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
+                systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
+            )
+        }
+        .settingsRowSeparator()
+    }
+
+    private var engineBinding: Binding<SpeechEngineChoice> {
+        Binding(
+            get: { player.speechEngineChoice },
+            set: { choice in
+                if choice == .supertonic, !player.supertonicAssetState.isInstalled {
+                    showsDownloadConfirmation = true
+                } else {
+                    player.setSpeechEngineChoice(choice)
+                }
+            }
+        )
+    }
+
+    private var supertonicVoiceBinding: Binding<SupertonicVoicePreset> {
+        Binding(
+            get: { player.selectedSupertonicVoice },
+            set: { player.setSelectedSupertonicVoice($0) }
+        )
+    }
+
+    private var supertonicQualityBinding: Binding<SupertonicQuality> {
+        Binding(
+            get: { player.supertonicQuality },
+            set: { player.setSupertonicQuality($0) }
+        )
     }
 
     private func voiceBinding(for language: CaptureLanguage) -> Binding<String> {
