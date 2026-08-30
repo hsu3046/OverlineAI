@@ -385,6 +385,33 @@ nonisolated enum OCRBoundaryTrimming: Sendable {
     }
 }
 
+enum OCRPageMarginMetadataFilter {
+    static func bodyLines(
+        from lines: [CameraRecognizedTextLine],
+        referenceLines: [CameraRecognizedTextLine]? = nil,
+        pageBoundingBox: CGRect? = nil
+    ) -> [CameraRecognizedTextLine] {
+        let referenceBox = pageBoundingBox ?? boundingBox(for: referenceLines ?? lines)
+        return lines.filter { line in
+            guard let referenceBox, referenceBox.height > 0.001 else { return true }
+            let relativeY = (line.boundingBox.midY - referenceBox.minY) / referenceBox.height
+            let edgeDistance = min(abs(relativeY), abs(1 - relativeY))
+            guard edgeDistance <= 0.14 else { return true }
+            return !PageReferenceInference.isDedicatedPageReferenceLine(
+                PageReferenceLine(text: line.text, boundingBox: line.boundingBox),
+                pageBoundingBox: referenceBox
+            )
+        }
+    }
+
+    private static func boundingBox(for lines: [CameraRecognizedTextLine]) -> CGRect? {
+        guard let firstLine = lines.first else { return nil }
+        return lines.dropFirst().reduce(firstLine.boundingBox) { result, line in
+            result.union(line.boundingBox)
+        }
+    }
+}
+
 struct OCRTextAssembler {
     private struct LayoutMetrics {
         let bodyLeft: CGFloat
@@ -1383,9 +1410,21 @@ final class CameraTextScanner {
         for selectedIDs: Set<CameraRecognizedTextLine.ID>,
         boundaryTrimming: OCRBoundaryTrimming = .all
     ) -> String {
-        OCRTextAssembler(
-            pageLines: lines,
-            selectedLines: selectedLines(for: selectedIDs),
+        let selectedLines = selectedLines(for: selectedIDs)
+        let referenceLines = lines + selectedLines
+        let bodyPageLines = OCRPageMarginMetadataFilter.bodyLines(
+            from: lines,
+            referenceLines: referenceLines,
+            pageBoundingBox: detectedPage?.boundingBox
+        )
+        let bodySelectedLines = OCRPageMarginMetadataFilter.bodyLines(
+            from: selectedLines,
+            referenceLines: referenceLines,
+            pageBoundingBox: detectedPage?.boundingBox
+        )
+        return OCRTextAssembler(
+            pageLines: bodyPageLines,
+            selectedLines: bodySelectedLines,
             boundaryTrimming: boundaryTrimming
         )
         .assembledText()

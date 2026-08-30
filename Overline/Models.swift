@@ -1379,6 +1379,11 @@ private struct CapturedHighlightMetadata {
 struct PageReferenceLine {
     let text: String
     let boundingBox: CGRect
+
+    nonisolated init(text: String, boundingBox: CGRect) {
+        self.text = text
+        self.boundingBox = boundingBox
+    }
 }
 
 enum PageReferenceInference {
@@ -1392,6 +1397,26 @@ enum PageReferenceInference {
             .sorted { $0.score < $1.score }
             .first?
             .pageReference
+    }
+
+    nonisolated static func isDedicatedPageReferenceLine(
+        _ line: PageReferenceLine,
+        pageBoundingBox: CGRect?
+    ) -> Bool {
+        let text = line.text.trimmed
+        guard text.range(
+            of: #"(?i)^\s*(?:(?:p|pp|page)\.?\s*)?\d{1,4}(?:\s*[-–~]\s*\d{1,4})?\s*(?:쪽|페이지)?\s*$"#,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+        guard let extraction = pageNumberExtraction(from: text) else { return false }
+        switch extraction.position {
+        case .marked, .standalone:
+            return candidate(from: line, referenceBox: pageBoundingBox) != nil
+        case .leading, .trailing:
+            return false
+        }
     }
 
     nonisolated private static func candidate(
