@@ -24,8 +24,11 @@ struct CommunityView: View {
             }
         }
         .onChange(of: isActive, initial: true) { _, active in
-            if active, selectedSection == .nearby {
-                locationService.requestCurrentLocation()
+            if active {
+                model.reconcileBooks(from: library)
+                if selectedSection == .nearby {
+                    locationService.requestCurrentLocation()
+                }
             }
         }
     }

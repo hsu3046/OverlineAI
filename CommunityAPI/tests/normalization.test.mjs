@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
-import { cleanText, safeHTTPURL } from "../.build/lib/http.js";
+import { cleanText, integerValue, numberQuery, safeHTTPURL } from "../.build/lib/http.js";
 import {
   data4LibraryKDC,
   data4LibraryLoanDateRange,
@@ -20,6 +20,14 @@ test("cleanText strips provider markup and decodes entities", () => {
 test("safeHTTPURL upgrades http and rejects unsupported schemes", () => {
   assert.equal(safeHTTPURL("http://example.com/book"), "https://example.com/book");
   assert.equal(safeHTTPURL("javascript:alert(1)"), undefined);
+});
+
+test("numeric parsing rejects explicitly empty values", () => {
+  const url = new URL("https://example.com/places?lat=&lng=%20");
+  assert.throws(() => numberQuery(url, "lat", { minimum: -90, maximum: 90 }));
+  assert.throws(() => numberQuery(url, "lng", { minimum: -180, maximum: 180 }));
+  assert.equal(integerValue(""), undefined);
+  assert.equal(integerValue("  "), undefined);
 });
 
 test("Kakao places require a usable address and distance", () => {

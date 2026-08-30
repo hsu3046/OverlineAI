@@ -70,7 +70,8 @@ export function numberQuery(
   range: { minimum: number; maximum: number },
 ): number {
   const rawValue = url.searchParams.get(name);
-  const value = rawValue === null ? Number.NaN : Number(rawValue);
+  const normalizedValue = rawValue?.trim() ?? "";
+  const value = normalizedValue.length === 0 ? Number.NaN : Number(normalizedValue);
   if (!Number.isFinite(value) || value < range.minimum || value > range.maximum) {
     throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
   }
@@ -144,7 +145,9 @@ export function safeHTTPURL(value: string | null | undefined): string | undefine
 export function integerValue(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return Math.round(value);
   if (typeof value !== "string") return undefined;
-  const parsed = Number(value.replaceAll(",", ""));
+  const normalizedValue = value.replaceAll(",", "").trim();
+  if (normalizedValue.length === 0) return undefined;
+  const parsed = Number(normalizedValue);
   return Number.isFinite(parsed) ? Math.round(parsed) : undefined;
 }
 
