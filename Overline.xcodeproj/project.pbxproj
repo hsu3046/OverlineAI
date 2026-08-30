@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EC56B1902FF0000100188824 /* onnxruntime in Frameworks */ = {isa = PBXBuildFile; productRef = EC56B1922FF0000100188824 /* onnxruntime */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		EC56B16E2FEBE5AF00188824 /* Overline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Overline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC56B1802FECC00000188824 /* Overline.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Overline.xcconfig; sourceTree = "<group>"; };
@@ -26,6 +30,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EC56B1902FF0000100188824 /* onnxruntime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -79,6 +84,7 @@
 			);
 			name = Overline;
 			packageProductDependencies = (
+				EC56B1922FF0000100188824 /* onnxruntime */,
 			);
 			productName = Overline;
 			productReference = EC56B16E2FEBE5AF00188824 /* Overline.app */;
@@ -108,6 +114,9 @@
 			);
 			mainGroup = EC56B1652FEBE5AF00188824;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				EC56B1912FF0000100188824 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EC56B16F2FEBE5AF00188824 /* Products */;
 			projectDirPath = "";
@@ -338,6 +347,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EC56B1912FF0000100188824 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/microsoft/onnxruntime-swift-package-manager.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.24.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EC56B1922FF0000100188824 /* onnxruntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC56B1912FF0000100188824 /* XCRemoteSwiftPackageReference "onnxruntime-swift-package-manager" */;
+			productName = onnxruntime;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EC56B1662FEBE5AF00188824 /* Project object */;
 }

@@ -914,29 +914,35 @@ struct OverlineSettingsSheet: View {
 
 private struct QuoteSpeechSettingsView: View {
     let player: QuoteSpeechPlayer
+    @State private var showsDownloadConfirmation = false
+    @State private var showsRemovalConfirmation = false
 
     var body: some View {
         Form {
-            ForEach(CaptureLanguage.allCases) { language in
-                Section(language.title) {
-                    Picker("음성", selection: voiceBinding(for: language)) {
-                        ForEach(player.voiceOptions(for: language)) { option in
-                            Text(option.pickerTitle)
-                                .tag(option.id)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .settingsRowSeparator()
+            Section("한국어") {
+                SpeechEnginePicker(selection: engineBinding)
+                    .listRowSeparator(.hidden, edges: .bottom)
 
-                    Button {
-                        player.togglePreview(for: language)
-                    } label: {
-                        Label(
-                            player.previewLanguage == language ? "미리 듣기 중지" : "미리 듣기",
-                            systemImage: player.previewLanguage == language ? "stop.fill" : "play.fill"
-                        )
-                    }
-                    .settingsRowSeparator()
+                if player.speechEngineChoice == .supertonic {
+                    supertonicPrimarySettings
+                } else {
+                    systemVoiceSettings(for: .korean)
+                }
+
+                SpeechPlaybackControls(
+                    rateMultiplier: speechRateBinding,
+                    sentencePause: sentencePauseBinding
+                )
+                .listRowSeparator(.hidden)
+
+                if player.speechEngineChoice == .supertonic {
+                    supertonicInstalledSettings
+                }
+            }
+
+            ForEach([CaptureLanguage.english, .japanese]) { language in
+                Section(language.title) {
+                    systemVoiceSettings(for: language)
                 }
             }
 
@@ -948,6 +954,50 @@ private struct QuoteSpeechSettingsView: View {
         }
         .navigationTitle("텍스트 낭독")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "고품질 음성 팩을 받을까요?",
+            isPresented: $showsDownloadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("받기 · \(SupertonicAssetStore.downloadSizeDescription)") {
+                player.setSpeechEngineChoice(.supertonic)
+                Task {
+                    await player.installSupertonicPack()
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("한 번 받으면 인터넷 없이 사용할 수 있습니다.")
+        }
+        .confirmationDialog(
+            "고품질 음성 팩을 삭제할까요?",
+            isPresented: $showsRemovalConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("음성 팩 삭제", role: .destructive) {
+                Task {
+                    await player.removeSupertonicPack()
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("필요할 때 다시 받을 수 있습니다.")
+        }
+        .alert(
+            "음성 팩을 준비하지 못했습니다",
+            isPresented: Binding(
+                get: { player.speechErrorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { player.clearSpeechError() }
+                }
+            )
+        ) {
+            Button("확인", role: .cancel) {
+                player.clearSpeechError()
+            }
+        } message: {
+            Text(player.speechErrorMessage ?? "잠시 후 다시 시도해주세요.")
+        }
         .onAppear {
             player.logVoiceCatalog()
         }
@@ -956,11 +1006,267 @@ private struct QuoteSpeechSettingsView: View {
         }
     }
 
-    private func voiceBinding(for language: CaptureLanguage) -> Binding<String> {
+    @ViewBuilder
+    private var supertonicPrimarySettings: some View {
+        switch player.supertonicAssetState {
+        case .unavailable:
+            Button {
+                showsDownloadConfirmation = true
+            } label: {
+                LabeledContent {
+                    Text(SupertonicAssetStore.downloadSizeDescription)
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("고품질 음성 받기", systemImage: "arrow.down.circle")
+                }
+            }
+            .listRowSeparator(.hidden)
+
+        case .downloading(let progress):
+            VStack(alignment: .leading, spacing: 10) {
+                LabeledContent("고품질 음성 받는 중") {
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: progress)
+                    .tint(Color.overlineAccent)
+            }
+            .listRowSeparator(.hidden)
+
+        case .installed:
+            NavigationLink {
+                SupertonicVoiceSelectionView(player: player)
+            } label: {
+                LabeledContent("음성") {
+                    Text(player.selectedSupertonicVoice.pickerTitle)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listRowSeparator(.hidden)
+
+        case .failed(let message):
+            Text(message)
+                .font(.overline(.footnote))
+                .foregroundStyle(.red)
+                .listRowSeparator(.hidden)
+
+            Button {
+                showsDownloadConfirmation = true
+            } label: {
+                Label("다시 받기", systemImage: "arrow.clockwise")
+            }
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var supertonicInstalledSettings: some View {
+        if player.supertonicAssetState.isInstalled {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("음질")
+                    .font(.overline(.body, weight: .medium))
+
+                ForEach(SupertonicQuality.allCases) { quality in
+                    Button {
+                        player.setSupertonicQuality(quality)
+                    } label: {
+                        HStack {
+                            Text(quality.title)
+                                .foregroundStyle(Color.primary)
+
+                            Spacer()
+
+                            Image(systemName: player.supertonicQuality == quality ? "circle.inset.filled" : "circle")
+                                .foregroundStyle(
+                                    player.supertonicQuality == quality
+                                        ? Color.overlineAccent
+                                        : Color.overlineMutedInk
+                                )
+                        }
+                        .frame(minHeight: 40)
+                        .contentShape(Rectangle())
+                    }
+                    .padding(.leading, 16)
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(
+                        player.supertonicQuality == quality ? .isSelected : []
+                    )
+                }
+            }
+            .listRowSeparator(.hidden)
+
+            Button(role: .destructive) {
+                showsRemovalConfirmation = true
+            } label: {
+                Label("고품질 음성 팩 삭제", systemImage: "trash")
+            }
+            .listRowSeparator(.visible, edges: .top)
+            .settingsRowSeparator()
+        }
+    }
+
+    @ViewBuilder
+    private func systemVoiceSettings(for language: CaptureLanguage) -> some View {
+        NavigationLink {
+            SystemVoiceSelectionView(player: player, language: language)
+        } label: {
+            LabeledContent("음성") {
+                Text(selectedSystemVoiceTitle(for: language))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listRowSeparator(.hidden)
+    }
+
+    private func selectedSystemVoiceTitle(for language: CaptureLanguage) -> String {
+        let identifier = player.selectedVoiceIdentifier(for: language)
+        return player.voiceOptions(for: language)
+            .first(where: { $0.id == identifier })?
+            .pickerTitle ?? player.selectedVoiceName(for: language)
+    }
+
+    private var engineBinding: Binding<SpeechEngineChoice> {
         Binding(
-            get: { player.selectedVoiceIdentifier(for: language) },
-            set: { player.setSelectedVoiceIdentifier($0, for: language) }
+            get: { player.speechEngineChoice },
+            set: { choice in
+                if choice == .supertonic, !player.supertonicAssetState.isInstalled {
+                    showsDownloadConfirmation = true
+                } else {
+                    player.setSpeechEngineChoice(choice)
+                }
+            }
         )
+    }
+
+    private var speechRateBinding: Binding<Double> {
+        Binding(
+            get: { player.speechRateMultiplier },
+            set: { player.setSpeechRateMultiplier($0) }
+        )
+    }
+
+    private var sentencePauseBinding: Binding<Double> {
+        Binding(
+            get: { player.sentencePause },
+            set: { player.setSentencePause($0) }
+        )
+    }
+
+}
+
+private struct SpeechEnginePicker: View {
+    @Binding var selection: SpeechEngineChoice
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(SpeechEngineChoice.allCases) { engine in
+                Button {
+                    selection = engine
+                } label: {
+                    Text(engine.title)
+                        .font(.overline(.body, weight: .medium))
+                        .foregroundStyle(
+                            selection == engine ? Color.overlineInk : Color.overlineMutedInk
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background {
+                            if selection == engine {
+                                Capsule(style: .continuous)
+                                    .fill(Color(uiColor: .systemBackground))
+                                    .shadow(color: Color.black.opacity(0.06), radius: 2, y: 1)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == engine ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Color(uiColor: .secondarySystemFill), in: Capsule(style: .continuous))
+    }
+}
+
+private struct SupertonicVoiceSelectionView: View {
+    let player: QuoteSpeechPlayer
+
+    var body: some View {
+        List(SupertonicVoicePreset.allCases) { voice in
+            VoiceSelectionRow(
+                title: voice.pickerTitle,
+                isSelected: player.selectedSupertonicVoice == voice,
+                isPreviewing: player.isPreviewing(voice),
+                select: { player.setSelectedSupertonicVoice(voice) },
+                togglePreview: { player.togglePreview(voice) }
+            )
+        }
+        .navigationTitle("음성")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            player.stop()
+        }
+    }
+}
+
+private struct SystemVoiceSelectionView: View {
+    let player: QuoteSpeechPlayer
+    let language: CaptureLanguage
+
+    var body: some View {
+        List(player.voiceOptions(for: language)) { option in
+            VoiceSelectionRow(
+                title: option.pickerTitle,
+                isSelected: player.selectedVoiceIdentifier(for: language) == option.id,
+                isPreviewing: player.isPreviewing(option, for: language),
+                select: { player.setSelectedVoiceIdentifier(option.id, for: language) },
+                togglePreview: { player.togglePreview(option, for: language) }
+            )
+        }
+        .navigationTitle("음성")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            player.stop()
+        }
+    }
+}
+
+private struct VoiceSelectionRow: View {
+    let title: String
+    let isSelected: Bool
+    let isPreviewing: Bool
+    let select: () -> Void
+    let togglePreview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: select) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .foregroundStyle(isSelected ? Color.overlineAccent : .primary)
+
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.overline(.caption, weight: .semibold))
+                            .foregroundStyle(Color.overlineAccent)
+                    }
+
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: togglePreview) {
+                Image(systemName: isPreviewing ? "stop.fill" : "play.fill")
+                    .font(.overline(.body, weight: .semibold))
+                    .foregroundStyle(Color.overlineAccent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isPreviewing ? "미리 듣기 중지" : "\(title) 미리 듣기")
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
