@@ -707,11 +707,21 @@ struct ScrapbookView: View {
                     }
 
                     if highlights.isEmpty && pendingDeletedHighlight == nil {
-                        ContentUnavailableView(
-                            "검색 결과 없음",
-                            systemImage: "magnifyingglass",
-                            description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
-                        )
+                        Group {
+                            if book.highlights.isEmpty {
+                                ContentUnavailableView(
+                                    "아직 글조각이 없습니다",
+                                    systemImage: "text.quote",
+                                    description: Text("캡처 탭에서 간직하고 싶은 문장을 저장해 보세요.")
+                                )
+                            } else {
+                                ContentUnavailableView(
+                                    "검색 결과 없음",
+                                    systemImage: "magnifyingglass",
+                                    description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
+                                )
+                            }
+                        }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                         .listRowChrome(top: 0, bottom: 16)
