@@ -923,6 +923,12 @@ private struct QuoteSpeechSettingsView: View {
                 SpeechEnginePicker(selection: engineBinding)
                     .listRowSeparator(.hidden, edges: .bottom)
 
+                if player.speechEngineChoice == .supertonic {
+                    supertonicPrimarySettings
+                } else {
+                    systemVoiceSettings(for: .korean)
+                }
+
                 SpeechPlaybackControls(
                     rateMultiplier: speechRateBinding,
                     sentencePause: sentencePauseBinding
@@ -930,9 +936,7 @@ private struct QuoteSpeechSettingsView: View {
                 .listRowSeparator(.hidden)
 
                 if player.speechEngineChoice == .supertonic {
-                    supertonicSettings
-                } else {
-                    systemVoiceSettings(for: .korean)
+                    supertonicInstalledSettings
                 }
             }
 
@@ -1003,7 +1007,7 @@ private struct QuoteSpeechSettingsView: View {
     }
 
     @ViewBuilder
-    private var supertonicSettings: some View {
+    private var supertonicPrimarySettings: some View {
         switch player.supertonicAssetState {
         case .unavailable:
             Button {
@@ -1040,6 +1044,24 @@ private struct QuoteSpeechSettingsView: View {
             }
             .listRowSeparator(.hidden)
 
+        case .failed(let message):
+            Text(message)
+                .font(.overline(.footnote))
+                .foregroundStyle(.red)
+                .listRowSeparator(.hidden)
+
+            Button {
+                showsDownloadConfirmation = true
+            } label: {
+                Label("다시 받기", systemImage: "arrow.clockwise")
+            }
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private var supertonicInstalledSettings: some View {
+        if player.supertonicAssetState.isInstalled {
             VStack(alignment: .leading, spacing: 12) {
                 Text("음질")
                     .font(.overline(.body, weight: .medium))
@@ -1064,6 +1086,7 @@ private struct QuoteSpeechSettingsView: View {
                         .frame(minHeight: 40)
                         .contentShape(Rectangle())
                     }
+                    .padding(.leading, 16)
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(
                         player.supertonicQuality == quality ? .isSelected : []
@@ -1077,20 +1100,8 @@ private struct QuoteSpeechSettingsView: View {
             } label: {
                 Label("고품질 음성 팩 삭제", systemImage: "trash")
             }
-            .listRowSeparator(.hidden)
-
-        case .failed(let message):
-            Text(message)
-                .font(.overline(.footnote))
-                .foregroundStyle(.red)
-                .listRowSeparator(.hidden)
-
-            Button {
-                showsDownloadConfirmation = true
-            } label: {
-                Label("다시 받기", systemImage: "arrow.clockwise")
-            }
-            .listRowSeparator(.hidden)
+            .listRowSeparator(.visible, edges: .top)
+            .settingsRowSeparator()
         }
     }
 
