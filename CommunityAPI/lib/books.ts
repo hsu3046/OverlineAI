@@ -7,16 +7,19 @@ export async function searchBookMetadata(
   aladinAPIKey: string,
   kakaoAPIKey: string,
 ): Promise<{ items: BookMetadataCandidate[]; message: string }> {
-  try {
-    const aladinItems = await searchAladinBooks(query, aladinAPIKey);
-    if (aladinItems.length > 0) {
-      return { items: aladinItems, message: "Aladin 도서 검색 결과입니다." };
-    }
-  } catch {
-    // Kakao provides the established fallback when Aladin is unavailable.
+  const [aladinResult, kakaoResult] = await Promise.allSettled([
+    searchAladinBooks(query, aladinAPIKey, 2_500),
+    searchKakaoBooks(query, kakaoAPIKey, 2_500),
+  ]);
+
+  if (aladinResult.status === "fulfilled" && aladinResult.value.length > 0) {
+    return { items: aladinResult.value, message: "Aladin 도서 검색 결과입니다." };
   }
 
-  const kakaoItems = await searchKakaoBooks(query, kakaoAPIKey);
+  if (kakaoResult.status === "rejected") {
+    throw kakaoResult.reason;
+  }
+  const kakaoItems = kakaoResult.value;
   return {
     items: kakaoItems,
     message: kakaoItems.length > 0

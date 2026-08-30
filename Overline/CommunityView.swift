@@ -10,15 +10,23 @@ struct CommunityView: View {
     @AppStorage("overline.community.selectedSection") private var selectedSectionRaw = CommunitySection.articles.rawValue
     @State private var model = CommunityViewModel()
     @State private var locationService = CommunityLocationService()
+    @State private var forcePlaceReloadAfterLocation = false
     @FocusState private var isArticleSearchFocused: Bool
     @Namespace private var sectionTabNamespace
 
     @ViewBuilder
     var body: some View {
-        if isActive {
-            activeContent
-        } else {
-            Color.clear
+        Group {
+            if isActive {
+                activeContent
+            } else {
+                Color.clear
+            }
+        }
+        .onChange(of: isActive, initial: true) { _, active in
+            if active, selectedSection == .nearby {
+                locationService.requestCurrentLocation()
+            }
         }
     }
 
@@ -50,7 +58,7 @@ struct CommunityView: View {
             model.selectDefaultBook(from: library)
             await loadSelectedSection()
         }
-        .onChange(of: library.books.map(\.id)) { _, _ in
+        .onChange(of: libraryBookSearchFingerprint) { _, _ in
             model.reconcileBooks(from: library)
         }
     }
@@ -368,6 +376,9 @@ struct CommunityView: View {
                 withAnimation(.easeInOut(duration: 0.22)) {
                     selectedSectionRaw = section.rawValue
                 }
+                if section == .nearby {
+                    locationService.requestCurrentLocation()
+                }
             }
         )
     }
@@ -384,7 +395,7 @@ struct CommunityView: View {
         switch selectedSection {
         case .nearby:
             let coordinate = locationService.location?.coordinate
-            return "nearby-\(coordinate?.latitude ?? 0)-\(coordinate?.longitude ?? 0)-\(model.placeKind.rawValue)-\(model.placeRadius)"
+            return "nearby-\(locationService.locationRevision)-\(coordinate?.latitude ?? 0)-\(coordinate?.longitude ?? 0)-\(model.placeKind.rawValue)-\(model.placeRadius)"
         case .articles:
             return "articles-\(model.articleQueryTitle)-\(model.articleQueryAuthor)-\(model.articleSource.rawValue)-\(model.articleSort.rawValue)"
         case .rankings:
@@ -396,11 +407,19 @@ struct CommunityView: View {
         guard isActive else { return }
         switch selectedSection {
         case .nearby:
+            if force {
+                forcePlaceReloadAfterLocation = true
+                locationService.requestCurrentLocation()
+                return
+            }
+            guard !locationService.isRequesting else { return }
             guard let location = locationService.location else {
                 locationService.requestCurrentLocation()
                 return
             }
-            await model.loadPlaces(location: location, force: force)
+            let shouldForce = forcePlaceReloadAfterLocation
+            forcePlaceReloadAfterLocation = false
+            await model.loadPlaces(location: location, force: shouldForce)
         case .articles:
             await model.loadArticles(force: force)
         case .rankings:
@@ -430,6 +449,12 @@ struct CommunityView: View {
             openApplicationSettings()
         } else {
             locationService.requestCurrentLocation()
+        }
+    }
+
+    private var libraryBookSearchFingerprint: [String] {
+        library.books.map { book in
+            "\(book.id)|\(book.title)|\(book.author)"
         }
     }
 

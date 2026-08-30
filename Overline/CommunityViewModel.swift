@@ -55,7 +55,16 @@ final class CommunityViewModel {
     }
 
     func reconcileBooks(from library: ReadingLibrary) {
-        if let selectedBookID, library.book(with: selectedBookID) == nil {
+        if let selectedBookID, let book = library.book(with: selectedBookID) {
+            let title = book.title.trimmed
+            let author = book.author.trimmed
+            if title != selectedBookTitle || author != selectedBookAuthor {
+                selectedBookTitle = title
+                selectedBookAuthor = author
+                articleSearchText = title
+                commitArticleQuery(title: title, author: author)
+            }
+        } else if selectedBookID != nil {
             self.selectedBookID = nil
             selectedBookTitle = ""
             selectedBookAuthor = ""

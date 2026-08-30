@@ -41,13 +41,14 @@ interface AladinResponse {
 export async function searchAladinBooks(
   query: string,
   apiKey: string,
+  timeoutMilliseconds = 7_000,
 ): Promise<BookMetadataCandidate[]> {
   const digits = query.replaceAll(/\D/g, "");
   if (digits.length === 10 || digits.length === 13) {
     const lookupItems = await requestAladin("ItemLookUp.aspx", {
       ItemId: digits,
       ItemIdType: digits.length === 13 ? "ISBN13" : "ISBN",
-    }, apiKey);
+    }, apiKey, timeoutMilliseconds);
     if (lookupItems.length > 0) return lookupItems.map(normalizeBookCandidate);
   }
 
@@ -58,7 +59,7 @@ export async function searchAladinBooks(
     Start: "1",
     SearchTarget: "Book",
     Sort: "Accuracy",
-  }, apiKey);
+  }, apiKey, timeoutMilliseconds);
   if (titleItems.length > 0 || digits.length === 10 || digits.length === 13) {
     return titleItems.map(normalizeBookCandidate).filter((item) => item.title.length > 0);
   }
@@ -70,7 +71,7 @@ export async function searchAladinBooks(
     Start: "1",
     SearchTarget: "Book",
     Sort: "Accuracy",
-  }, apiKey);
+  }, apiKey, timeoutMilliseconds);
   return keywordItems.map(normalizeBookCandidate).filter((item) => item.title.length > 0);
 }
 
@@ -119,6 +120,7 @@ async function requestAladin(
   endpoint: string,
   parameters: Readonly<Record<string, string>>,
   apiKey: string,
+  timeoutMilliseconds = 7_000,
 ): Promise<AladinItem[]> {
   const url = new URL(`https://www.aladin.co.kr/ttb/api/${endpoint}`);
   url.searchParams.set("TTBKey", apiKey);
@@ -129,7 +131,7 @@ async function requestAladin(
     url.searchParams.set(name, value);
   }
 
-  const response = await fetchJSON<AladinResponse>(url);
+  const response = await fetchJSON<AladinResponse>(url, {}, timeoutMilliseconds);
   if (response.errorCode !== undefined) {
     throw new Error(`aladin_${String(response.errorCode)}_${cleanText(response.errorMessage).slice(0, 80)}`);
   }

@@ -9,6 +9,7 @@ final class CommunityLocationService: NSObject, CLLocationManagerDelegate {
     private(set) var authorizationStatus: CLAuthorizationStatus
     private(set) var errorMessage: String?
     private(set) var isRequesting = false
+    private(set) var locationRevision = 0
 
     override init() {
         authorizationStatus = manager.authorizationStatus
@@ -18,6 +19,7 @@ final class CommunityLocationService: NSObject, CLLocationManagerDelegate {
     }
 
     func requestCurrentLocation() {
+        guard !isRequesting else { return }
         errorMessage = nil
         switch authorizationStatus {
         case .notDetermined:
@@ -51,6 +53,7 @@ final class CommunityLocationService: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         location = locations.last
+        locationRevision += 1
         isRequesting = false
         errorMessage = nil
     }

@@ -962,6 +962,7 @@ struct PageReaderView: View {
     @State private var finishTransitionTask: Task<Void, Never>?
     @State private var initialDraftTask: Task<Void, Never>?
     @State private var resumeDraftTask: Task<Void, Never>?
+    @State private var draftProgressSaveTask: Task<Void, Never>?
     @State private var showsExitConfirmation = false
     @State private var showsStoredDraftPrompt = false
     @State private var showsReplacementConfirmation = false
@@ -1663,8 +1664,11 @@ struct PageReaderView: View {
             return
         }
 
+        let pendingProgressSave = draftProgressSaveTask
+        draftProgressSaveTask = nil
         Task { @MainActor in
             do {
+                await pendingProgressSave?.value
                 try await PageReadingDraftStore.shared.save(draft)
                 storedDraft = draft
                 activeDraftID = draft.id
@@ -1704,8 +1708,11 @@ struct PageReaderView: View {
             return
         }
 
+        let pendingProgressSave = draftProgressSaveTask
+        draftProgressSaveTask = nil
         Task { @MainActor in
             do {
+                await pendingProgressSave?.value
                 try await PageReadingDraftStore.shared.save(updatedDraft)
                 self.storedDraft = updatedDraft
                 closeReader()
@@ -1756,10 +1763,20 @@ struct PageReaderView: View {
             activeCueIndex: readingSession.activeCueIndex,
             pages: currentDraftPages
         )
-        self.storedDraft = updatedDraft
-
-        Task {
-            try? await PageReadingDraftStore.shared.save(updatedDraft)
+        let previousSave = draftProgressSaveTask
+        draftProgressSaveTask = Task { @MainActor in
+            await previousSave?.value
+            do {
+                try await PageReadingDraftStore.shared.save(updatedDraft)
+                guard
+                    activeDraftID == updatedDraft.id,
+                    self.storedDraft?.id == updatedDraft.id,
+                    currentDraftPages == updatedDraft.pages
+                else { return }
+                self.storedDraft = updatedDraft
+            } catch {
+                // Closing the reader retries this write and reports any failure to the user.
+            }
         }
     }
 
@@ -1769,8 +1786,11 @@ struct PageReaderView: View {
             return
         }
 
+        let pendingProgressSave = draftProgressSaveTask
+        draftProgressSaveTask = nil
         Task { @MainActor in
             do {
+                await pendingProgressSave?.value
                 try await PageReadingDraftStore.shared.delete()
                 storedDraft = nil
                 activeDraftID = nil
