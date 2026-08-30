@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import OSLog
 
 #if canImport(FoundationModels)
@@ -8,17 +9,19 @@ import FoundationModels
 actor LocalOCRCorrectionService {
     static let shared = LocalOCRCorrectionService()
 
+    private static let maximumSourceUTF8ByteCount = 1_800
+
     private var requestTail: Task<Void, Never>?
     private var requestGeneration = 0
 
-    func correctedText(for text: String, language: CaptureLanguage) async -> String? {
+    func correctedText(for text: String) async -> String? {
         requestGeneration += 1
         let generation = requestGeneration
         let previousRequest = requestTail
         let request = Task<String?, Never>(priority: .utility) {
             await previousRequest?.value
             guard !Task.isCancelled else { return nil }
-            return await Self.generateCorrection(for: text, language: language)
+            return await Self.generateCorrection(for: text)
         }
         requestTail = Task { _ = await request.value }
         let result = await request.value
@@ -28,19 +31,16 @@ actor LocalOCRCorrectionService {
         return result
     }
 
-    nonisolated private static func generateCorrection(
-        for text: String,
-        language: CaptureLanguage
-    ) async -> String? {
+    nonisolated private static func generateCorrection(for text: String) async -> String? {
         let sourceText = text.normalizedQuotesForStorage.trimmed
-        guard (8...3_000).contains(sourceText.count) else {
+        guard sourceText.count >= 8, sourceText.utf8.count <= maximumSourceUTF8ByteCount else {
             log.info("local_ocr_correction_skipped reason=text_length")
             return nil
         }
 
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *) {
-            return await generateFoundationModelCorrection(for: sourceText, language: language)
+            return await generateFoundationModelCorrection(for: sourceText)
         }
         #endif
 
@@ -51,8 +51,7 @@ actor LocalOCRCorrectionService {
     #if canImport(FoundationModels)
     @available(iOS 26.0, *)
     nonisolated private static func generateFoundationModelCorrection(
-        for sourceText: String,
-        language: CaptureLanguage
+        for sourceText: String
     ) async -> String? {
         let model = SystemLanguageModel(
             useCase: .general,
@@ -63,7 +62,10 @@ actor LocalOCRCorrectionService {
             return nil
         }
 
-        let locale = correctionLocale(for: language)
+        guard let locale = correctionLocale(for: sourceText) else {
+            log.info("local_ocr_correction_skipped reason=language_unrecognized")
+            return nil
+        }
         guard model.supportsLocale(locale) else {
             log.info("local_ocr_correction_skipped reason=locale_unsupported")
             return nil
@@ -109,11 +111,21 @@ actor LocalOCRCorrectionService {
     }
 
     @available(iOS 26.0, *)
-    nonisolated private static func correctionLocale(for language: CaptureLanguage) -> Locale {
-        switch language {
-        case .korean: Locale(identifier: "ko_KR")
-        case .english: Locale(identifier: "en_US")
-        case .japanese: Locale(identifier: "ja_JP")
+    nonisolated private static func correctionLocale(for sourceText: String) -> Locale? {
+        if sourceText.range(of: #"[가-힣]"#, options: .regularExpression) != nil {
+            return Locale(identifier: "ko_KR")
+        }
+        if sourceText.range(of: #"[ぁ-ゟ゠-ヿ]"#, options: .regularExpression) != nil {
+            return Locale(identifier: "ja_JP")
+        }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(sourceText)
+        switch recognizer.dominantLanguage {
+        case .korean: return Locale(identifier: "ko_KR")
+        case .english: return Locale(identifier: "en_US")
+        case .japanese: return Locale(identifier: "ja_JP")
+        default: return nil
         }
     }
     #endif

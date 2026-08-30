@@ -75,7 +75,7 @@ nonisolated enum AutomaticOCRCorrectionValidator {
     }
 
     private static func digitRuns(in text: String) -> [String] {
-        guard let expression = try? NSRegularExpression(pattern: #"[0-9]+"#) else { return [] }
+        guard let expression = try? NSRegularExpression(pattern: #"\p{Nd}+"#) else { return [] }
         let range = NSRange(text.startIndex..., in: text)
         return expression.matches(in: text, range: range).compactMap { match in
             guard let matchRange = Range(match.range, in: text) else { return nil }

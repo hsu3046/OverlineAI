@@ -2031,7 +2031,7 @@ final class ReadingLibrary {
     func applyAutomaticOCRCorrection(
         _ correctedText: String,
         to highlightID: Highlight.ID,
-        expectedOriginalText: String
+        expectedHighlight: Highlight
     ) -> Highlight? {
         guard
             let location = highlightLocationByID[highlightID],
@@ -2041,12 +2041,12 @@ final class ReadingLibrary {
             return nil
         }
 
-        let currentText = books[location.bookIndex].highlights[location.highlightIndex].text
-            .normalizedQuotesForStorage
-            .trimmed
-        let expectedText = expectedOriginalText.normalizedQuotesForStorage.trimmed
+        let currentHighlight = books[location.bookIndex].highlights[location.highlightIndex]
+        guard currentHighlight == expectedHighlight else { return nil }
+
+        let currentText = currentHighlight.text.normalizedQuotesForStorage.trimmed
         let correctedText = correctedText.normalizedQuotesForStorage.trimmed
-        guard currentText == expectedText, !correctedText.isEmpty, correctedText != currentText else {
+        guard !correctedText.isEmpty, correctedText != currentText else {
             return nil
         }
 
