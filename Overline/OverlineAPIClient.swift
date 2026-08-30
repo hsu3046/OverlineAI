@@ -70,10 +70,16 @@ nonisolated struct OverlineAPIClient {
         )
     }
 
-    func rankings(kind: CommunityRankingKind) async throws -> CommunityListResponse<CommunityRankingItem> {
+    func rankings(
+        kind: CommunityRankingKind,
+        category: CommunityRankingCategory
+    ) async throws -> CommunityListResponse<CommunityRankingItem> {
         try await get(
             path: "api/v1/rankings",
-            queryItems: [URLQueryItem(name: "kind", value: kind.rawValue)]
+            queryItems: [
+                URLQueryItem(name: "kind", value: kind.rawValue),
+                URLQueryItem(name: "category", value: category.rawValue)
+            ]
         )
     }
 

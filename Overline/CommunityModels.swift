@@ -14,6 +14,14 @@ nonisolated enum CommunitySection: String, CaseIterable, Identifiable {
         case .rankings: "인기 도서"
         }
     }
+
+    var systemImage: String {
+        switch self {
+        case .nearby: "location"
+        case .articles: "newspaper"
+        case .rankings: "chart.bar"
+        }
+    }
 }
 
 nonisolated enum CommunityPlaceKind: String, CaseIterable, Identifiable, Codable, Sendable {
@@ -62,6 +70,53 @@ nonisolated enum CommunityRankingKind: String, CaseIterable, Identifiable, Senda
 
     var id: String { rawValue }
     var title: String { self == .bestseller ? "베스트셀러" : "대출 순위" }
+}
+
+nonisolated enum CommunityRankingCategory: String, Identifiable, Sendable {
+    case all
+    case fiction
+    case essay
+    case humanities
+    case business
+    case selfDevelopment
+    case children
+    case literature
+    case philosophy
+    case socialScience
+    case naturalScience
+    case technology
+    case arts
+    case history
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "전체 분야"
+        case .fiction: "소설·시·희곡"
+        case .essay: "에세이"
+        case .humanities: "인문학"
+        case .business: "경제·경영"
+        case .selfDevelopment: "자기계발"
+        case .children: "어린이"
+        case .literature: "문학"
+        case .philosophy: "철학"
+        case .socialScience: "사회과학"
+        case .naturalScience: "자연과학"
+        case .technology: "기술과학"
+        case .arts: "예술"
+        case .history: "역사"
+        }
+    }
+
+    static func options(for kind: CommunityRankingKind) -> [CommunityRankingCategory] {
+        switch kind {
+        case .bestseller:
+            [.all, .fiction, .essay, .humanities, .business, .selfDevelopment, .children]
+        case .loans:
+            [.all, .literature, .philosophy, .socialScience, .naturalScience, .technology, .arts, .history]
+        }
+    }
 }
 
 nonisolated struct CommunityPlace: Identifiable, Hashable, Decodable, Sendable {

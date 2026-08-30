@@ -77,7 +77,8 @@ export function normalizeKakaoPlaces(
     if (!name || !address || distanceMeters === undefined) return [];
 
     const category = cleanText(document.category_name);
-    const inferredKind: PlaceKind = category.includes("도서관") ? "library" : fallbackKind;
+    if (!matchesPlaceCategory(category, fallbackKind)) return [];
+
     const identifier = cleanText(document.id) || `${name}-${address}`;
     const phone = cleanText(document.phone);
     const detailURL = safeHTTPURL(document.place_url);
@@ -85,8 +86,8 @@ export function normalizeKakaoPlaces(
     return [{
       id: `kakao-${identifier}`,
       name,
-      kind: inferredKind,
-      category: category || (inferredKind === "library" ? "도서관" : "서점"),
+      kind: fallbackKind,
+      category,
       address,
       distanceMeters,
       source: "kakao" as const,
@@ -94,6 +95,14 @@ export function normalizeKakaoPlaces(
       ...(detailURL ? { detailURL } : {}),
     }];
   });
+}
+
+export function matchesPlaceCategory(category: string, kind: PlaceKind): boolean {
+  const parts = category.split(">").map((part) => part.trim()).filter(Boolean);
+  if (kind === "bookstore") {
+    return parts.some((part) => part === "서점" || part.endsWith("서점"));
+  }
+  return parts.some((part) => part === "도서관" || part.endsWith("도서관"));
 }
 
 export async function searchKakaoBooks(

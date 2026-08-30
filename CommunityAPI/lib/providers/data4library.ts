@@ -1,6 +1,26 @@
 import { cleanText, fetchJSON, integerValue, safeHTTPURL } from "../http.js";
 import type { CommunityRankingItem } from "../types.js";
 
+export type Data4LibraryLoanCategory =
+  | "all"
+  | "literature"
+  | "philosophy"
+  | "socialScience"
+  | "naturalScience"
+  | "technology"
+  | "arts"
+  | "history";
+
+const data4LibraryKDCValues: Readonly<Record<Exclude<Data4LibraryLoanCategory, "all">, string>> = {
+  literature: "8",
+  philosophy: "1",
+  socialScience: "3",
+  naturalScience: "4",
+  technology: "5",
+  arts: "6",
+  history: "9",
+};
+
 interface Data4LibraryDocument {
   ranking?: string | number;
   bookname?: string;
@@ -28,6 +48,7 @@ interface Data4LibraryResponse {
 export async function fetchPopularLoans(
   page: number,
   apiKey: string,
+  category: Data4LibraryLoanCategory = "all",
   now = new Date(),
 ): Promise<CommunityRankingItem[]> {
   const endDate = new Date(now);
@@ -42,12 +63,18 @@ export async function fetchPopularLoans(
   url.searchParams.set("pageNo", String(page));
   url.searchParams.set("pageSize", "20");
   url.searchParams.set("format", "json");
+  const kdc = data4LibraryKDC(category);
+  if (kdc) url.searchParams.set("kdc", kdc);
 
   // This provider returns 406 for an explicit application/json Accept header.
   const response = await fetchJSON<Data4LibraryResponse>(url, {
     headers: { Accept: "*/*" },
   });
   return normalizePopularLoans(documentsFromData4LibraryResponse(response), page);
+}
+
+export function data4LibraryKDC(category: Data4LibraryLoanCategory): string | undefined {
+  return category === "all" ? undefined : data4LibraryKDCValues[category];
 }
 
 export function documentsFromData4LibraryResponse(response: Data4LibraryResponse): WrappedDocument[] {

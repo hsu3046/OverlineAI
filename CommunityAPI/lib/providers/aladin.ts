@@ -1,6 +1,24 @@
 import { cleanText, fetchJSON, integerValue, safeHTTPURL } from "../http.js";
 import type { BookMetadataCandidate, CommunityRankingItem } from "../types.js";
 
+export type AladinBestsellerCategory =
+  | "all"
+  | "fiction"
+  | "essay"
+  | "humanities"
+  | "business"
+  | "selfDevelopment"
+  | "children";
+
+const aladinBestsellerCategoryIDs: Readonly<Record<Exclude<AladinBestsellerCategory, "all">, string>> = {
+  fiction: "1",
+  essay: "55889",
+  humanities: "656",
+  business: "170",
+  selfDevelopment: "336",
+  children: "1108",
+};
+
 interface AladinItem {
   itemId?: number;
   title?: string;
@@ -59,12 +77,15 @@ export async function searchAladinBooks(
 export async function fetchAladinBestsellers(
   page: number,
   apiKey: string,
+  category: AladinBestsellerCategory = "all",
 ): Promise<CommunityRankingItem[]> {
+  const categoryID = aladinBestsellerCategoryID(category);
   const items = await requestAladin("ItemList.aspx", {
     QueryType: "Bestseller",
     MaxResults: "20",
     Start: String(page),
     SearchTarget: "Book",
+    ...(categoryID ? { CategoryId: categoryID } : {}),
   }, apiKey);
 
   return items.flatMap((item, index) => {
@@ -88,6 +109,10 @@ export async function fetchAladinBestsellers(
       ...(detailURL ? { detailURL } : {}),
     }];
   });
+}
+
+export function aladinBestsellerCategoryID(category: AladinBestsellerCategory): string | undefined {
+  return category === "all" ? undefined : aladinBestsellerCategoryIDs[category];
 }
 
 async function requestAladin(

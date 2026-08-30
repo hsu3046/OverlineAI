@@ -10,6 +10,8 @@ struct CommunityView: View {
     @AppStorage("overline.community.selectedSection") private var selectedSectionRaw = CommunitySection.articles.rawValue
     @State private var model = CommunityViewModel()
     @State private var locationService = CommunityLocationService()
+    @FocusState private var isArticleSearchFocused: Bool
+    @Namespace private var sectionTabNamespace
 
     @ViewBuilder
     var body: some View {
@@ -25,13 +27,10 @@ struct CommunityView: View {
             SectionHeader(title: "커뮤니티", systemImage: "person.3")
                 .communityListRow(top: 16, bottom: 10)
 
-            Picker("커뮤니티 보기", selection: selectedSectionBinding) {
-                ForEach(CommunitySection.allCases) { section in
-                    Text(section.title).tag(section)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(minHeight: 44)
+            CommunitySectionTabBar(
+                selection: selectedSectionBinding,
+                namespace: sectionTabNamespace
+            )
             .communityListRow(top: 0, bottom: 16)
 
             switch selectedSection {
@@ -52,59 +51,44 @@ struct CommunityView: View {
         }
         .task(id: loadTaskID) {
             model.selectDefaultBook(from: library)
-            if library.books.isEmpty && selectedSection == .articles {
-                selectedSectionRaw = CommunitySection.rankings.rawValue
-                return
-            }
             await loadSelectedSection()
         }
-        .onChange(of: library.books.map(\.id)) { _, bookIDs in
-            if let selectedBookID = model.selectedBookID, !bookIDs.contains(selectedBookID) {
-                model.selectedBookID = library.selectedBookID ?? bookIDs.first
-            } else {
-                model.selectDefaultBook(from: library)
-            }
+        .onChange(of: library.books.map(\.id)) { _, _ in
+            model.reconcileBooks(from: library)
         }
     }
 
     @ViewBuilder
     private var nearbyContent: some View {
-        VStack(spacing: 12) {
-            Picker("장소 종류", selection: $model.placeKind) {
-                ForEach(CommunityPlaceKind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+        HStack(spacing: 8) {
+            ForEach(CommunityPlaceKind.allCases) { kind in
+                CommunityFilterChip(
+                    title: kind.title,
+                    isSelected: model.placeKind == kind
+                ) {
+                    model.placeKind = kind
                 }
             }
-            .pickerStyle(.segmented)
 
-            HStack {
-                Label("가까운 순", systemImage: "location")
-                    .font(.overline(.caption, weight: .semibold))
-                    .foregroundStyle(Color.overlineMutedInk)
+            Spacer(minLength: 4)
 
-                Spacer()
-
-                Menu {
-                    ForEach([1_000, 3_000, 5_000, 10_000], id: \.self) { radius in
-                        Button {
-                            model.placeRadius = radius
-                        } label: {
-                            if model.placeRadius == radius {
-                                Label(radiusTitle(radius), systemImage: "checkmark")
-                            } else {
-                                Text(radiusTitle(radius))
-                            }
+            Menu {
+                ForEach([1_000, 3_000, 5_000, 10_000], id: \.self) { radius in
+                    Button {
+                        model.placeRadius = radius
+                    } label: {
+                        if model.placeRadius == radius {
+                            Label(radiusTitle(radius), systemImage: "checkmark")
+                        } else {
+                            Text(radiusTitle(radius))
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(radiusTitle(model.placeRadius))
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.overline(.caption2, weight: .semibold))
-                    }
-                    .font(.overline(.caption, weight: .semibold))
-                    .foregroundStyle(Color.overlineAccent)
                 }
+            } label: {
+                CommunityFilterMenuLabel(
+                    title: radiusTitle(model.placeRadius),
+                    systemImage: "scope"
+                )
             }
         }
         .communityListRow(top: 0, bottom: 12)
@@ -152,134 +136,189 @@ struct CommunityView: View {
 
     @ViewBuilder
     private var articleContent: some View {
-        if library.books.isEmpty {
-            CommunityMessageRow(
-                systemImage: "books.vertical",
-                title: "먼저 책을 추가해 주세요",
-                message: "책장에 담긴 책을 바탕으로 관련 글을 찾아드립니다.",
-                actionTitle: nil,
-                action: nil
-            )
-            .communityListRow(top: 8, bottom: 16)
-        } else {
-            VStack(spacing: 12) {
-                Menu {
-                    ForEach(library.books) { book in
-                        Button {
-                            model.selectedBookID = book.id
-                        } label: {
-                            if model.selectedBookID == book.id {
-                                Label(book.title, systemImage: "checkmark")
-                            } else {
-                                Text(book.title)
-                            }
-                        }
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.overline(.body, weight: .semibold))
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+
+                TextField("책 제목 또는 저자", text: articleSearchBinding)
+                    .font(.overline(.body))
+                    .foregroundStyle(Color.overlineInk)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .focused($isArticleSearchFocused)
+                    .onSubmit(performArticleSearch)
+
+                if !model.articleSearchText.isEmpty {
+                    Button {
+                        model.clearArticleSearch()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.overline(.body))
+                            .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
                     }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "book.closed")
-                            .foregroundStyle(Color.overlineAccent)
-                        Text(selectedBook?.title ?? "책 선택")
-                            .font(.overline(.body, weight: .semibold))
-                            .foregroundStyle(Color.overlineInk)
-                            .lineLimit(1)
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.overline(.caption, weight: .semibold))
-                            .foregroundStyle(Color.overlineMutedInk.opacity(0.7))
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 52)
-                    .background(Color.white.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("검색어 지우기")
                 }
 
-                Picker("글 출처", selection: $model.articleSource) {
-                    ForEach(CommunityArticleSource.allCases) { source in
-                        Text(source.title).tag(source)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                HStack {
-                    Text("책 제목과 저자로 검색")
-                        .font(.overline(.caption))
-                        .foregroundStyle(Color.overlineMutedInk)
-                    Spacer()
+                if !library.books.isEmpty {
                     Menu {
-                        ForEach(CommunityArticleSort.allCases) { sort in
+                        ForEach(library.books) { book in
                             Button {
-                                model.articleSort = sort
+                                isArticleSearchFocused = false
+                                model.selectArticleBook(book)
                             } label: {
-                                if model.articleSort == sort {
-                                    Label(sort.title, systemImage: "checkmark")
+                                if model.selectedBookID == book.id {
+                                    Label(book.title, systemImage: "checkmark")
                                 } else {
-                                    Text(sort.title)
+                                    Text(book.title)
                                 }
                             }
                         }
                     } label: {
-                        HStack(spacing: 4) {
-                            Text(model.articleSort.title)
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.overline(.caption2, weight: .semibold))
-                        }
-                        .font(.overline(.caption, weight: .semibold))
-                        .foregroundStyle(Color.overlineAccent)
+                        Image(systemName: "books.vertical")
+                            .font(.overline(.body, weight: .semibold))
+                            .foregroundStyle(Color.overlineAccent)
+                            .frame(width: 36, height: 36)
+                            .background(Color.overlineAccent.opacity(0.09), in: Circle())
+                    }
+                    .accessibilityLabel("책장에서 선택")
+                }
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .frame(minHeight: 52)
+            .background(Color.white.opacity(0.52), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.overlineInk.opacity(0.07), lineWidth: 1)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(CommunityArticleSource.allCases) { source in
+                    CommunityFilterChip(
+                        title: source.title,
+                        isSelected: model.articleSource == source
+                    ) {
+                        model.articleSource = source
                     }
                 }
-            }
-            .communityListRow(top: 0, bottom: 12)
 
-            if !model.articleWarnings.isEmpty && !model.articles.isEmpty {
-                Label("일부 출처를 불러오지 못했습니다.", systemImage: "exclamationmark.circle")
-                    .font(.overline(.caption))
-                    .foregroundStyle(Color.overlineMutedInk)
-                    .communityListRow(top: 0, bottom: 10)
-            }
+                Spacer(minLength: 4)
 
-            if let error = model.articleError {
-                CommunityMessageRow(
-                    systemImage: "wifi.exclamationmark",
-                    title: "관련 글을 불러오지 못했습니다",
-                    message: error,
-                    actionTitle: "다시 시도",
-                    action: { Task { await loadSelectedSection(force: true) } }
-                )
-                .communityListRow(top: 0, bottom: 16)
-            } else if model.isLoadingArticles && model.articles.isEmpty {
-                CommunityLoadingRow(message: "책에 관한 글을 찾고 있습니다")
-                    .communityListRow(top: 12, bottom: 16)
-            } else if model.articles.isEmpty {
-                CommunityMessageRow(
-                    systemImage: "text.magnifyingglass",
-                    title: "관련 글을 찾지 못했습니다",
-                    message: "다른 책을 선택하거나 최신순으로 확인해 보세요.",
-                    actionTitle: nil,
-                    action: nil
-                )
-                .communityListRow(top: 0, bottom: 16)
-            } else {
-                ForEach(model.articles) { article in
-                    CommunityArticleRow(article: article, openURL: openExternalURL)
-                        .communityListRow(top: 0, bottom: 10)
+                Menu {
+                    ForEach(CommunityArticleSort.allCases) { sort in
+                        Button {
+                            model.articleSort = sort
+                        } label: {
+                            if model.articleSort == sort {
+                                Label(sort.title, systemImage: "checkmark")
+                            } else {
+                                Text(sort.title)
+                            }
+                        }
+                    }
+                } label: {
+                    CommunityFilterMenuLabel(
+                        title: model.articleSort.title,
+                        systemImage: "arrow.up.arrow.down"
+                    )
                 }
+            }
+        }
+        .communityListRow(top: 0, bottom: 12)
+
+        if !model.articleWarnings.isEmpty && !model.articles.isEmpty {
+            Label("일부 출처를 불러오지 못했습니다.", systemImage: "exclamationmark.circle")
+                .font(.overline(.caption))
+                .foregroundStyle(Color.overlineMutedInk)
+                .communityListRow(top: 0, bottom: 10)
+        }
+
+        if model.articleQueryTitle.isEmpty {
+            CommunityMessageRow(
+                systemImage: "text.magnifyingglass",
+                title: "찾고 싶은 책을 입력해 주세요",
+                message: library.books.isEmpty
+                    ? "책 제목이나 저자로 관련 글을 찾을 수 있습니다."
+                    : "직접 검색하거나 책장에서 골라보세요.",
+                actionTitle: nil,
+                action: nil
+            )
+            .communityListRow(top: 0, bottom: 16)
+        } else if let error = model.articleError {
+            CommunityMessageRow(
+                systemImage: "wifi.exclamationmark",
+                title: "관련 글을 불러오지 못했습니다",
+                message: error,
+                actionTitle: "다시 시도",
+                action: { Task { await loadSelectedSection(force: true) } }
+            )
+            .communityListRow(top: 0, bottom: 16)
+        } else if model.isLoadingArticles && model.articles.isEmpty {
+            CommunityLoadingRow(message: "책에 관한 글을 찾고 있습니다")
+                .communityListRow(top: 12, bottom: 16)
+        } else if model.articles.isEmpty {
+            CommunityMessageRow(
+                systemImage: "text.magnifyingglass",
+                title: "관련 글을 찾지 못했습니다",
+                message: "검색어를 바꾸거나 최신순으로 확인해 보세요.",
+                actionTitle: nil,
+                action: nil
+            )
+            .communityListRow(top: 0, bottom: 16)
+        } else {
+            ForEach(model.articles) { article in
+                CommunityArticleRow(article: article, openURL: openExternalURL)
+                    .communityListRow(top: 0, bottom: 10)
             }
         }
     }
 
     @ViewBuilder
     private var rankingContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("순위 종류", selection: $model.rankingKind) {
+        HStack(spacing: 8) {
+            Menu {
                 ForEach(CommunityRankingKind.allCases) { kind in
-                    Text(kind.title).tag(kind)
+                    Button {
+                        model.selectRankingKind(kind)
+                    } label: {
+                        if model.rankingKind == kind {
+                            Label(kind.title, systemImage: "checkmark")
+                        } else {
+                            Text(kind.title)
+                        }
+                    }
                 }
+            } label: {
+                CommunityFilterMenuLabel(
+                    title: model.rankingKind.title,
+                    systemImage: "chart.bar"
+                )
             }
-            .pickerStyle(.segmented)
 
-            Text(model.rankingKind == .bestseller ? "알라딘 베스트셀러" : "최근 30일 전국 공공도서관 대출")
-                .font(.overline(.caption))
-                .foregroundStyle(Color.overlineMutedInk)
+            Menu {
+                ForEach(CommunityRankingCategory.options(for: model.rankingKind)) { category in
+                    Button {
+                        model.rankingCategory = category
+                    } label: {
+                        if model.rankingCategory == category {
+                            Label(category.title, systemImage: "checkmark")
+                        } else {
+                            Text(category.title)
+                        }
+                    }
+                }
+            } label: {
+                CommunityFilterMenuLabel(
+                    title: model.rankingCategory.title,
+                    systemImage: "line.3.horizontal.decrease"
+                )
+            }
+
+            Spacer(minLength: 0)
         }
         .communityListRow(top: 0, bottom: 12)
 
@@ -327,13 +366,20 @@ struct CommunityView: View {
     private var selectedSectionBinding: Binding<CommunitySection> {
         Binding(
             get: { selectedSection },
-            set: { selectedSectionRaw = $0.rawValue }
+            set: { section in
+                isArticleSearchFocused = false
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    selectedSectionRaw = section.rawValue
+                }
+            }
         )
     }
 
-    private var selectedBook: ReadingBook? {
-        guard let selectedBookID = model.selectedBookID else { return nil }
-        return library.book(with: selectedBookID)
+    private var articleSearchBinding: Binding<String> {
+        Binding(
+            get: { model.articleSearchText },
+            set: model.updateArticleSearchText
+        )
     }
 
     private var loadTaskID: String {
@@ -343,9 +389,9 @@ struct CommunityView: View {
             let coordinate = locationService.location?.coordinate
             return "nearby-\(coordinate?.latitude ?? 0)-\(coordinate?.longitude ?? 0)-\(model.placeKind.rawValue)-\(model.placeRadius)"
         case .articles:
-            return "articles-\(model.selectedBookID?.uuidString ?? "none")-\(model.articleSource.rawValue)-\(model.articleSort.rawValue)"
+            return "articles-\(model.articleQueryTitle)-\(model.articleQueryAuthor)-\(model.articleSource.rawValue)-\(model.articleSort.rawValue)"
         case .rankings:
-            return "rankings-\(model.rankingKind.rawValue)"
+            return "rankings-\(model.rankingKind.rawValue)-\(model.rankingCategory.rawValue)"
         }
     }
 
@@ -359,11 +405,17 @@ struct CommunityView: View {
             }
             await model.loadPlaces(location: location, force: force)
         case .articles:
-            guard let selectedBook else { return }
-            await model.loadArticles(book: selectedBook, force: force)
+            await model.loadArticles(force: force)
         case .rankings:
             await model.loadRankings(force: force)
         }
+    }
+
+    private func performArticleSearch() {
+        isArticleSearchFocused = false
+        let queryChanged = model.commitArticleSearch()
+        guard !model.articleQueryTitle.isEmpty, !queryChanged else { return }
+        Task { await model.loadArticles(force: true) }
     }
 
     private func openExternalURL(_ value: String?) {
@@ -386,6 +438,99 @@ struct CommunityView: View {
 
     private func radiusTitle(_ radius: Int) -> String {
         radius < 1_000 ? "\(radius)m" : "\(radius / 1_000)km"
+    }
+}
+
+private struct CommunitySectionTabBar: View {
+    @Binding var selection: CommunitySection
+    let namespace: Namespace.ID
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(CommunitySection.allCases) { section in
+                Button {
+                    selection = section
+                } label: {
+                    VStack(spacing: 7) {
+                        HStack(spacing: 6) {
+                            Image(systemName: section.systemImage)
+                                .font(.overline(.subheadline, weight: .semibold))
+                            Text(section.title)
+                                .font(.overline(.subheadline, weight: .semibold))
+                        }
+                        .foregroundStyle(selection == section ? Color.overlineAccent : Color.overlineMutedInk)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+
+                        ZStack {
+                            Color.clear.frame(height: 2)
+                            if selection == section {
+                                Capsule(style: .continuous)
+                                    .fill(Color.overlineAccent)
+                                    .frame(height: 2)
+                                    .matchedGeometryEffect(id: "community-section", in: namespace)
+                            }
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == section ? [.isSelected] : [])
+            }
+        }
+    }
+}
+
+private struct CommunityFilterChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.overline(.caption, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.overlineAccent : Color.overlineMutedInk)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 34)
+                .background(
+                    isSelected ? Color.overlineAccent.opacity(0.12) : Color.white.opacity(0.38),
+                    in: Capsule(style: .continuous)
+                )
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(
+                            isSelected ? Color.overlineAccent.opacity(0.25) : Color.overlineInk.opacity(0.06),
+                            lineWidth: 1
+                        )
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+private struct CommunityFilterMenuLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.overline(.caption, weight: .semibold))
+            Text(title)
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.overline(.caption2, weight: .bold))
+        }
+        .font(.overline(.caption, weight: .semibold))
+        .foregroundStyle(Color.overlineAccent)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 34)
+        .background(Color.white.opacity(0.46), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.overlineInk.opacity(0.06), lineWidth: 1)
+        }
     }
 }
 

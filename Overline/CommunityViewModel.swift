@@ -9,7 +9,11 @@ final class CommunityViewModel {
     var articleSource: CommunityArticleSource = .all
     var articleSort: CommunityArticleSort = .relevance
     var rankingKind: CommunityRankingKind = .bestseller
-    var selectedBookID: ReadingBook.ID?
+    var rankingCategory: CommunityRankingCategory = .all
+    var articleSearchText = ""
+    private(set) var selectedBookID: ReadingBook.ID?
+    private(set) var articleQueryTitle = ""
+    private(set) var articleQueryAuthor = ""
 
     private(set) var places: [CommunityPlace] = []
     private(set) var articles: [CommunityArticle] = []
@@ -26,14 +30,72 @@ final class CommunityViewModel {
     private var loadedPlaceKey: String?
     private var loadedArticleKey: String?
     private var loadedRankingKey: String?
+    private var selectedBookTitle = ""
+    private var selectedBookAuthor = ""
 
     init(client: OverlineAPIClient = OverlineAPIClient()) {
         self.client = client
     }
 
     func selectDefaultBook(from library: ReadingLibrary) {
-        guard selectedBookID == nil else { return }
-        selectedBookID = library.selectedBookID ?? library.books.first?.id
+        guard selectedBookID == nil, articleSearchText.trimmed.isEmpty else { return }
+        guard let book = library.selectedBook ?? library.books.first else { return }
+        selectArticleBook(book)
+    }
+
+    func reconcileBooks(from library: ReadingLibrary) {
+        if let selectedBookID, library.book(with: selectedBookID) == nil {
+            self.selectedBookID = nil
+            selectedBookTitle = ""
+            selectedBookAuthor = ""
+            articleQueryAuthor = ""
+        }
+        selectDefaultBook(from: library)
+    }
+
+    func selectArticleBook(_ book: ReadingBook) {
+        selectedBookID = book.id
+        selectedBookTitle = book.title.trimmed
+        selectedBookAuthor = book.author.trimmed
+        articleSearchText = selectedBookTitle
+        commitArticleQuery(title: selectedBookTitle, author: selectedBookAuthor)
+    }
+
+    func updateArticleSearchText(_ value: String) {
+        articleSearchText = value
+        if selectedBookID != nil, value.trimmed != selectedBookTitle {
+            selectedBookID = nil
+            selectedBookTitle = ""
+            selectedBookAuthor = ""
+        }
+    }
+
+    @discardableResult
+    func commitArticleSearch() -> Bool {
+        let title = articleSearchText.trimmed
+        guard !title.isEmpty else { return false }
+        let author = selectedBookID == nil ? "" : selectedBookAuthor
+        return commitArticleQuery(title: title, author: author)
+    }
+
+    func clearArticleSearch() {
+        articleSearchText = ""
+        selectedBookID = nil
+        selectedBookTitle = ""
+        selectedBookAuthor = ""
+        articleQueryTitle = ""
+        articleQueryAuthor = ""
+        articles = []
+        articleWarnings = []
+        articleError = nil
+        loadedArticleKey = nil
+    }
+
+    func selectRankingKind(_ kind: CommunityRankingKind) {
+        rankingKind = kind
+        if !CommunityRankingCategory.options(for: kind).contains(rankingCategory) {
+            rankingCategory = .all
+        }
     }
 
     func loadPlaces(location: CLLocation, force: Bool = false) async {
@@ -66,8 +128,9 @@ final class CommunityViewModel {
         }
     }
 
-    func loadArticles(book: ReadingBook, force: Bool = false) async {
-        let key = "\(book.id)-\(articleSource.rawValue)-\(articleSort.rawValue)"
+    func loadArticles(force: Bool = false) async {
+        guard !articleQueryTitle.isEmpty else { return }
+        let key = "\(articleQueryTitle)-\(articleQueryAuthor)-\(articleSource.rawValue)-\(articleSort.rawValue)"
         if !force, loadedArticleKey == key {
             articleError = nil
             return
@@ -78,8 +141,8 @@ final class CommunityViewModel {
         defer { isLoadingArticles = false }
         do {
             let response = try await client.articles(
-                title: book.title,
-                author: book.author,
+                title: articleQueryTitle,
+                author: articleQueryAuthor,
                 source: articleSource,
                 sort: articleSort
             )
@@ -96,7 +159,7 @@ final class CommunityViewModel {
     }
 
     func loadRankings(force: Bool = false) async {
-        let key = rankingKind.rawValue
+        let key = "\(rankingKind.rawValue)-\(rankingCategory.rawValue)"
         if !force, loadedRankingKey == key {
             rankingError = nil
             return
@@ -106,7 +169,7 @@ final class CommunityViewModel {
         rankingError = nil
         defer { isLoadingRankings = false }
         do {
-            let response = try await client.rankings(kind: rankingKind)
+            let response = try await client.rankings(kind: rankingKind, category: rankingCategory)
             guard !Task.isCancelled else { return }
             rankings = response.items
             loadedRankingKey = key
@@ -120,5 +183,18 @@ final class CommunityViewModel {
 
     private func roundedCoordinate(_ value: CLLocationDegrees) -> CLLocationDegrees {
         (value * 10_000).rounded() / 10_000
+    }
+
+    @discardableResult
+    private func commitArticleQuery(title: String, author: String) -> Bool {
+        let changed = articleQueryTitle != title || articleQueryAuthor != author
+        articleQueryTitle = title
+        articleQueryAuthor = author
+        if changed {
+            articles = []
+            articleWarnings = []
+            articleError = nil
+        }
+        return changed
     }
 }

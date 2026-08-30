@@ -4,10 +4,12 @@ import test from "node:test";
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
 import { cleanText, safeHTTPURL } from "../.build/lib/http.js";
 import {
+  data4LibraryKDC,
   documentsFromData4LibraryResponse,
   normalizePopularLoans,
 } from "../.build/lib/providers/data4library.js";
-import { normalizeKakaoPlaces } from "../.build/lib/providers/kakao.js";
+import { aladinBestsellerCategoryID } from "../.build/lib/providers/aladin.js";
+import { matchesPlaceCategory, normalizeKakaoPlaces } from "../.build/lib/providers/kakao.js";
 import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
 
 test("cleanText strips provider markup and decodes entities", () => {
@@ -24,17 +26,31 @@ test("Kakao places require a usable address and distance", () => {
     {
       id: "1",
       place_name: "동네 서점",
-      category_name: "문화,예술 > 서점",
+      category_name: "문화,예술 > 도서 > 서점",
       road_address_name: "서울시 어딘가 1",
       distance: "420",
       place_url: "http://place.map.kakao.com/1",
     },
     { id: "2", place_name: "주소 없는 곳", distance: "10" },
+    {
+      id: "3",
+      place_name: "서점 이름이 들어간 카페",
+      category_name: "음식점 > 카페 > 커피전문점",
+      road_address_name: "서울시 어딘가 2",
+      distance: "30",
+    },
   ], "bookstore");
 
   assert.equal(places.length, 1);
   assert.equal(places[0]?.distanceMeters, 420);
   assert.equal(places[0]?.detailURL, "https://place.map.kakao.com/1");
+});
+
+test("place category matching excludes keyword-only businesses", () => {
+  assert.equal(matchesPlaceCategory("문화,예술 > 도서 > 서점 > 교보문고", "bookstore"), true);
+  assert.equal(matchesPlaceCategory("음식점 > 카페 > 커피전문점", "bookstore"), false);
+  assert.equal(matchesPlaceCategory("교육,학문 > 학습시설 > 도서관 > 작은도서관", "library"), true);
+  assert.equal(matchesPlaceCategory("교육,학문 > 학교부속시설", "library"), false);
 });
 
 test("loan rankings preserve provider rank and count", () => {
@@ -57,6 +73,13 @@ test("data4library provider errors are not treated as an empty ranking", () => {
     () => documentsFromData4LibraryResponse({ response: { errCode: "AUTH", error: "not active" } }),
     /data4library_provider_error_AUTH/,
   );
+});
+
+test("ranking categories map to provider category identifiers", () => {
+  assert.equal(aladinBestsellerCategoryID("essay"), "55889");
+  assert.equal(aladinBestsellerCategoryID("all"), undefined);
+  assert.equal(data4LibraryKDC("literature"), "8");
+  assert.equal(data4LibraryKDC("all"), undefined);
 });
 
 test("article query uses the stored book and author", () => {

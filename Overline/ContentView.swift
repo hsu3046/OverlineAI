@@ -275,6 +275,7 @@ private struct OverlineBottomMenuItem: View {
             Image(systemName: tab.systemImage)
                 .font(.system(size: isCompact ? 21 : 24, weight: .semibold))
                 .frame(height: isCompact ? 24 : 26)
+                .scaleEffect(tab == .community ? 0.9 : 1)
 
             Text(tab.title)
                 .font(.overline(.caption, weight: .bold))
@@ -370,7 +371,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .capture: "text.viewfinder"
         case .library: "books.vertical"
         case .insights: "sparkles"
-        case .community: "person.3"
+        case .community: "person.2"
         }
     }
 
