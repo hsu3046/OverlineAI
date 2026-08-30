@@ -54,6 +54,7 @@ enum OverlineIntentDestination: String, AppEnum {
     case capture
     case library
     case insights
+    case community
 
     static var typeDisplayName: LocalizedStringResource { "화면" }
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "화면"
@@ -62,7 +63,8 @@ enum OverlineIntentDestination: String, AppEnum {
         [
             .capture: "캡처",
             .library: "책장",
-            .insights: "인사이트"
+            .insights: "인사이트",
+            .community: "커뮤니티"
         ]
     }
 
@@ -71,13 +73,14 @@ enum OverlineIntentDestination: String, AppEnum {
         case .capture: .capture
         case .library: .library
         case .insights: .insights
+        case .community: .community
         }
     }
 }
 
 struct OpenOverlineIntent: AppIntent {
     static let title: LocalizedStringResource = "Overline 열기"
-    static let description = IntentDescription("Overline의 캡처, 책장, 인사이트 화면을 바로 엽니다.")
+    static let description = IntentDescription("Overline의 캡처, 책장, 인사이트, 커뮤니티 화면을 바로 엽니다.")
     static let openAppWhenRun = true
 
     @Parameter(title: "화면")
@@ -230,6 +233,17 @@ struct OverlineShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "인사이트",
             systemImageName: "sparkles"
+        )
+
+        AppShortcut(
+            intent: OpenOverlineIntent(destination: .community),
+            phrases: [
+                "\(.applicationName)에서 커뮤니티 열기",
+                "\(.applicationName) 책 커뮤니티",
+                "Open community in \(.applicationName)"
+            ],
+            shortTitle: "커뮤니티",
+            systemImageName: "person.3"
         )
 
         AppShortcut(

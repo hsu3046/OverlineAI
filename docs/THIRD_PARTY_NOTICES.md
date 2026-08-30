@@ -23,3 +23,12 @@
 - Swift package: https://github.com/microsoft/onnxruntime-swift-package-manager
 - Version: `1.24.2`
 - License: MIT License
+
+## Community data providers
+
+Overline links to search results and metadata supplied by the following services through the Overline server. Content ownership remains with each provider and original publisher.
+
+- Kakao Developers: Local Search, Book Search, Daum Blog Search
+- NAVER Developers: Blog Search
+- Aladin Open API: Book Search and Bestseller List
+- 도서관 정보나루: Popular Book Loan Data

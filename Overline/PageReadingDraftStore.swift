@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-nonisolated struct PageReadingDraftPage: Codable, Sendable {
+nonisolated struct PageReadingDraftPage: Codable, Equatable, Sendable {
     let text: String
     let language: CaptureLanguage
     let recognizedLineCount: Int

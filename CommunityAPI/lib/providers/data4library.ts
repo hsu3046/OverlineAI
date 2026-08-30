@@ -1,0 +1,145 @@
+import { cleanText, fetchJSON, integerValue, safeHTTPURL } from "../http.js";
+import type { CommunityRankingItem } from "../types.js";
+
+export type Data4LibraryLoanCategory =
+  | "all"
+  | "literature"
+  | "philosophy"
+  | "socialScience"
+  | "naturalScience"
+  | "technology"
+  | "arts"
+  | "history";
+
+const data4LibraryKDCValues: Readonly<Record<Exclude<Data4LibraryLoanCategory, "all">, string>> = {
+  literature: "8",
+  philosophy: "1",
+  socialScience: "3",
+  naturalScience: "4",
+  technology: "5",
+  arts: "6",
+  history: "9",
+};
+
+interface Data4LibraryDocument {
+  ranking?: string | number;
+  bookname?: string;
+  authors?: string;
+  publisher?: string;
+  publication_year?: string;
+  isbn13?: string;
+  bookImageURL?: string;
+  bookDtlUrl?: string;
+  loan_count?: string | number;
+}
+
+interface WrappedDocument {
+  doc?: Data4LibraryDocument;
+}
+
+interface Data4LibraryResponse {
+  response?: {
+    docs?: WrappedDocument[];
+    errCode?: string | number;
+    error?: string;
+  };
+}
+
+export async function fetchPopularLoans(
+  page: number,
+  apiKey: string,
+  category: Data4LibraryLoanCategory = "all",
+  now = new Date(),
+): Promise<CommunityRankingItem[]> {
+  const { startDate, endDate } = data4LibraryLoanDateRange(now);
+
+  const url = new URL("https://data4library.kr/api/loanItemSrch");
+  url.searchParams.set("authKey", apiKey);
+  url.searchParams.set("startDt", startDate);
+  url.searchParams.set("endDt", endDate);
+  url.searchParams.set("pageNo", String(page));
+  url.searchParams.set("pageSize", "20");
+  url.searchParams.set("format", "json");
+  const kdc = data4LibraryKDC(category);
+  if (kdc) url.searchParams.set("kdc", kdc);
+
+  // This provider returns 406 for an explicit application/json Accept header.
+  const response = await fetchJSON<Data4LibraryResponse>(url, {
+    headers: { Accept: "*/*" },
+  });
+  return normalizePopularLoans(documentsFromData4LibraryResponse(response), page);
+}
+
+export function data4LibraryKDC(category: Data4LibraryLoanCategory): string | undefined {
+  return category === "all" ? undefined : data4LibraryKDCValues[category];
+}
+
+export function data4LibraryLoanDateRange(now: Date): { startDate: string; endDate: string } {
+  const koreanDate = calendarDate(now, "Asia/Seoul");
+  const endDate = new Date(Date.UTC(koreanDate.year, koreanDate.month - 1, koreanDate.day - 1));
+  const startDate = new Date(endDate);
+  startDate.setUTCDate(startDate.getUTCDate() - 29);
+  return {
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate),
+  };
+}
+
+export function documentsFromData4LibraryResponse(response: Data4LibraryResponse): WrappedDocument[] {
+  if (cleanText(response.response?.error)) {
+    const code = cleanText(String(response.response?.errCode ?? "unknown"));
+    throw new Error(`data4library_provider_error_${code}`);
+  }
+  return response.response?.docs ?? [];
+}
+
+export function normalizePopularLoans(
+  documents: WrappedDocument[],
+  page: number,
+): CommunityRankingItem[] {
+  return documents.flatMap((wrapper, index) => {
+    const document = wrapper.doc;
+    if (!document) return [];
+    const title = cleanText(document.bookname);
+    if (!title) return [];
+
+    const isbn13 = cleanText(document.isbn13);
+    const coverURL = safeHTTPURL(document.bookImageURL);
+    const detailURL = safeHTTPURL(document.bookDtlUrl);
+    const rank = integerValue(document.ranking) ?? (((page - 1) * 20) + index + 1);
+    const loanCount = integerValue(document.loan_count);
+
+    return [{
+      id: `data4library-${isbn13 || title}`,
+      rank,
+      title,
+      author: cleanText(document.authors),
+      source: "data4library" as const,
+      ...(cleanText(document.publisher) ? { publisher: cleanText(document.publisher) } : {}),
+      ...(cleanText(document.publication_year) ? { publishedDate: cleanText(document.publication_year) } : {}),
+      ...(isbn13 ? { isbn13 } : {}),
+      ...(coverURL ? { coverURL } : {}),
+      ...(detailURL ? { detailURL } : {}),
+      ...(loanCount !== undefined ? { loanCount } : {}),
+    }];
+  });
+}
+
+function formatDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function calendarDate(date: Date, timeZone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): number => {
+    const part = parts.find((candidate) => candidate.type === type)?.value;
+    if (!part) throw new Error(`missing_${type}_for_${timeZone}`);
+    return Number(part);
+  };
+  return { year: value("year"), month: value("month"), day: value("day") };
+}
