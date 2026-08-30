@@ -2416,12 +2416,19 @@ final class ReadingLibrary {
 
     private static func isUntouchedDemoSnapshot(_ snapshot: LibraryStateSnapshot) -> Bool {
         let demoTitles = Set(SampleData.books.map(\.title))
+        let demoInsightPrompts = Set(SampleData.insights.map(\.prompt))
         let snapshotTitles = Set(snapshot.books.map(\.title))
-        let highlights = snapshot.books.flatMap(\.highlights)
+        let hasUserBookContent = snapshot.books.contains { book in
+            !book.readingRecords.isEmpty || book.highlights.contains { $0.source != .sample }
+        }
+        let hasUserInsights = snapshot.insights.contains { insight in
+            !demoInsightPrompts.contains(insight.prompt)
+        }
 
         return !snapshot.books.isEmpty
             && snapshotTitles.isSubset(of: demoTitles)
-            && highlights.allSatisfy { $0.source == .sample }
+            && !hasUserBookContent
+            && !hasUserInsights
     }
 
     private static func removingDemoContent(from snapshot: LibraryStateSnapshot) -> LibraryStateSnapshot {
@@ -2430,9 +2437,10 @@ final class ReadingLibrary {
 
         let books = snapshot.books.compactMap { book -> ReadingBook? in
             let nonDemoHighlights = book.highlights.filter { $0.source != .sample }
+            let hasUserBookContent = !nonDemoHighlights.isEmpty || !book.readingRecords.isEmpty
 
             if demoBookTitles.contains(book.title) {
-                guard !nonDemoHighlights.isEmpty else { return nil }
+                guard hasUserBookContent else { return nil }
             }
 
             var sanitizedBook = book

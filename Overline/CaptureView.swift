@@ -173,8 +173,8 @@ struct CaptureView: View {
             .onChange(of: selectedTone) { _, _ in
                 scheduleAmendIfNeeded()
             }
-            .onChange(of: library.selectedBookID) { _, _ in
-                if continuationAvailableHighlightID != nil || continuationCaptureTargetID != nil {
+            .onChange(of: library.selectedBookID) { _, selectedBookID in
+                if shouldFinalizeContinuation(afterSelecting: selectedBookID) {
                     applyAmendIfNeeded(clearAfterSave: true, showConfirmation: false)
                 }
                 prefillTagsFromSelectedBookIfNeeded()
@@ -557,6 +557,13 @@ struct CaptureView: View {
             return false
         }
         return true
+    }
+
+    private func shouldFinalizeContinuation(afterSelecting selectedBookID: ReadingBook.ID?) -> Bool {
+        guard let targetID = continuationCaptureTargetID ?? continuationAvailableHighlightID else {
+            return false
+        }
+        return library.bookID(containing: targetID) != selectedBookID
     }
 
     private func continueLastSavedHighlight() {
