@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { resolveBookMetadataResults } from "../.build/lib/books.js";
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
 import { cleanText, integerQuery, integerValue, numberQuery, safeHTTPURL } from "../.build/lib/http.js";
 import {
@@ -136,6 +137,27 @@ test("ranking categories map to provider category identifiers", () => {
 test("article query uses the stored book and author", () => {
   assert.equal(buildBookQuery("[개정판] 바람의 노래", "무라카미 하루키"), "개정판 바람의 노래 무라카미 하루키 책");
   assert.equal(buildBookQuery("어린 왕자", "Unknown"), "어린 왕자 책");
+});
+
+test("book metadata fallback is incomplete when Aladin is unavailable", () => {
+  const kakaoItem = {
+    id: "kakao-book",
+    title: "책",
+    author: "저자",
+    summary: "",
+    publisher: "출판사",
+    publishedDate: "",
+    isbn: "",
+    coverURLString: "",
+    source: "kakao",
+  };
+  const result = resolveBookMetadataResults(
+    { status: "rejected", reason: new Error("timeout") },
+    { status: "fulfilled", value: [kakaoItem] },
+  );
+
+  assert.deepEqual(result.items, [kakaoItem]);
+  assert.equal(result.isComplete, false);
 });
 
 test("relevance results alternate sources", () => {

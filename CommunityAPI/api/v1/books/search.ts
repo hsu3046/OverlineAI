@@ -15,6 +15,8 @@ export default createGETHandler(async (url) => {
       message: result.message,
       fetchedAt: new Date().toISOString(),
     },
-    cacheControl: "public, s-maxage=86400, stale-while-revalidate=604800",
+    cacheControl: result.isComplete
+      ? "public, s-maxage=86400, stale-while-revalidate=604800"
+      : "no-store",
   };
 });
