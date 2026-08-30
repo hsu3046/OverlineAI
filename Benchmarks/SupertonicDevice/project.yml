@@ -1,0 +1,40 @@
+name: SupertonicDeviceBenchmark
+options:
+  minimumXcodeGenVersion: 2.46.0
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  onnxruntime:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager.git
+    exactVersion: 1.24.2
+targets:
+  SupertonicDeviceBenchmark:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Generated/Helper.swift
+        type: file
+      - path: Generated/onnx
+        type: folder
+        buildPhase: resources
+      - path: Generated/voice_styles
+        type: folder
+        buildPhase: resources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Supertonic Benchmark
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: aib.Overline.SupertonicBenchmark
+        PRODUCT_NAME: SupertonicBenchmark
+        SWIFT_VERSION: 5.0
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: 1
+    dependencies:
+      - package: onnxruntime
+        product: onnxruntime

@@ -3,3 +3,6 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 Config/Secrets.xcconfig
+Benchmarks/SupertonicDevice/Generated/
+Benchmarks/SupertonicDevice/Info.plist
+Benchmarks/SupertonicDevice/SupertonicDeviceBenchmark.xcodeproj/
