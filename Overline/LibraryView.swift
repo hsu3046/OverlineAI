@@ -866,7 +866,7 @@ private struct ScrapbookHeader: View {
                             Spacer(minLength: 0)
                         }
                         Spacer(minLength: 0)
-                        OverlineShareButton(item: book.shareText, accessibilityLabel: "전체 메모 공유")
+                        OverlineShareButton(item: book.shareText, accessibilityLabel: "책 공유")
                     }
                     .frame(maxWidth: .infinity, minHeight: 28, alignment: .center)
                 }
@@ -1269,6 +1269,32 @@ private extension ReadingBook {
     }
 
     var shareText: String {
+        let sortedReadingRecords = readingRecords.sorted { lhs, rhs in
+            if lhs.startedAt != rhs.startedAt {
+                return lhs.startedAt < rhs.startedAt
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
+        let readingRecordText = sortedReadingRecords.enumerated().map { index, record in
+            let heading = sortedReadingRecords.count > 1 ? "독서 기록 \(index + 1)" : "독서 기록"
+            var lines = [
+                heading,
+                "독서 날짜: \(readingRecordShareDateRange(for: record))"
+            ]
+
+            if let rating = record.rating {
+                lines.append("별점: \(rating.formatted(.number.precision(.fractionLength(1))))점")
+            }
+
+            let review = record.review.trimmed
+            if !review.isEmpty {
+                lines.append("감상문: \(review)")
+            }
+
+            return lines.joined(separator: "\n")
+        }
+        .joined(separator: "\n\n")
+
         let highlightText = highlights.enumerated().map { index, highlight in
             var lines = [
                 "\(index + 1). \(highlight.text)",
@@ -1289,12 +1315,28 @@ private extension ReadingBook {
         return [
             title,
             author,
+            readingRecordText,
             highlightText
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
     }
 }
+
+private func readingRecordShareDateRange(for record: ReadingRecord) -> String {
+    let start = readingRecordShareDateFormatter.string(from: record.startedAt)
+    guard let endedAt = record.endedAt else { return start }
+    let end = readingRecordShareDateFormatter.string(from: endedAt)
+    return start == end ? start : "\(start) - \(end)"
+}
+
+private let readingRecordShareDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "ko_KR")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.dateFormat = "yyyy. M. d."
+    return formatter
+}()
 
 private struct HighlighterStroke: View {
     var body: some View {

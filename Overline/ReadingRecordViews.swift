@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ReadingRecordSection: View {
     let book: ReadingBook
@@ -41,15 +42,17 @@ struct ReadingRecordSection: View {
                         .buttonStyle(.plain)
                 }
 
-                Button(action: addRecord) {
-                    Image(systemName: "plus")
-                        .font(.overline(.body, weight: .semibold))
-                        .foregroundStyle(Color.overlineAccent)
-                        .frame(width: 36, height: 36)
-                        .contentShape(Rectangle())
+                if !records.isEmpty {
+                    Button(action: addRecord) {
+                        Image(systemName: "plus")
+                            .font(.overline(.body, weight: .semibold))
+                            .foregroundStyle(Color.overlineAccent)
+                            .frame(width: 36, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("독서 기록 추가")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("독서 기록 추가")
             }
 
             if let latestRecord = records.first {
@@ -623,21 +626,99 @@ private struct ReadingRatingPicker: View {
     @Binding var rating: Double
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                ReadingRatingStars(rating: rating, size: 23)
-                Spacer(minLength: 0)
-                Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "평가 안 함")
-                    .font(.overline(.subheadline, weight: .semibold))
-                    .foregroundStyle(Color.overlineMutedInk)
-                    .monospacedDigit()
-            }
+        HStack(spacing: 10) {
+            InteractiveReadingRatingStars(rating: $rating)
+                .frame(maxWidth: .infinity)
 
-            Slider(value: $rating, in: 0...5, step: 0.5)
-                .tint(Color.overlineHighlight)
-                .accessibilityLabel("별점")
-                .accessibilityValue(rating > 0 ? "5점 만점에 \(rating)점" : "평가 안 함")
+            Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "평가 안 함")
+                .font(.overline(.subheadline, weight: .semibold))
+                .foregroundStyle(Color.overlineMutedInk)
+                .monospacedDigit()
+                .frame(width: 66, alignment: .trailing)
+
+            Button {
+                rating = 0
+                UISelectionFeedbackGenerator().selectionChanged()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.overline(.body, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.56))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(rating > 0 ? 1 : 0)
+            .allowsHitTesting(rating > 0)
+            .accessibilityHidden(rating <= 0)
+            .accessibilityLabel("별점 지우기")
         }
+    }
+}
+
+private struct InteractiveReadingRatingStars: View {
+    @Binding var rating: Double
+
+    private static let feedbackGenerator = UISelectionFeedbackGenerator()
+
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(1...5, id: \.self) { index in
+                    Image(systemName: symbolName(for: index))
+                        .font(.system(size: 30, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Color.overlineHighlight)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        updateRating(at: value.location.x, width: geometry.size.width)
+                    }
+            )
+        }
+        .frame(height: 48)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("별점")
+        .accessibilityValue(rating > 0 ? "5점 만점에 \(rating)점" : "평가 안 함")
+        .accessibilityHint("별을 탭하거나 쓸어 별점을 선택합니다")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                setRating(min(5, max(0.5, rating + 0.5)))
+            case .decrement:
+                setRating(rating <= 0.5 ? 0 : rating - 0.5)
+            @unknown default:
+                break
+            }
+        }
+        .onAppear {
+            Self.feedbackGenerator.prepare()
+        }
+    }
+
+    private func updateRating(at locationX: CGFloat, width: CGFloat) {
+        guard width > 0 else { return }
+        let clampedX = min(max(locationX, 0), width)
+        let halfStarStep = min(10, max(1, Int(ceil((clampedX / width) * 10))))
+        setRating(Double(halfStarStep) / 2)
+    }
+
+    private func setRating(_ newRating: Double) {
+        guard rating != newRating else { return }
+        rating = newRating
+        Self.feedbackGenerator.selectionChanged()
+        Self.feedbackGenerator.prepare()
+    }
+
+    private func symbolName(for index: Int) -> String {
+        let threshold = Double(index)
+        if rating >= threshold { return "star.fill" }
+        if rating >= threshold - 0.5 { return "star.leadinghalf.filled" }
+        return "star"
     }
 }
 
