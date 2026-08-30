@@ -750,14 +750,14 @@ struct PageReadingTextResult {
 struct PageReadingTextProcessor {
     func process(_ recognition: CameraFrozenFrameRecognitionResult) throws -> PageReadingTextResult {
         let pageLines = linesInsideDetectedPage(recognition)
-        let referenceBox = recognition.page?.boundingBox ?? boundingBox(for: pageLines)
-        let bodyLines = pageLines.filter { line in
-            !isPageMarginMetadata(line, referenceBox: referenceBox)
-        }
+        let bodyLines = OCRPageMarginMetadataFilter.bodyLines(
+            from: pageLines,
+            pageBoundingBox: recognition.page?.boundingBox
+        )
         let text = OCRTextAssembler(
             pageLines: bodyLines,
             selectedLines: bodyLines,
-            trimsBoundaryFragments: false
+            boundaryTrimming: .none
         )
         .assembledText()
         .trimmed
@@ -794,29 +794,6 @@ struct PageReadingTextProcessor {
             : recognition.lines
     }
 
-    private func isPageMarginMetadata(
-        _ line: CameraRecognizedTextLine,
-        referenceBox: CGRect?
-    ) -> Bool {
-        guard let referenceBox, referenceBox.height > 0.001 else { return false }
-
-        let relativeY = (line.boundingBox.midY - referenceBox.minY) / referenceBox.height
-        let edgeDistance = min(abs(relativeY), abs(1 - relativeY))
-        guard edgeDistance <= 0.14 else { return false }
-        guard line.text.count <= 48 else { return false }
-
-        return PageReferenceInference.inferredPageReference(
-            from: [PageReferenceLine(text: line.text, boundingBox: line.boundingBox)],
-            pageBoundingBox: referenceBox
-        ) != nil
-    }
-
-    private func boundingBox(for lines: [CameraRecognizedTextLine]) -> CGRect? {
-        guard let firstLine = lines.first else { return nil }
-        return lines.dropFirst().reduce(firstLine.boundingBox) { result, line in
-            result.union(line.boundingBox)
-        }
-    }
 }
 
 private enum PageReaderStage {

@@ -650,7 +650,27 @@ struct ScrapbookView: View {
                     }
                     .listRowChrome(top: 16, bottom: 18)
 
+                    ReadingRecordSection(
+                        book: book,
+                        addRecord: {
+                            presentedSheet = .editReadingRecord(book.id, nil)
+                        },
+                        editRecord: { recordID in
+                            presentedSheet = .editReadingRecord(book.id, recordID)
+                        },
+                        showHistory: {
+                            presentedSheet = .readingRecordHistory(book.id)
+                        }
+                    )
+                    .listRowChrome(top: 0, bottom: 16)
+
                     if !book.highlights.isEmpty {
+                        Rectangle()
+                            .fill(Color.overlineInk.opacity(0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 1)
+                            .listRowChrome(top: 0, bottom: 18)
+
                         OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
                             .listRowChrome(top: 0, bottom: 12)
                     }
@@ -687,11 +707,21 @@ struct ScrapbookView: View {
                     }
 
                     if highlights.isEmpty && pendingDeletedHighlight == nil {
-                        ContentUnavailableView(
-                            "검색 결과 없음",
-                            systemImage: "magnifyingglass",
-                            description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
-                        )
+                        Group {
+                            if book.highlights.isEmpty {
+                                ContentUnavailableView(
+                                    "아직 글조각이 없습니다",
+                                    systemImage: "text.quote",
+                                    description: Text("캡처 탭에서 간직하고 싶은 문장을 저장해 보세요.")
+                                )
+                            } else {
+                                ContentUnavailableView(
+                                    "검색 결과 없음",
+                                    systemImage: "magnifyingglass",
+                                    description: Text("다른 글조각, 태그, 메모로 찾아보세요.")
+                                )
+                            }
+                        }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
                         .listRowChrome(top: 0, bottom: 16)
@@ -712,6 +742,14 @@ struct ScrapbookView: View {
                         HighlightEditorSheet(highlightID: highlightID) { highlightID in
                             deleteHighlight(highlightID)
                         }
+                            .presentationDetents([.large])
+                            .presentationDragIndicator(.visible)
+                    case .readingRecordHistory(let bookID):
+                        ReadingRecordHistorySheet(bookID: bookID)
+                            .presentationDetents([.large])
+                            .presentationDragIndicator(.visible)
+                    case .editReadingRecord(let bookID, let recordID):
+                        ReadingRecordEditorSheet(bookID: bookID, recordID: recordID)
                             .presentationDetents([.large])
                             .presentationDragIndicator(.visible)
                     }
@@ -800,11 +838,16 @@ struct ScrapbookView: View {
 private enum ScrapbookSheet: Identifiable {
     case editBook(ReadingBook.ID)
     case editHighlight(Highlight.ID)
+    case readingRecordHistory(ReadingBook.ID)
+    case editReadingRecord(ReadingBook.ID, ReadingRecord.ID?)
 
     var id: String {
         switch self {
         case .editBook(let id): "editBook-\(id.uuidString)"
         case .editHighlight(let id): "editHighlight-\(id.uuidString)"
+        case .readingRecordHistory(let id): "readingRecordHistory-\(id.uuidString)"
+        case .editReadingRecord(let bookID, let recordID):
+            "editReadingRecord-\(bookID.uuidString)-\(recordID?.uuidString ?? "new")"
         }
     }
 }
@@ -839,7 +882,7 @@ private struct ScrapbookHeader: View {
                             Spacer(minLength: 0)
                         }
                         Spacer(minLength: 0)
-                        OverlineShareButton(item: book.shareText, accessibilityLabel: "전체 메모 공유")
+                        OverlineShareButton(item: book.shareText, accessibilityLabel: "책 공유")
                     }
                     .frame(maxWidth: .infinity, minHeight: 28, alignment: .center)
                 }
@@ -1242,6 +1285,32 @@ private extension ReadingBook {
     }
 
     var shareText: String {
+        let sortedReadingRecords = readingRecords.sorted { lhs, rhs in
+            if lhs.startedAt != rhs.startedAt {
+                return lhs.startedAt < rhs.startedAt
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
+        let readingRecordText = sortedReadingRecords.enumerated().map { index, record in
+            let heading = sortedReadingRecords.count > 1 ? "독서 기록 \(index + 1)" : "독서 기록"
+            var lines = [
+                heading,
+                "독서 날짜: \(readingRecordShareDateRange(for: record))"
+            ]
+
+            if let rating = record.rating {
+                lines.append("별점: \(rating.formatted(.number.precision(.fractionLength(1))))점")
+            }
+
+            let review = record.review.trimmed
+            if !review.isEmpty {
+                lines.append("감상문: \(review)")
+            }
+
+            return lines.joined(separator: "\n")
+        }
+        .joined(separator: "\n\n")
+
         let highlightText = highlights.enumerated().map { index, highlight in
             var lines = [
                 "\(index + 1). \(highlight.text)",
@@ -1262,12 +1331,28 @@ private extension ReadingBook {
         return [
             title,
             author,
+            readingRecordText,
             highlightText
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n\n")
     }
 }
+
+private func readingRecordShareDateRange(for record: ReadingRecord) -> String {
+    let start = readingRecordShareDateFormatter.string(from: record.startedAt)
+    guard let endedAt = record.endedAt else { return start }
+    let end = readingRecordShareDateFormatter.string(from: endedAt)
+    return start == end ? start : "\(start) - \(end)"
+}
+
+private let readingRecordShareDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "ko_KR")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.dateFormat = "yyyy. M. d."
+    return formatter
+}()
 
 private struct HighlighterStroke: View {
     var body: some View {

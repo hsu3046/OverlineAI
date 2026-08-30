@@ -208,6 +208,64 @@ nonisolated struct LibraryInsight: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+nonisolated enum ReadingStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case reading
+    case completed
+    case paused
+    case abandoned
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .reading: "읽는 중"
+        case .completed: "완독"
+        case .paused: "잠시 멈춤"
+        case .abandoned: "중단"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .reading: "book.pages"
+        case .completed: "checkmark.circle"
+        case .paused: "pause.circle"
+        case .abandoned: "stop.circle"
+        }
+    }
+}
+
+nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
+    var id: UUID
+    var startedAt: Date
+    var endedAt: Date?
+    var status: ReadingStatus
+    var rating: Double?
+    var review: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        startedAt: Date,
+        endedAt: Date? = nil,
+        status: ReadingStatus,
+        rating: Double? = nil,
+        review: String = "",
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.status = status
+        self.rating = rating
+        self.review = review
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 struct DeletedHighlightSnapshot: Identifiable, Hashable {
     let id = UUID()
     let highlight: Highlight
@@ -986,6 +1044,7 @@ nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
     var metadataSource: BookMetadataSource?
     var coverTheme: CoverTheme
     var highlights: [Highlight]
+    var readingRecords: [ReadingRecord]
 
     init(
         id: UUID = UUID(),
@@ -999,7 +1058,8 @@ nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
         coverURLString: String? = nil,
         metadataSource: BookMetadataSource? = .manual,
         coverTheme: CoverTheme,
-        highlights: [Highlight]
+        highlights: [Highlight],
+        readingRecords: [ReadingRecord] = []
     ) {
         self.id = id
         self.title = title
@@ -1013,6 +1073,7 @@ nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
         self.metadataSource = metadataSource
         self.coverTheme = coverTheme
         self.highlights = highlights
+        self.readingRecords = readingRecords
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1028,6 +1089,7 @@ nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
         case metadataSource
         case coverTheme
         case highlights
+        case readingRecords
     }
 
     init(from decoder: Decoder) throws {
@@ -1044,6 +1106,7 @@ nonisolated struct ReadingBook: Identifiable, Hashable, Codable, Sendable {
         metadataSource = try container.decodeIfPresent(BookMetadataSource.self, forKey: .metadataSource)
         coverTheme = try container.decode(CoverTheme.self, forKey: .coverTheme)
         highlights = try container.decode([Highlight].self, forKey: .highlights)
+        readingRecords = try container.decodeIfPresent([ReadingRecord].self, forKey: .readingRecords) ?? []
     }
 }
 
@@ -1316,6 +1379,11 @@ private struct CapturedHighlightMetadata {
 struct PageReferenceLine {
     let text: String
     let boundingBox: CGRect
+
+    nonisolated init(text: String, boundingBox: CGRect) {
+        self.text = text
+        self.boundingBox = boundingBox
+    }
 }
 
 enum PageReferenceInference {
@@ -1329,6 +1397,26 @@ enum PageReferenceInference {
             .sorted { $0.score < $1.score }
             .first?
             .pageReference
+    }
+
+    nonisolated static func isDedicatedPageReferenceLine(
+        _ line: PageReferenceLine,
+        pageBoundingBox: CGRect?
+    ) -> Bool {
+        let text = line.text.trimmed
+        guard text.range(
+            of: #"(?i)^\s*(?:(?:p|pp|page)\.?\s*)?\d{1,4}(?:\s*[-–~]\s*\d{1,4})?\s*(?:쪽|페이지)?\s*$"#,
+            options: .regularExpression
+        ) != nil else {
+            return false
+        }
+        guard let extraction = pageNumberExtraction(from: text) else { return false }
+        switch extraction.position {
+        case .marked, .standalone:
+            return candidate(from: line, referenceBox: pageBoundingBox) != nil
+        case .leading, .trailing:
+            return false
+        }
     }
 
     nonisolated private static func candidate(
@@ -1806,6 +1894,67 @@ final class ReadingLibrary {
     }
 
     @discardableResult
+    func addReadingRecord(
+        to bookID: ReadingBook.ID,
+        startedAt: Date,
+        endedAt: Date?,
+        status: ReadingStatus,
+        rating: Double?,
+        review: String
+    ) -> ReadingRecord? {
+        guard let bookIndex = books.firstIndex(where: { $0.id == bookID }) else { return nil }
+
+        let record = ReadingRecord(
+            startedAt: Self.normalizedReadingDate(startedAt),
+            endedAt: Self.normalizedReadingEndDate(endedAt, startedAt: startedAt),
+            status: status,
+            rating: Self.normalizedReadingRating(rating),
+            review: String(review.normalizedQuotesForStorage.trimmed.prefix(3_000))
+        )
+        books[bookIndex].readingRecords.insert(record, at: 0)
+        persist()
+        return record
+    }
+
+    func updateReadingRecord(
+        _ recordID: ReadingRecord.ID,
+        in bookID: ReadingBook.ID,
+        startedAt: Date,
+        endedAt: Date?,
+        status: ReadingStatus,
+        rating: Double?,
+        review: String
+    ) {
+        guard
+            let bookIndex = books.firstIndex(where: { $0.id == bookID }),
+            let recordIndex = books[bookIndex].readingRecords.firstIndex(where: { $0.id == recordID })
+        else {
+            return
+        }
+
+        books[bookIndex].readingRecords[recordIndex].startedAt = Self.normalizedReadingDate(startedAt)
+        books[bookIndex].readingRecords[recordIndex].endedAt = Self.normalizedReadingEndDate(
+            endedAt,
+            startedAt: startedAt
+        )
+        books[bookIndex].readingRecords[recordIndex].status = status
+        books[bookIndex].readingRecords[recordIndex].rating = Self.normalizedReadingRating(rating)
+        books[bookIndex].readingRecords[recordIndex].review = String(
+            review.normalizedQuotesForStorage.trimmed.prefix(3_000)
+        )
+        books[bookIndex].readingRecords[recordIndex].updatedAt = .now
+        persist()
+    }
+
+    func deleteReadingRecord(_ recordID: ReadingRecord.ID, in bookID: ReadingBook.ID) {
+        guard let bookIndex = books.firstIndex(where: { $0.id == bookID }) else { return }
+        let originalCount = books[bookIndex].readingRecords.count
+        books[bookIndex].readingRecords.removeAll { $0.id == recordID }
+        guard books[bookIndex].readingRecords.count != originalCount else { return }
+        persist()
+    }
+
+    @discardableResult
     func addCapturedHighlight(
         text: String,
         memo: String,
@@ -1842,6 +1991,40 @@ final class ReadingLibrary {
         append(highlight, to: targetBookID)
         persist()
         return highlight
+    }
+
+    @discardableResult
+    func applyCaptureContinuation(
+        firstPageText: String,
+        secondPageText: String,
+        to highlightID: Highlight.ID,
+        expectedOriginalText: String
+    ) -> Highlight? {
+        guard
+            let location = highlightLocationByID[highlightID],
+            books.indices.contains(location.bookIndex),
+            books[location.bookIndex].highlights.indices.contains(location.highlightIndex)
+        else {
+            return nil
+        }
+
+        let currentText = books[location.bookIndex].highlights[location.highlightIndex].text
+            .normalizedQuotesForStorage
+            .trimmed
+        let expectedText = expectedOriginalText.normalizedQuotesForStorage.trimmed
+        guard currentText == expectedText else { return nil }
+
+        let firstPageText = firstPageText.normalizedQuotesForStorage.trimmed
+        let secondPageText = secondPageText.normalizedQuotesForStorage.trimmed
+        guard !firstPageText.isEmpty, !secondPageText.isEmpty else { return nil }
+
+        let separator = OCRLineJoiner.inlineSeparator(between: firstPageText, and: secondPageText)
+        let combinedText = "\(firstPageText)\(separator)\(secondPageText)".trimmed
+
+        books[location.bookIndex].highlights[location.highlightIndex].text = combinedText
+        books[location.bookIndex].highlights[location.highlightIndex].language = CaptureLanguage.detect(from: combinedText)
+        persist()
+        return books[location.bookIndex].highlights[location.highlightIndex]
     }
 
     @discardableResult
@@ -2082,6 +2265,22 @@ final class ReadingLibrary {
         suggestedTags(for: bookID)
     }
 
+    private static func normalizedReadingDate(_ date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    private static func normalizedReadingEndDate(_ endDate: Date?, startedAt: Date) -> Date? {
+        guard let endDate else { return nil }
+        let normalizedStart = normalizedReadingDate(startedAt)
+        let normalizedEnd = normalizedReadingDate(endDate)
+        return max(normalizedStart, normalizedEnd)
+    }
+
+    private static func normalizedReadingRating(_ rating: Double?) -> Double? {
+        guard let rating, rating > 0 else { return nil }
+        return min(max((rating * 2).rounded() / 2, 0.5), 5)
+    }
+
     private func persist() {
         refreshDerivedState()
         let snapshot = currentSnapshot
@@ -2217,12 +2416,19 @@ final class ReadingLibrary {
 
     private static func isUntouchedDemoSnapshot(_ snapshot: LibraryStateSnapshot) -> Bool {
         let demoTitles = Set(SampleData.books.map(\.title))
+        let demoInsightPrompts = Set(SampleData.insights.map(\.prompt))
         let snapshotTitles = Set(snapshot.books.map(\.title))
-        let highlights = snapshot.books.flatMap(\.highlights)
+        let hasUserBookContent = snapshot.books.contains { book in
+            !book.readingRecords.isEmpty || book.highlights.contains { $0.source != .sample }
+        }
+        let hasUserInsights = snapshot.insights.contains { insight in
+            !demoInsightPrompts.contains(insight.prompt)
+        }
 
         return !snapshot.books.isEmpty
             && snapshotTitles.isSubset(of: demoTitles)
-            && highlights.allSatisfy { $0.source == .sample }
+            && !hasUserBookContent
+            && !hasUserInsights
     }
 
     private static func removingDemoContent(from snapshot: LibraryStateSnapshot) -> LibraryStateSnapshot {
@@ -2231,9 +2437,10 @@ final class ReadingLibrary {
 
         let books = snapshot.books.compactMap { book -> ReadingBook? in
             let nonDemoHighlights = book.highlights.filter { $0.source != .sample }
+            let hasUserBookContent = !nonDemoHighlights.isEmpty || !book.readingRecords.isEmpty
 
             if demoBookTitles.contains(book.title) {
-                guard !nonDemoHighlights.isEmpty else { return nil }
+                guard hasUserBookContent else { return nil }
             }
 
             var sanitizedBook = book
