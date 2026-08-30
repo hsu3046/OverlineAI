@@ -923,6 +923,12 @@ private struct QuoteSpeechSettingsView: View {
                 SpeechEnginePicker(selection: engineBinding)
                     .listRowSeparator(.hidden, edges: .bottom)
 
+                SpeechPlaybackControls(
+                    rateMultiplier: speechRateBinding,
+                    sentencePause: sentencePauseBinding
+                )
+                .settingsRowSeparator()
+
                 if player.speechEngineChoice == .supertonic {
                     supertonicSettings
                 } else {
@@ -1102,6 +1108,20 @@ private struct QuoteSpeechSettingsView: View {
         Binding(
             get: { player.supertonicQuality },
             set: { player.setSupertonicQuality($0) }
+        )
+    }
+
+    private var speechRateBinding: Binding<Double> {
+        Binding(
+            get: { player.speechRateMultiplier },
+            set: { player.setSpeechRateMultiplier($0) }
+        )
+    }
+
+    private var sentencePauseBinding: Binding<Double> {
+        Binding(
+            get: { player.sentencePause },
+            set: { player.setSentencePause($0) }
         )
     }
 

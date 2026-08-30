@@ -1024,16 +1024,17 @@ struct ScrapbookCard: View {
             HStack(alignment: .center, spacing: 10) {
                 HighlightMetaBar(highlight: highlight)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 2) {
+                HStack(spacing: 8) {
                     QuoteSpeechButton(highlight: highlight)
                     OverlineShareButton(
                         item: highlight.shareText(bookTitle: shareBookTitle ?? book?.title),
                         accessibilityLabel: "공유",
-                        iconYOffset: -2
+                        iconYOffset: -2,
+                        controlSize: CGSize(width: 36, height: 32)
                     )
                 }
             }
-            .frame(minHeight: 26, alignment: .center)
+            .frame(minHeight: 32, alignment: .center)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1116,7 +1117,7 @@ private struct QuoteSpeechButton: View {
                         : Color.overlineMutedInk.opacity(0.46)
                 )
                 .contentTransition(.symbolEffect(.replace))
-                .frame(width: 30, height: 26)
+                .frame(width: 36, height: 32)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1146,6 +1147,7 @@ private struct OverlineShareButton: View {
     let item: String
     let accessibilityLabel: String
     var iconYOffset: CGFloat = 0
+    var controlSize = CGSize(width: 30, height: 26)
 
     var body: some View {
         ShareLink(item: item) {
@@ -1154,7 +1156,7 @@ private struct OverlineShareButton: View {
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
                 .offset(y: iconYOffset)
-                .frame(width: 30, height: 26)
+                .frame(width: controlSize.width, height: controlSize.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

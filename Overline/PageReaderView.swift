@@ -121,6 +121,12 @@ nonisolated private enum ReadingCueTokenizer {
     }
 }
 
+private struct SystemReadingUtteranceContext {
+    let pageIndex: Int
+    let cueIndex: Int
+    let sourceLocation: Int
+}
+
 @MainActor
 @Observable
 final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
@@ -135,10 +141,15 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var playbackErrorMessage: String?
     private(set) var activeCueIndex = 0
     private(set) var speechRateMultiplier: Float = 1
+    private(set) var sentencePause = SpeechPlaybackPreferences.defaultSentencePause
     fileprivate private(set) var lyricsCues: [ReadingLyricsCue] = []
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
+    @ObservationIgnored private var systemUtteranceContexts: [ObjectIdentifier: SystemReadingUtteranceContext] = [:]
+    @ObservationIgnored private var systemUtterances: [ObjectIdentifier: AVSpeechUtterance] = [:]
+    @ObservationIgnored private var systemUtteranceOrder: [ObjectIdentifier] = []
+    @ObservationIgnored private var refreshSystemQueueAfterCurrentSentence = false
     @ObservationIgnored private weak var voiceSettings: QuoteSpeechPlayer?
     @ObservationIgnored private var currentUtteranceSourceLocation = 0
     @ObservationIgnored private var pendingStartCueIndex: Int?
@@ -273,7 +284,9 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func updateSpeechRateMultiplier(_ multiplier: Float) {
-        let normalizedMultiplier = min(max(multiplier, 0.8), 1.4)
+        let normalizedMultiplier = Float(
+            SpeechPlaybackPreferences.normalizedRate(Double(multiplier))
+        )
         guard abs(speechRateMultiplier - normalizedMultiplier) > 0.001 else { return }
 
         speechRateMultiplier = normalizedMultiplier
@@ -294,6 +307,33 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
             pendingStartCueIndex = cueIndex
         } else {
             speakCurrentPage(startingAtCueIndex: cueIndex)
+        }
+    }
+
+    func updateSentencePause(_ pause: Double) {
+        let normalizedPause = SpeechPlaybackPreferences.normalizedSentencePause(pause)
+        guard abs(sentencePause - normalizedPause) > 0.001 else { return }
+
+        sentencePause = normalizedPause
+        if activePlaybackUsesSupertonic {
+            let currentID: ReadingLyricsCueID? = if
+                pages.indices.contains(currentPageIndex),
+                pages[currentPageIndex].cues.indices.contains(activeCueIndex)
+            {
+                ReadingLyricsCueID(
+                    pageID: pages[currentPageIndex].id,
+                    cueID: pages[currentPageIndex].cues[activeCueIndex].id
+                )
+            } else {
+                nil
+            }
+            let prefetchedIDs = supertonicSynthesisTasks.keys.filter { $0 != currentID }
+            for id in prefetchedIDs {
+                supertonicSynthesisTasks[id]?.cancel()
+                supertonicSynthesisTasks[id] = nil
+            }
+        } else if currentUtterance != nil {
+            refreshSystemQueueAfterCurrentSentence = true
         }
     }
 
@@ -318,6 +358,16 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
                     text: cue.text
                 )
             }
+        }
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didStart utterance: AVSpeechUtterance
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.startIfQueued(utteranceID)
         }
     }
 
@@ -362,23 +412,55 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
             startSupertonicCue(pageIndex: currentPageIndex, cueIndex: cueIndex)
             return
         }
-        let sourceLocation = page.cues.indices.contains(cueIndex)
-            ? page.cues[cueIndex].range.location
-            : 0
-        let sourceText = (page.text as NSString).substring(from: sourceLocation)
-        let utterance = voiceSettings.configuredUtterance(
-            for: sourceText,
-            language: page.language,
-            rateMultiplier: speechRateMultiplier
+        let utterances = queuedSystemUtterances(
+            startingAtPageIndex: currentPageIndex,
+            cueIndex: cueIndex,
+            voiceSettings: voiceSettings
         )
-        currentUtterance = utterance
-        currentUtteranceSourceLocation = sourceLocation
+        guard !utterances.isEmpty else { return }
+
+        currentUtterance = utterances.first
+        currentUtteranceSourceLocation = page.cues[cueIndex].range.location
         pendingStartCueIndex = nil
         activeCueIndex = cueIndex
         isSpeaking = true
         isPaused = false
         isWaitingForNextPage = false
-        activeSynthesizer().speak(utterance)
+        let synthesizer = activeSynthesizer()
+        for utterance in utterances {
+            synthesizer.speak(utterance)
+        }
+    }
+
+    private func queuedSystemUtterances(
+        startingAtPageIndex startPageIndex: Int,
+        cueIndex startCueIndex: Int,
+        voiceSettings: QuoteSpeechPlayer
+    ) -> [AVSpeechUtterance] {
+        guard pages.indices.contains(startPageIndex) else { return [] }
+        var utterances: [AVSpeechUtterance] = []
+        let page = pages[startPageIndex]
+        guard page.cues.indices.contains(startCueIndex) else { return [] }
+
+        for cueIndex in startCueIndex..<page.cues.count {
+            let cue = page.cues[cueIndex]
+            let utterance = voiceSettings.configuredUtterance(
+                for: cue.text,
+                language: page.language,
+                rateMultiplier: speechRateMultiplier,
+                sentencePause: sentencePause
+            )
+            let utteranceID = ObjectIdentifier(utterance)
+            systemUtteranceContexts[utteranceID] = SystemReadingUtteranceContext(
+                pageIndex: startPageIndex,
+                cueIndex: cueIndex,
+                sourceLocation: cue.range.location
+            )
+            systemUtterances[utteranceID] = utterance
+            systemUtteranceOrder.append(utteranceID)
+            utterances.append(utterance)
+        }
+        return utterances
     }
 
     private func stopPlayback() {
@@ -393,6 +475,10 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         isPreparingSpeech = false
         currentUtterance = nil
         currentUtteranceSourceLocation = 0
+        systemUtteranceContexts.removeAll()
+        systemUtterances.removeAll()
+        systemUtteranceOrder.removeAll()
+        refreshSystemQueueAfterCurrentSentence = false
         if let synthesizer, synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
         }
@@ -469,7 +555,8 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         return Task {
             try await voiceSettings.synthesizeSupertonic(
                 text: text,
-                speedMultiplier: speed
+                speedMultiplier: speed,
+                sentencePause: sentencePause
             )
         }
     }
@@ -557,20 +644,49 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         return (nextPageIndex, 0, pages[nextPageIndex], firstCue)
     }
 
-    private func finishIfCurrent(_ utteranceID: ObjectIdentifier) {
+    private func startIfQueued(_ utteranceID: ObjectIdentifier) {
         guard
-            let currentUtterance,
-            ObjectIdentifier(currentUtterance) == utteranceID
+            let context = systemUtteranceContexts[utteranceID],
+            let utterance = systemUtterances[utteranceID]
         else {
             return
         }
+        currentUtterance = utterance
+        currentPageIndex = context.pageIndex
+        activeCueIndex = context.cueIndex
+        currentUtteranceSourceLocation = context.sourceLocation
+        isSpeaking = true
+        isPaused = false
+        isWaitingForNextPage = false
+    }
 
-        self.currentUtterance = nil
-        currentUtteranceSourceLocation = 0
+    private func finishIfCurrent(_ utteranceID: ObjectIdentifier) {
+        guard systemUtteranceContexts.removeValue(forKey: utteranceID) != nil else { return }
+        systemUtterances.removeValue(forKey: utteranceID)
+        systemUtteranceOrder.removeAll(where: { $0 == utteranceID })
+
+        if let currentUtterance,
+           ObjectIdentifier(currentUtterance) == utteranceID {
+            self.currentUtterance = nil
+            currentUtteranceSourceLocation = 0
+        }
+
+        if
+            refreshSystemQueueAfterCurrentSentence,
+            let nextUtteranceID = systemUtteranceOrder.first,
+            let nextContext = systemUtteranceContexts[nextUtteranceID]
+        {
+            refreshSystemQueueAfterCurrentSentence = false
+            currentPageIndex = nextContext.pageIndex
+            speakCurrentPage(startingAtCueIndex: nextContext.cueIndex)
+            return
+        }
+
+        guard systemUtteranceOrder.isEmpty else { return }
+        refreshSystemQueueAfterCurrentSentence = false
         pendingStartCueIndex = nil
         isSpeaking = false
         isPaused = false
-
         if canMoveForward {
             currentPageIndex += 1
             speakCurrentPage()
@@ -580,17 +696,14 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     private func cancelIfCurrent(_ utteranceID: ObjectIdentifier) {
-        guard
-            let currentUtterance,
-            ObjectIdentifier(currentUtterance) == utteranceID
-        else {
-            return
+        guard systemUtteranceContexts.removeValue(forKey: utteranceID) != nil else { return }
+        systemUtterances.removeValue(forKey: utteranceID)
+        systemUtteranceOrder.removeAll(where: { $0 == utteranceID })
+        if let currentUtterance,
+           ObjectIdentifier(currentUtterance) == utteranceID {
+            self.currentUtterance = nil
+            currentUtteranceSourceLocation = 0
         }
-
-        self.currentUtterance = nil
-        currentUtteranceSourceLocation = 0
-        isSpeaking = false
-        isPaused = false
     }
 
     private func updateActiveCue(
@@ -598,19 +711,14 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         utteranceID: ObjectIdentifier
     ) {
         guard
-            let currentUtterance,
-            ObjectIdentifier(currentUtterance) == utteranceID,
-            let currentPage
+            let context = systemUtteranceContexts[utteranceID],
+            pages.indices.contains(context.pageIndex)
         else {
             return
         }
-
-        let absoluteSpokenLocation = currentUtteranceSourceLocation + spokenRange.location
-        let cueIndex = currentPage.cues.lastIndex { cue in
-            cue.range.location <= absoluteSpokenLocation
-        } ?? 0
-        guard activeCueIndex != cueIndex else { return }
-        activeCueIndex = cueIndex
+        currentPageIndex = context.pageIndex
+        activeCueIndex = context.cueIndex
+        currentUtteranceSourceLocation = context.sourceLocation + spokenRange.location
     }
 
     private func activeSynthesizer() -> AVSpeechSynthesizer {
@@ -805,57 +913,23 @@ private struct PageReaderLyricsStage: View {
     }
 }
 
-private enum PageReadingSpeed: Double, CaseIterable, Identifiable {
-    case relaxed = 0.8
-    case normal = 1.0
-    case brisk = 1.2
-    case fast = 1.4
-
-    var id: Double { rawValue }
-
-    var title: String {
-        String(format: "%.1f×", rawValue)
-    }
-}
-
 private struct PageReaderSpeechSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @Binding var speedMultiplier: Double
+    let player: QuoteSpeechPlayer
 
     var body: some View {
         NavigationStack {
             VStack {
-                HStack(spacing: 4) {
-                    ForEach(PageReadingSpeed.allCases) { speed in
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.16)) {
-                                speedMultiplier = speed.rawValue
-                            }
-                        } label: {
-                            Text(speed.title)
-                                .font(.overline(.subheadline, weight: .semibold))
-                                .foregroundStyle(Color.overlineInk)
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                                .background {
-                                    if isSelected(speed) {
-                                        Capsule(style: .continuous)
-                                            .fill(Color.white.opacity(0.88))
-                                    }
-                                }
-                                .contentShape(Capsule(style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(isSelected(speed) ? [.isSelected] : [])
-                    }
-                }
-                .padding(4)
-                .background(Color.overlineMutedInk.opacity(0.12), in: Capsule(style: .continuous))
+                SpeechPlaybackControls(
+                    rateMultiplier: rateBinding,
+                    sentencePause: sentencePauseBinding
+                )
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
 
                 Spacer()
             }
-            .navigationTitle("읽기 속도")
+            .navigationTitle("낭독 설정")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -871,8 +945,18 @@ private struct PageReaderSpeechSettingsView: View {
         }
     }
 
-    private func isSelected(_ speed: PageReadingSpeed) -> Bool {
-        abs(speedMultiplier - speed.rawValue) < 0.001
+    private var rateBinding: Binding<Double> {
+        Binding(
+            get: { player.speechRateMultiplier },
+            set: { player.setSpeechRateMultiplier($0) }
+        )
+    }
+
+    private var sentencePauseBinding: Binding<Double> {
+        Binding(
+            get: { player.sentencePause },
+            set: { player.setSentencePause($0) }
+        )
     }
 }
 
@@ -906,7 +990,6 @@ struct PageReaderView: View {
     @State private var wasWaitingForNextPageBeforeCapture = false
     @State private var storedDraft: PageReadingDraft?
     @State private var activeDraftID: PageReadingDraft.ID?
-    @AppStorage("pageReader.speechRateMultiplier") private var speechRateMultiplier = 1.0
 
     var body: some View {
         ZStack {
@@ -970,8 +1053,8 @@ struct PageReaderView: View {
             Text(storedDraftRemainingMessage)
         }
         .sheet(isPresented: $showsSpeechSettings) {
-            PageReaderSpeechSettingsView(speedMultiplier: $speechRateMultiplier)
-                .presentationDetents([.height(210)])
+            PageReaderSpeechSettingsView(player: quoteSpeechPlayer)
+                .presentationDetents([.height(360)])
                 .presentationDragIndicator(.visible)
         }
         .onAppear {
@@ -982,15 +1065,21 @@ struct PageReaderView: View {
             quoteSpeechPlayer.stop()
             cameraScanner.previewRouter.selectOwner("reader")
             readingSession.connectVoiceSettings(quoteSpeechPlayer)
-            readingSession.updateSpeechRateMultiplier(Float(speechRateMultiplier))
+            readingSession.updateSpeechRateMultiplier(
+                Float(quoteSpeechPlayer.speechRateMultiplier)
+            )
+            readingSession.updateSentencePause(quoteSpeechPlayer.sentencePause)
             scheduleCameraPreparation()
             initialDraftTask?.cancel()
             initialDraftTask = Task { @MainActor in
                 await prepareInitialReadingState()
             }
         }
-        .onChange(of: speechRateMultiplier) { _, multiplier in
+        .onChange(of: quoteSpeechPlayer.speechRateMultiplier) { _, multiplier in
             readingSession.updateSpeechRateMultiplier(Float(multiplier))
+        }
+        .onChange(of: quoteSpeechPlayer.sentencePause) { _, pause in
+            readingSession.updateSentencePause(pause)
         }
         .onDisappear {
             pageReaderMetricsLogger.info(
@@ -1242,7 +1331,7 @@ struct PageReaderView: View {
                         .frame(width: 48, height: 48)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("읽기 속도 설정")
+                .accessibilityLabel("낭독 설정")
             }
         }
         .frame(maxWidth: .infinity, minHeight: 58)

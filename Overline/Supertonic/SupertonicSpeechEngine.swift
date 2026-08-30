@@ -12,6 +12,7 @@ actor SupertonicSpeechEngine {
         voice: SupertonicVoicePreset,
         quality: SupertonicQuality,
         speed: Float,
+        silenceDuration: Float,
         paths: SupertonicModelPaths
     ) throws -> SupertonicAudio {
         try Task.checkCancellation()
@@ -32,7 +33,7 @@ actor SupertonicSpeechEngine {
             style,
             quality.rawValue,
             speed: speed,
-            silenceDuration: 0.12
+            silenceDuration: silenceDuration
         )
         try Task.checkCancellation()
 

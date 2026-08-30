@@ -43,11 +43,14 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var selectedSupertonicVoice: SupertonicVoicePreset = .f1
     private(set) var supertonicQuality: SupertonicQuality = .balanced
     private(set) var supertonicAssetState: SupertonicAssetState = .unavailable
+    private(set) var speechRateMultiplier = SpeechPlaybackPreferences.defaultRate
+    private(set) var sentencePause = SpeechPlaybackPreferences.defaultSentencePause
     private(set) var speechErrorMessage: String?
 
     @ObservationIgnored private var synthesizer: AVSpeechSynthesizer?
     @ObservationIgnored private var cachedVoices: [AVSpeechSynthesisVoice]?
     @ObservationIgnored private var currentUtterance: AVSpeechUtterance?
+    @ObservationIgnored private var queuedSystemUtterances: [ObjectIdentifier: AVSpeechUtterance] = [:]
     @ObservationIgnored private var supertonicPlaybackTask: Task<Void, Never>?
     @ObservationIgnored private var supertonicSynthesisTasks: [Int: Task<SupertonicAudio, Error>] = [:]
     @ObservationIgnored private var supertonicPlaybackToken: UUID?
@@ -65,6 +68,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         supertonicAssetStore = SupertonicAssetStore()
         super.init()
         loadVoiceSelections()
+        loadPlaybackPreferences()
         supertonicAssetState = supertonicAssetStore.state
         loadSupertonicSelections()
     }
@@ -89,12 +93,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
             return
         }
 
-        let utterance = AVSpeechUtterance(string: text)
-        configure(utterance, for: highlight.language)
-
-        currentUtterance = utterance
         activeHighlightID = highlight.id
-        activeSynthesizer().speak(utterance)
+        speakSystemText(text, language: highlight.language)
     }
 
     func isPreviewing(_ option: QuoteSpeechVoiceOption, for language: CaptureLanguage) -> Bool {
@@ -110,12 +110,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
         stopPlayback(releaseSupertonicRuntime: false)
 
-        let utterance = AVSpeechUtterance(string: language.speechPreviewText)
-        configure(utterance, for: language, voiceIdentifier: option.id)
-
-        currentUtterance = utterance
         previewVoiceKey = previewKey
-        activeSynthesizer().speak(utterance)
+        speakSystemText(
+            language.speechPreviewText,
+            language: language,
+            voiceIdentifier: option.id
+        )
     }
 
     func isPreviewing(_ voice: SupertonicVoicePreset) -> Bool {
@@ -216,6 +216,20 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         defaults.set(quality.rawValue, forKey: Self.supertonicQualityDefaultsKey)
     }
 
+    func setSpeechRateMultiplier(_ multiplier: Double) {
+        let normalized = SpeechPlaybackPreferences.normalizedRate(multiplier)
+        guard abs(speechRateMultiplier - normalized) > 0.001 else { return }
+        speechRateMultiplier = normalized
+        defaults.set(normalized, forKey: SpeechPlaybackPreferences.rateDefaultsKey)
+    }
+
+    func setSentencePause(_ pause: Double) {
+        let normalized = SpeechPlaybackPreferences.normalizedSentencePause(pause)
+        guard abs(sentencePause - normalized) > 0.001 else { return }
+        sentencePause = normalized
+        defaults.set(normalized, forKey: SpeechPlaybackPreferences.sentencePauseDefaultsKey)
+    }
+
     func installSupertonicPack() async {
         speechErrorMessage = nil
         await supertonicAssetStore.install { [weak self] state in
@@ -248,6 +262,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     func synthesizeSupertonic(
         text: String,
         speedMultiplier: Float,
+        sentencePause: Double? = nil,
         voice: SupertonicVoicePreset? = nil
     ) async throws -> SupertonicAudio {
         guard let paths = supertonicAssetStore.modelPaths else {
@@ -259,7 +274,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
             text: text,
             voice: voice,
             quality: quality,
-            speed: min(max(speedMultiplier, 0.8), 1.4),
+            speed: min(max(speedMultiplier, 0.8), 1.6),
+            silenceDuration: Float(
+                SpeechPlaybackPreferences.normalizedSentencePause(
+                    sentencePause ?? self.sentencePause
+                )
+            ),
             paths: paths
         )
     }
@@ -324,6 +344,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         supertonicPlaybackLanguage = nil
         supertonicPlaybackVoice = nil
         supertonicAudioPlayer.stop()
+        queuedSystemUtterances.removeAll()
         if let synthesizer,
            synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
@@ -347,15 +368,27 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     func configuredUtterance(
         for text: String,
         language: CaptureLanguage,
-        rateMultiplier: Float = 1
+        rateMultiplier: Float? = nil,
+        sentencePause: Double? = nil
     ) -> AVSpeechUtterance {
         let utterance = AVSpeechUtterance(string: text)
-        configure(utterance, for: language)
-        utterance.rate = min(
-            max(utterance.rate * rateMultiplier, AVSpeechUtteranceMinimumSpeechRate),
-            AVSpeechUtteranceMaximumSpeechRate
+        configure(
+            utterance,
+            for: language,
+            rateMultiplier: rateMultiplier,
+            sentencePause: sentencePause
         )
         return utterance
+    }
+
+    nonisolated func speechSynthesizer(
+        _ synthesizer: AVSpeechSynthesizer,
+        didStart utterance: AVSpeechUtterance
+    ) {
+        let utteranceID = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in
+            self?.markSystemUtteranceStarted(utteranceID)
+        }
     }
 
     nonisolated func speechSynthesizer(
@@ -364,7 +397,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     ) {
         let utteranceID = ObjectIdentifier(utterance)
         Task { @MainActor [weak self] in
-            self?.finishIfCurrent(utteranceID)
+            self?.finishSystemUtterance(utteranceID)
         }
     }
 
@@ -374,16 +407,52 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     ) {
         let utteranceID = ObjectIdentifier(utterance)
         Task { @MainActor [weak self] in
-            self?.finishIfCurrent(utteranceID)
+            self?.finishSystemUtterance(utteranceID)
         }
     }
 
-    private func finishIfCurrent(_ utteranceID: ObjectIdentifier) {
-        guard let activeUtterance = currentUtterance,
-              ObjectIdentifier(activeUtterance) == utteranceID else { return }
-        currentUtterance = nil
+    private func markSystemUtteranceStarted(_ utteranceID: ObjectIdentifier) {
+        guard let utterance = queuedSystemUtterances[utteranceID] else { return }
+        currentUtterance = utterance
+    }
+
+    private func finishSystemUtterance(_ utteranceID: ObjectIdentifier) {
+        guard queuedSystemUtterances.removeValue(forKey: utteranceID) != nil else { return }
+        if let currentUtterance,
+           ObjectIdentifier(currentUtterance) == utteranceID {
+            self.currentUtterance = nil
+        }
+        guard queuedSystemUtterances.isEmpty else { return }
         activeHighlightID = nil
         previewVoiceKey = nil
+    }
+
+    private func speakSystemText(
+        _ text: String,
+        language: CaptureLanguage,
+        voiceIdentifier: String? = nil
+    ) {
+        let cues = makeSpeechCues(from: text, language: language)
+        guard !cues.isEmpty else { return }
+
+        let utterances = cues.map { cue in
+            let utterance = AVSpeechUtterance(string: cue)
+            configure(
+                utterance,
+                for: language,
+                voiceIdentifier: voiceIdentifier
+            )
+            return utterance
+        }
+        queuedSystemUtterances = Dictionary(
+            uniqueKeysWithValues: utterances.map { (ObjectIdentifier($0), $0) }
+        )
+        currentUtterance = utterances.first
+
+        let synthesizer = activeSynthesizer()
+        for utterance in utterances {
+            synthesizer.speak(utterance)
+        }
     }
 
     private func startSupertonicPlayback(
@@ -454,7 +523,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
             guard let self else { throw CancellationError() }
             return try await synthesizeSupertonic(
                 text: text,
-                speedMultiplier: 1,
+                speedMultiplier: Float(speechRateMultiplier),
+                sentencePause: sentencePause,
                 voice: voice
             )
         }
@@ -553,17 +623,29 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private func configure(
         _ utterance: AVSpeechUtterance,
         for language: CaptureLanguage,
-        voiceIdentifier: String? = nil
+        voiceIdentifier: String? = nil,
+        rateMultiplier: Float? = nil,
+        sentencePause: Double? = nil
     ) {
         if let voiceIdentifier {
             utterance.voice = voice(for: voiceIdentifier, language: language)
         } else {
             utterance.voice = selectedVoice(for: language)
         }
-        utterance.rate = 0.47
+        let normalizedRate = Float(
+            SpeechPlaybackPreferences.normalizedRate(
+                Double(rateMultiplier ?? Float(speechRateMultiplier))
+            )
+        )
+        utterance.rate = min(
+            max(0.47 * normalizedRate, AVSpeechUtteranceMinimumSpeechRate),
+            AVSpeechUtteranceMaximumSpeechRate
+        )
         utterance.pitchMultiplier = 1
         utterance.volume = 1
-        utterance.postUtteranceDelay = 0.12
+        utterance.postUtteranceDelay = SpeechPlaybackPreferences.normalizedSentencePause(
+            sentencePause ?? self.sentencePause
+        )
     }
 
     private func selectedVoice(for language: CaptureLanguage) -> AVSpeechSynthesisVoice? {
@@ -631,6 +713,28 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
                 defaults.string(forKey: voiceDefaultsKey(for: language))
                 ?? QuoteSpeechVoiceIdentifier.systemAutomatic
         }
+    }
+
+    private func loadPlaybackPreferences() {
+        let savedRate: Double
+        if defaults.object(forKey: SpeechPlaybackPreferences.rateDefaultsKey) != nil {
+            savedRate = defaults.double(forKey: SpeechPlaybackPreferences.rateDefaultsKey)
+        } else if defaults.object(forKey: SpeechPlaybackPreferences.legacyPageReaderRateDefaultsKey) != nil {
+            savedRate = defaults.double(
+                forKey: SpeechPlaybackPreferences.legacyPageReaderRateDefaultsKey
+            )
+        } else {
+            savedRate = SpeechPlaybackPreferences.defaultRate
+        }
+        speechRateMultiplier = SpeechPlaybackPreferences.normalizedRate(savedRate)
+        defaults.set(speechRateMultiplier, forKey: SpeechPlaybackPreferences.rateDefaultsKey)
+
+        let savedPause = defaults.object(
+            forKey: SpeechPlaybackPreferences.sentencePauseDefaultsKey
+        ) != nil
+            ? defaults.double(forKey: SpeechPlaybackPreferences.sentencePauseDefaultsKey)
+            : SpeechPlaybackPreferences.defaultSentencePause
+        sentencePause = SpeechPlaybackPreferences.normalizedSentencePause(savedPause)
     }
 
     private func loadSupertonicSelections() {
