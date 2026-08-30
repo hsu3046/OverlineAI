@@ -94,7 +94,10 @@ private struct ReadingRecordSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
-                Label(record.status.title, systemImage: record.status.systemImage)
+                HStack(spacing: 4) {
+                    Image(systemName: record.status.systemImage)
+                    Text(record.status.title)
+                }
                     .foregroundStyle(Color.overlineAccent)
 
                 Text(readingDateRangeText(for: record))
@@ -112,7 +115,7 @@ private struct ReadingRecordSummary: View {
                 Text(record.review)
                     .font(.overline(.subheadline, weight: .medium))
                     .foregroundStyle(Color.overlineInk.opacity(0.82))
-                    .lineLimit(2)
+                    .lineLimit(4)
                     .lineSpacing(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -229,7 +232,6 @@ struct ReadingRecordEditorSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
-    @Environment(LLMSettingsStore.self) private var llmSettings
 
     let bookID: ReadingBook.ID
     let recordID: ReadingRecord.ID?
@@ -240,9 +242,7 @@ struct ReadingRecordEditorSheet: View {
     @State private var status: ReadingStatus = .reading
     @State private var rating = 0.0
     @State private var review = ""
-    @State private var isGeneratingDraft = false
-    @State private var draftProposal: ReadingReviewDraftProposal?
-    @State private var aiAlert: ReadingRecordAlert?
+    @State private var showsReviewEditor = false
     @State private var showsDeleteConfirmation = false
     @State private var didLoad = false
 
@@ -301,20 +301,14 @@ struct ReadingRecordEditorSheet: View {
                     review = String(newValue.prefix(Self.reviewLimit))
                 }
             }
-            .sheet(item: $draftProposal) { proposal in
-                ReadingReviewDraftPreviewSheet(proposal: proposal) { draft in
-                    applyDraft(draft, proposal: proposal)
+            .fullScreenCover(isPresented: $showsReviewEditor) {
+                ReadingReviewFullScreenEditor(
+                    bookID: bookID,
+                    status: status,
+                    initialText: review
+                ) { updatedReview in
+                    review = String(updatedReview.prefix(Self.reviewLimit))
                 }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(.thinMaterial)
-            }
-            .alert(item: $aiAlert) { alert in
-                Alert(
-                    title: Text(alert.title),
-                    message: Text(alert.message),
-                    dismissButton: .cancel(Text("확인"))
-                )
             }
             .confirmationDialog("독서 기록을 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
                 Button("삭제", role: .destructive, action: deleteRecord)
@@ -400,35 +394,36 @@ struct ReadingRecordEditorSheet: View {
 
     private var reviewEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                OverlineEditorLabel(title: "감상문")
-                Spacer(minLength: 0)
-                if !(book?.highlights.isEmpty ?? true) {
-                    aiDraftButton
-                        .padding(.trailing, 14)
-                }
-            }
+            OverlineEditorLabel(title: "감상문")
 
-            ZStack(alignment: .topLeading) {
-                if review.isEmpty {
-                    Text("이 책을 읽고 남은 생각")
-                        .font(.overline(.body))
-                        .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 22)
-                        .allowsHitTesting(false)
-                }
+            Button {
+                showsReviewEditor = true
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    Text(review.trimmed.isEmpty ? "이 책을 읽고 남은 생각" : review)
+                        .font(.overline(.body, weight: review.trimmed.isEmpty ? .regular : .medium))
+                        .foregroundStyle(
+                            review.trimmed.isEmpty
+                                ? Color.overlineMutedInk.opacity(0.46)
+                                : Color.overlineInk
+                        )
+                        .lineLimit(4)
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                TextEditor(text: $review)
-                    .font(.overline(.body, weight: .medium))
-                    .lineSpacing(4)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 240)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .accessibilityLabel("감상문")
+                    Image(systemName: "pencil")
+                        .font(.overline(.body, weight: .semibold))
+                        .foregroundStyle(Color.overlineAccent)
+                        .frame(width: 28, height: 28)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .overlineGlassControl(cornerRadius: 22)
+            .accessibilityLabel(review.trimmed.isEmpty ? "감상문 작성" : "감상문 편집")
 
             Text("\(review.count.formatted()) / \(Self.reviewLimit.formatted())")
                 .font(.overline(.caption))
@@ -436,28 +431,6 @@ struct ReadingRecordEditorSheet: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.trailing, 10)
         }
-    }
-
-    private var aiDraftButton: some View {
-        Button(action: requestAIDraft) {
-            ZStack {
-                if isGeneratingDraft {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Color.overlineAccent)
-                } else {
-                    Image(systemName: "sparkles")
-                        .font(.overline(.body, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.overlineAccent)
-                }
-            }
-            .frame(width: 36, height: 36)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isGeneratingDraft)
-        .accessibilityLabel("AI 감상문 초안 만들기")
     }
 
     private var deleteButton: some View {
@@ -529,6 +502,153 @@ struct ReadingRecordEditorSheet: View {
         library.deleteReadingRecord(recordID, in: bookID)
         dismiss()
     }
+}
+
+private struct ReadingReviewFullScreenEditor: View {
+    private static let reviewLimit = 3_000
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(ReadingLibrary.self) private var library
+    @Environment(LLMSettingsStore.self) private var llmSettings
+
+    let bookID: ReadingBook.ID
+    let status: ReadingStatus
+    let save: (String) -> Void
+
+    @State private var draftText: String
+    @State private var isGeneratingDraft = false
+    @State private var draftProposal: ReadingReviewDraftProposal?
+    @State private var aiAlert: ReadingRecordAlert?
+    @State private var generationTask: Task<Void, Never>?
+    @FocusState private var isEditorFocused: Bool
+
+    init(
+        bookID: ReadingBook.ID,
+        status: ReadingStatus,
+        initialText: String,
+        save: @escaping (String) -> Void
+    ) {
+        self.bookID = bookID
+        self.status = status
+        self.save = save
+        _draftText = State(initialValue: initialText)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                OverlineSheetHeader(title: "감상문") {
+                    OverlineSheetIconButton(
+                        systemImage: "xmark",
+                        accessibilityLabel: "취소",
+                        tint: Color.overlineMutedInk.opacity(0.72),
+                        font: .title3.weight(.semibold)
+                    ) {
+                        dismiss()
+                    }
+                } trailing: {
+                    HStack(spacing: 2) {
+                        if !(book?.highlights.isEmpty ?? true) {
+                            aiDraftButton
+                        }
+
+                        OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
+                            save(String(draftText.prefix(Self.reviewLimit)))
+                            dismiss()
+                        }
+                    }
+                }
+
+                VStack(spacing: 10) {
+                    ZStack(alignment: .topLeading) {
+                        if draftText.isEmpty {
+                            Text("이 책을 읽고 남은 생각")
+                                .font(.overline(.body))
+                                .foregroundStyle(Color.overlineMutedInk.opacity(0.46))
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 22)
+                                .allowsHitTesting(false)
+                        }
+
+                        TextEditor(text: $draftText)
+                            .font(.overline(.body, weight: .medium))
+                            .lineSpacing(5)
+                            .scrollContentBackground(.hidden)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .focused($isEditorFocused)
+                            .accessibilityLabel("감상문")
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlineGlassControl(cornerRadius: 22)
+
+                    Text("\(draftText.count.formatted()) / \(Self.reviewLimit.formatted())")
+                        .font(.overline(.caption))
+                        .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.trailing, 10)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .task {
+                try? await Task.sleep(for: .milliseconds(220))
+                guard !Task.isCancelled else { return }
+                isEditorFocused = true
+            }
+            .onChange(of: draftText) { _, newValue in
+                if newValue.count > Self.reviewLimit {
+                    draftText = String(newValue.prefix(Self.reviewLimit))
+                }
+            }
+            .onDisappear {
+                generationTask?.cancel()
+            }
+            .sheet(item: $draftProposal) { proposal in
+                ReadingReviewDraftPreviewSheet(proposal: proposal) { draft in
+                    applyDraft(draft, proposal: proposal)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.thinMaterial)
+            }
+            .alert(item: $aiAlert) { alert in
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .cancel(Text("확인"))
+                )
+            }
+        }
+    }
+
+    private var aiDraftButton: some View {
+        Button(action: requestAIDraft) {
+            ZStack {
+                if isGeneratingDraft {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.overlineAccent)
+                } else {
+                    Image(systemName: "sparkles")
+                        .font(.overline(.body, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.overlineAccent)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isGeneratingDraft)
+        .accessibilityLabel("AI 감상문 초안 만들기")
+    }
+
+    private var book: ReadingBook? {
+        library.book(with: bookID)
+    }
 
     private func requestAIDraft() {
         guard let book, !book.highlights.isEmpty else { return }
@@ -538,19 +658,23 @@ struct ReadingRecordEditorSheet: View {
         }
 
         let snapshot = ReadingReviewGenerationSnapshot(
-            review: review,
+            review: draftText,
             status: status,
             highlights: book.highlights
         )
         let sources = readingReviewSources(for: book)
         guard !sources.isEmpty else { return }
 
+        generationTask?.cancel()
         isGeneratingDraft = true
         aiAlert = nil
         LLMUsageMetricsStore.recordRequested()
 
-        Task { @MainActor in
-            defer { isGeneratingDraft = false }
+        generationTask = Task { @MainActor in
+            defer {
+                isGeneratingDraft = false
+                generationTask = nil
+            }
 
             do {
                 let generatedDraft = try await LLMInsightClient().generateInsight(
@@ -565,12 +689,12 @@ struct ReadingRecordEditorSheet: View {
                     )
                 )
 
+                guard !Task.isCancelled else { return }
                 llmSettings.handleRequestSuccess(configuration: configuration)
                 LLMUsageMetricsStore.recordCompleted()
 
                 guard
-                    review == snapshot.review,
-                    status == snapshot.status,
+                    draftText == snapshot.review,
                     library.book(with: bookID)?.highlights == snapshot.highlights
                 else {
                     aiAlert = ReadingRecordAlert(
@@ -586,6 +710,7 @@ struct ReadingRecordEditorSheet: View {
                     sourceCount: sources.count
                 )
             } catch {
+                guard !Task.isCancelled else { return }
                 llmSettings.handleRequestError(error, configuration: configuration)
                 LLMUsageMetricsStore.recordFailed()
                 aiAlert = ReadingRecordAlert(title: "AI 초안", message: error.localizedDescription)
@@ -594,7 +719,7 @@ struct ReadingRecordEditorSheet: View {
     }
 
     private func applyDraft(_ draft: String, proposal: ReadingReviewDraftProposal) {
-        guard review == proposal.sourceReview else {
+        guard draftText == proposal.sourceReview else {
             draftProposal = nil
             aiAlert = ReadingRecordAlert(
                 title: "AI 초안",
@@ -603,7 +728,7 @@ struct ReadingRecordEditorSheet: View {
             return
         }
 
-        review = String(draft.trimmed.prefix(Self.reviewLimit))
+        draftText = String(draft.trimmed.prefix(Self.reviewLimit))
         draftProposal = nil
     }
 
@@ -868,7 +993,7 @@ private func evenlySampled<T>(_ values: [T], maximumCount: Int) -> [T] {
 
 private func readingDateRangeText(for record: ReadingRecord) -> String {
     let start = readingRecordDateFormatter.string(from: record.startedAt)
-    guard let endedAt = record.endedAt else { return "\(start) -" }
+    guard let endedAt = record.endedAt else { return start }
     let end = readingRecordDateFormatter.string(from: endedAt)
     return start == end ? start : "\(start) - \(end)"
 }
