@@ -505,7 +505,7 @@ struct CaptureView: View {
             }
         }
         if let savedHighlightID {
-            scheduleAutomaticTagGeneration(for: savedHighlightID)
+            scheduleAutomaticOCRCorrection(for: savedHighlightID)
         }
         cameraScanner.stopSwipeRecognition()
         logCaptureSaved(
@@ -570,11 +570,20 @@ struct CaptureView: View {
         guard
             canContinueLastSavedHighlight,
             let targetID = continuationAvailableHighlightID,
-            continuationSeed?.highlightID == targetID
+            let continuationSeed,
+            continuationSeed.highlightID == targetID
         else {
             return
         }
         applyAmendIfNeeded(clearAfterSave: false, showConfirmation: false)
+
+        if let currentHighlight = library.highlight(with: targetID) {
+            self.continuationSeed = CaptureContinuationSeed(
+                highlightID: continuationSeed.highlightID,
+                persistedText: currentHighlight.text,
+                firstPageText: continuationSeed.firstPageText
+            )
+        }
 
         withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
             continuationAvailableHighlightID = nil
@@ -779,7 +788,7 @@ struct CaptureView: View {
                 )
             }
             if let savedHighlightID {
-                scheduleAutomaticTagGeneration(for: savedHighlightID)
+                scheduleAutomaticOCRCorrection(for: savedHighlightID)
             }
             logCaptureSaved(
                 source: "photo",
@@ -821,6 +830,106 @@ struct CaptureView: View {
 
     private func defaultTagsTextForSelectedBook() -> String {
         library.suggestedTagsForSelectedBook().joined(separator: " ")
+    }
+
+    private func scheduleAutomaticOCRCorrection(for highlightID: Highlight.ID) {
+        guard
+            let highlight = library.highlight(with: highlightID),
+            let bookID = library.bookID(containing: highlightID)
+        else {
+            captureMetricsLogger.info("local_ocr_correction_skipped reason=missing_highlight")
+            return
+        }
+
+        let originalHighlight = highlight
+        let originalText = originalHighlight.text
+        captureMetricsLogger.info("local_ocr_correction_requested language=\(originalHighlight.language.rawValue, privacy: .public)")
+
+        Task { @MainActor in
+            let correctedText = await LocalOCRCorrectionService.shared.correctedText(for: originalText)
+            guard !Task.isCancelled else { return }
+            guard
+                library.bookID(containing: highlightID) == bookID,
+                library.highlight(with: highlightID) == originalHighlight
+            else {
+                captureMetricsLogger.info("local_ocr_correction_skipped reason=highlight_changed")
+                return
+            }
+
+            guard continuationCaptureTargetID != highlightID else {
+                captureMetricsLogger.info("local_ocr_correction_skipped reason=continuation_active")
+                scheduleAutomaticTagGeneration(for: highlightID)
+                return
+            }
+
+            if let correctedText {
+                guard canRebaseContinuationSeed(for: highlightID, originalText: originalText) else {
+                    captureMetricsLogger.info("local_ocr_correction_skipped reason=continuation_rebase_failed")
+                    scheduleAutomaticTagGeneration(for: highlightID)
+                    return
+                }
+                guard let updatedHighlight = library.applyAutomaticOCRCorrection(
+                    correctedText,
+                    to: highlightID,
+                    expectedHighlight: originalHighlight
+                ) else {
+                    captureMetricsLogger.info("local_ocr_correction_skipped reason=highlight_changed")
+                    return
+                }
+
+                if lastSaved?.id == highlightID {
+                    lastSaved = updatedHighlight
+                }
+                updateContinuationSeed(
+                    for: highlightID,
+                    originalText: originalText,
+                    correctedText: correctedText
+                )
+                captureMetricsLogger.info("local_ocr_correction_applied")
+            }
+
+            scheduleAutomaticTagGeneration(for: highlightID)
+        }
+    }
+
+    private func canRebaseContinuationSeed(
+        for highlightID: Highlight.ID,
+        originalText: String
+    ) -> Bool {
+        guard continuationAvailableHighlightID == highlightID else { return true }
+        guard let seed = continuationSeed, seed.highlightID == highlightID else { return false }
+
+        let normalizedOriginal = originalText.normalizedQuotesForStorage.trimmed
+        let normalizedFirstPage = seed.firstPageText.normalizedQuotesForStorage.trimmed
+        return normalizedFirstPage.hasPrefix(normalizedOriginal)
+    }
+
+    private func updateContinuationSeed(
+        for highlightID: Highlight.ID,
+        originalText: String,
+        correctedText: String
+    ) {
+        guard
+            continuationAvailableHighlightID == highlightID,
+            let seed = continuationSeed,
+            seed.highlightID == highlightID
+        else {
+            return
+        }
+
+        let normalizedOriginal = originalText.normalizedQuotesForStorage.trimmed
+        let normalizedFirstPage = seed.firstPageText.normalizedQuotesForStorage.trimmed
+        let normalizedCorrection = correctedText.normalizedQuotesForStorage.trimmed
+
+        guard normalizedFirstPage.hasPrefix(normalizedOriginal) else { return }
+        let suffix = normalizedFirstPage.dropFirst(normalizedOriginal.count)
+        let correctedFirstPage = "\(normalizedCorrection)\(suffix)"
+
+        continuationSeed = CaptureContinuationSeed(
+            highlightID: highlightID,
+            persistedText: normalizedCorrection,
+            firstPageText: correctedFirstPage
+        )
     }
 
     private func scheduleAutomaticTagGeneration(for highlightID: Highlight.ID) {
