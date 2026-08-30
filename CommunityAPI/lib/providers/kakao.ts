@@ -38,7 +38,7 @@ export async function searchKakaoPlaces(
   apiKey: string,
 ): Promise<CommunityPlace[]> {
   const queries: PlaceKind[] = kind === "all" ? ["bookstore", "library"] : [kind];
-  const responses = await Promise.all(queries.map(async (queryKind) => {
+  const outcomes = await Promise.allSettled(queries.map(async (queryKind) => {
     const url = new URL("https://dapi.kakao.com/v2/local/search/keyword.json");
     url.searchParams.set("query", queryKind === "bookstore" ? "서점" : "도서관");
     url.searchParams.set("x", longitude.toFixed(5));
@@ -52,6 +52,11 @@ export async function searchKakaoPlaces(
     });
     return normalizeKakaoPlaces(response.documents ?? [], queryKind);
   }));
+  const responses = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
+  if (responses.length === 0) {
+    const failure = outcomes.find((outcome) => outcome.status === "rejected");
+    throw failure?.reason ?? new Error("kakao_places_unavailable");
+  }
 
   const uniquePlaces = new Map<string, CommunityPlace>();
   for (const place of responses.flat()) {

@@ -51,15 +51,12 @@ export async function fetchPopularLoans(
   category: Data4LibraryLoanCategory = "all",
   now = new Date(),
 ): Promise<CommunityRankingItem[]> {
-  const endDate = new Date(now);
-  endDate.setUTCDate(endDate.getUTCDate() - 1);
-  const startDate = new Date(endDate);
-  startDate.setUTCDate(startDate.getUTCDate() - 29);
+  const { startDate, endDate } = data4LibraryLoanDateRange(now);
 
   const url = new URL("https://data4library.kr/api/loanItemSrch");
   url.searchParams.set("authKey", apiKey);
-  url.searchParams.set("startDt", formatDate(startDate));
-  url.searchParams.set("endDt", formatDate(endDate));
+  url.searchParams.set("startDt", startDate);
+  url.searchParams.set("endDt", endDate);
   url.searchParams.set("pageNo", String(page));
   url.searchParams.set("pageSize", "20");
   url.searchParams.set("format", "json");
@@ -75,6 +72,17 @@ export async function fetchPopularLoans(
 
 export function data4LibraryKDC(category: Data4LibraryLoanCategory): string | undefined {
   return category === "all" ? undefined : data4LibraryKDCValues[category];
+}
+
+export function data4LibraryLoanDateRange(now: Date): { startDate: string; endDate: string } {
+  const koreanDate = calendarDate(now, "Asia/Seoul");
+  const endDate = new Date(Date.UTC(koreanDate.year, koreanDate.month - 1, koreanDate.day - 1));
+  const startDate = new Date(endDate);
+  startDate.setUTCDate(startDate.getUTCDate() - 29);
+  return {
+    startDate: formatDate(startDate),
+    endDate: formatDate(endDate),
+  };
 }
 
 export function documentsFromData4LibraryResponse(response: Data4LibraryResponse): WrappedDocument[] {
@@ -119,4 +127,19 @@ export function normalizePopularLoans(
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function calendarDate(date: Date, timeZone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): number => {
+    const part = parts.find((candidate) => candidate.type === type)?.value;
+    if (!part) throw new Error(`missing_${type}_for_${timeZone}`);
+    return Number(part);
+  };
+  return { year: value("year"), month: value("month"), day: value("day") };
 }

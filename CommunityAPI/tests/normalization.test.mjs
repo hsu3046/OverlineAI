@@ -5,6 +5,7 @@ import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
 import { cleanText, safeHTTPURL } from "../.build/lib/http.js";
 import {
   data4LibraryKDC,
+  data4LibraryLoanDateRange,
   documentsFromData4LibraryResponse,
   normalizePopularLoans,
 } from "../.build/lib/providers/data4library.js";
@@ -72,6 +73,13 @@ test("data4library provider errors are not treated as an empty ranking", () => {
   assert.throws(
     () => documentsFromData4LibraryResponse({ response: { errCode: "AUTH", error: "not active" } }),
     /data4library_provider_error_AUTH/,
+  );
+});
+
+test("loan ranking dates use the Korean calendar before 09:00 KST", () => {
+  assert.deepEqual(
+    data4LibraryLoanDateRange(new Date("2026-08-30T00:30:00+09:00")),
+    { startDate: "2026-07-31", endDate: "2026-08-29" },
   );
 });
 

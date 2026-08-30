@@ -1679,7 +1679,7 @@ struct PageReaderView: View {
 
     private var currentContentMatchesStoredDraft: Bool {
         guard let storedDraft, activeDraftID == storedDraft.id else { return false }
-        return storedDraft.pages == currentDraftPages
+        return storedDraft.expiresAt > .now && storedDraft.pages == currentDraftPages
     }
 
     private func saveStoredProgressAndClose() {

@@ -30,6 +30,12 @@ final class CommunityViewModel {
     private var loadedPlaceKey: String?
     private var loadedArticleKey: String?
     private var loadedRankingKey: String?
+    private var latestPlaceRequestKey: String?
+    private var latestArticleRequestKey: String?
+    private var latestRankingRequestKey: String?
+    private var placeRequestID: UUID?
+    private var articleRequestID: UUID?
+    private var rankingRequestID: UUID?
     private var selectedBookTitle = ""
     private var selectedBookAuthor = ""
     private var hasInitializedArticleSearch = false
@@ -96,6 +102,9 @@ final class CommunityViewModel {
         articleWarnings = []
         articleError = nil
         loadedArticleKey = nil
+        latestArticleRequestKey = nil
+        articleRequestID = nil
+        isLoadingArticles = false
     }
 
     func selectRankingKind(_ kind: CommunityRankingKind) {
@@ -108,88 +117,172 @@ final class CommunityViewModel {
     func loadPlaces(location: CLLocation, force: Bool = false) async {
         let latitude = roundedCoordinate(location.coordinate.latitude)
         let longitude = roundedCoordinate(location.coordinate.longitude)
-        let key = "\(latitude)-\(longitude)-\(placeRadius)-\(placeKind.rawValue)"
+        let radius = placeRadius
+        let kind = placeKind
+        let key = placeKey(latitude: latitude, longitude: longitude, radius: radius, kind: kind)
+        latestPlaceRequestKey = key
         if !force, loadedPlaceKey == key {
             placeError = nil
             return
         }
 
+        let requestID = UUID()
+        placeRequestID = requestID
         isLoadingPlaces = true
         placeError = nil
-        defer { isLoadingPlaces = false }
+        defer {
+            if placeRequestID == requestID {
+                isLoadingPlaces = false
+            }
+        }
         do {
             let response = try await client.nearbyPlaces(
                 latitude: latitude,
                 longitude: longitude,
-                radius: placeRadius,
-                kind: placeKind
+                radius: radius,
+                kind: kind
             )
-            guard !Task.isCancelled else { return }
+            guard
+                !Task.isCancelled,
+                placeRequestID == requestID,
+                latestPlaceRequestKey == key,
+                key == placeKey(latitude: latitude, longitude: longitude)
+            else { return }
             places = response.items
             loadedPlaceKey = key
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard
+                !Task.isCancelled,
+                placeRequestID == requestID,
+                latestPlaceRequestKey == key,
+                key == placeKey(latitude: latitude, longitude: longitude)
+            else { return }
             placeError = error.localizedDescription
         }
     }
 
     func loadArticles(force: Bool = false) async {
         guard !articleQueryTitle.isEmpty else { return }
-        let key = "\(articleQueryTitle)-\(articleQueryAuthor)-\(articleSource.rawValue)-\(articleSort.rawValue)"
+        let title = articleQueryTitle
+        let author = articleQueryAuthor
+        let source = articleSource
+        let sort = articleSort
+        let key = articleKey(title: title, author: author, source: source, sort: sort)
+        latestArticleRequestKey = key
         if !force, loadedArticleKey == key {
             articleError = nil
             return
         }
 
+        let requestID = UUID()
+        articleRequestID = requestID
         isLoadingArticles = true
         articleError = nil
-        defer { isLoadingArticles = false }
+        defer {
+            if articleRequestID == requestID {
+                isLoadingArticles = false
+            }
+        }
         do {
             let response = try await client.articles(
-                title: articleQueryTitle,
-                author: articleQueryAuthor,
-                source: articleSource,
-                sort: articleSort
+                title: title,
+                author: author,
+                source: source,
+                sort: sort
             )
-            guard !Task.isCancelled else { return }
+            guard
+                !Task.isCancelled,
+                articleRequestID == requestID,
+                latestArticleRequestKey == key,
+                key == articleKey()
+            else { return }
             articles = response.items
             articleWarnings = response.warnings ?? []
             loadedArticleKey = key
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard
+                !Task.isCancelled,
+                articleRequestID == requestID,
+                latestArticleRequestKey == key,
+                key == articleKey()
+            else { return }
             articleError = error.localizedDescription
         }
     }
 
     func loadRankings(force: Bool = false) async {
-        let key = "\(rankingKind.rawValue)-\(rankingCategory.rawValue)"
+        let kind = rankingKind
+        let category = rankingCategory
+        let key = rankingKey(kind: kind, category: category)
+        latestRankingRequestKey = key
         if !force, loadedRankingKey == key {
             rankingError = nil
             return
         }
 
+        let requestID = UUID()
+        rankingRequestID = requestID
         isLoadingRankings = true
         rankingError = nil
-        defer { isLoadingRankings = false }
+        defer {
+            if rankingRequestID == requestID {
+                isLoadingRankings = false
+            }
+        }
         do {
-            let response = try await client.rankings(kind: rankingKind, category: rankingCategory)
-            guard !Task.isCancelled else { return }
+            let response = try await client.rankings(kind: kind, category: category)
+            guard
+                !Task.isCancelled,
+                rankingRequestID == requestID,
+                latestRankingRequestKey == key,
+                key == rankingKey()
+            else { return }
             rankings = response.items
             loadedRankingKey = key
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard
+                !Task.isCancelled,
+                rankingRequestID == requestID,
+                latestRankingRequestKey == key,
+                key == rankingKey()
+            else { return }
             rankingError = error.localizedDescription
         }
     }
 
     private func roundedCoordinate(_ value: CLLocationDegrees) -> CLLocationDegrees {
         (value * 10_000).rounded() / 10_000
+    }
+
+    private func placeKey(
+        latitude: CLLocationDegrees,
+        longitude: CLLocationDegrees,
+        radius: Int? = nil,
+        kind: CommunityPlaceKind? = nil
+    ) -> String {
+        "\(latitude)-\(longitude)-\(radius ?? placeRadius)-\((kind ?? placeKind).rawValue)"
+    }
+
+    private func articleKey(
+        title: String? = nil,
+        author: String? = nil,
+        source: CommunityArticleSource? = nil,
+        sort: CommunityArticleSort? = nil
+    ) -> String {
+        "\(title ?? articleQueryTitle)-\(author ?? articleQueryAuthor)-\((source ?? articleSource).rawValue)-\((sort ?? articleSort).rawValue)"
+    }
+
+    private func rankingKey(
+        kind: CommunityRankingKind? = nil,
+        category: CommunityRankingCategory? = nil
+    ) -> String {
+        "\((kind ?? rankingKind).rawValue)-\((category ?? rankingCategory).rawValue)"
     }
 
     @discardableResult
@@ -201,6 +294,9 @@ final class CommunityViewModel {
             articles = []
             articleWarnings = []
             articleError = nil
+            latestArticleRequestKey = nil
+            articleRequestID = nil
+            isLoadingArticles = false
         }
         return changed
     }
