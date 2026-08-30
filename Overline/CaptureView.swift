@@ -506,7 +506,6 @@ struct CaptureView: View {
         }
         if let savedHighlightID {
             scheduleAutomaticOCRCorrection(for: savedHighlightID)
-            scheduleAutomaticTagGeneration(for: savedHighlightID)
         }
         cameraScanner.stopSwipeRecognition()
         logCaptureSaved(
@@ -790,7 +789,6 @@ struct CaptureView: View {
             }
             if let savedHighlightID {
                 scheduleAutomaticOCRCorrection(for: savedHighlightID)
-                scheduleAutomaticTagGeneration(for: savedHighlightID)
             }
             logCaptureSaved(
                 source: "photo",
@@ -848,34 +846,42 @@ struct CaptureView: View {
         captureMetricsLogger.info("local_ocr_correction_requested language=\(language.rawValue, privacy: .public)")
 
         Task { @MainActor in
-            guard let correctedText = await LocalOCRCorrectionService.shared.correctedText(
+            let correctedText = await LocalOCRCorrectionService.shared.correctedText(
                 for: originalText,
                 language: language
-            ) else {
-                return
-            }
+            )
             guard !Task.isCancelled else { return }
-            guard continuationCaptureTargetID != highlightID else {
-                captureMetricsLogger.info("local_ocr_correction_skipped reason=continuation_active")
-                return
-            }
-
             guard
                 library.bookID(containing: highlightID) == bookID,
-                let updatedHighlight = library.applyAutomaticOCRCorrection(
-                    correctedText,
-                    to: highlightID,
-                    expectedOriginalText: originalText
-                )
+                library.highlight(with: highlightID)?.text == originalText
             else {
                 captureMetricsLogger.info("local_ocr_correction_skipped reason=highlight_changed")
                 return
             }
 
-            if lastSaved?.id == highlightID {
-                lastSaved = updatedHighlight
+            guard continuationCaptureTargetID != highlightID else {
+                captureMetricsLogger.info("local_ocr_correction_skipped reason=continuation_active")
+                scheduleAutomaticTagGeneration(for: highlightID)
+                return
             }
-            captureMetricsLogger.info("local_ocr_correction_applied")
+
+            if let correctedText {
+                guard let updatedHighlight = library.applyAutomaticOCRCorrection(
+                    correctedText,
+                    to: highlightID,
+                    expectedOriginalText: originalText
+                ) else {
+                    captureMetricsLogger.info("local_ocr_correction_skipped reason=highlight_changed")
+                    return
+                }
+
+                if lastSaved?.id == highlightID {
+                    lastSaved = updatedHighlight
+                }
+                captureMetricsLogger.info("local_ocr_correction_applied")
+            }
+
+            scheduleAutomaticTagGeneration(for: highlightID)
         }
     }
 
