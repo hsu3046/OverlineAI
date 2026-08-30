@@ -23,21 +23,26 @@ struct ContentView: View {
         persistentTabContent
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HStack {
-                    Spacer(minLength: 0)
-                    OverlineBottomMenu(
-                        selectedTab: selectedTab,
-                        isCompact: isBottomMenuCompact,
-                        selectTab: selectTab
-                    )
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+                OverlineBottomMenuBar(
+                    selectedTab: selectedTab,
+                    isCompact: isBottomMenuCompact,
+                    selectTab: selectTab
+                )
             }
             .tint(Color.overlineAccent)
             .background(OverlineCanvasBackground().ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(action: dismissKeyboard) {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                    }
+                    .accessibilityLabel("키보드 닫기")
+                }
+            }
             .environment(\.setBottomMenuCompact, setBottomMenuCompact)
+            .environment(\.selectAppTab, selectTab)
             .onAppear {
                 recordAppOpen()
                 apply(intentRouter.request)
@@ -155,12 +160,7 @@ struct ContentView: View {
     }
 
     private func selectTab(_ tab: AppTab) {
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
+        dismissKeyboard()
 
         guard selectedTab != tab else {
             if tab == .library {
@@ -173,6 +173,15 @@ struct ContentView: View {
         loadedTabs.insert(tab)
         selectedTab = tab
         isBottomMenuCompact = false
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func recordAppOpen() {
@@ -196,6 +205,26 @@ private struct CameraStartupPlaceholder: View {
 private enum OverlineMotion {
     static let tab = Animation.smooth(duration: 0.28, extraBounce: 0.03)
     static let menu = Animation.smooth(duration: 0.24, extraBounce: 0.02)
+}
+
+struct OverlineBottomMenuBar: View {
+    let selectedTab: AppTab
+    let isCompact: Bool
+    let selectTab: (AppTab) -> Void
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 0)
+            OverlineBottomMenu(
+                selectedTab: selectedTab,
+                isCompact: isCompact,
+                selectTab: selectTab
+            )
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
 }
 
 private struct OverlineBottomMenu: View {
@@ -498,10 +527,19 @@ private struct BottomMenuCompactActionKey: EnvironmentKey {
     static let defaultValue: (Bool) -> Void = { _ in }
 }
 
+private struct AppTabSelectionActionKey: EnvironmentKey {
+    static let defaultValue: (AppTab) -> Void = { _ in }
+}
+
 extension EnvironmentValues {
     var setBottomMenuCompact: (Bool) -> Void {
         get { self[BottomMenuCompactActionKey.self] }
         set { self[BottomMenuCompactActionKey.self] = newValue }
+    }
+
+    var selectAppTab: (AppTab) -> Void {
+        get { self[AppTabSelectionActionKey.self] }
+        set { self[AppTabSelectionActionKey.self] = newValue }
     }
 }
 

@@ -1,9 +1,9 @@
 import Foundation
 
 nonisolated enum CommunitySection: String, CaseIterable, Identifiable {
-    case nearby
-    case articles
     case rankings
+    case articles
+    case nearby
 
     var id: String { rawValue }
 
@@ -19,7 +19,7 @@ nonisolated enum CommunitySection: String, CaseIterable, Identifiable {
         switch self {
         case .nearby: "location"
         case .articles: "newspaper"
-        case .rankings: "chart.bar"
+        case .rankings: "book"
         }
     }
 }

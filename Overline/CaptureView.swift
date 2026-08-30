@@ -13,6 +13,7 @@ struct CaptureView: View {
     @Environment(ReadingLibrary.self) private var library
     @Environment(LLMSettingsStore.self) private var llmSettings
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.selectAppTab) private var selectAppTab
     @State private var selectedLineIDs: Set<Int> = []
     @State private var selectedCameraLineIDs: Set<CameraRecognizedTextLine.ID> = []
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -40,6 +41,7 @@ struct CaptureView: View {
     @State private var selectedTone: StickyTone = .yellow
     @State private var isPageReaderPresented = false
     @State private var pageReaderRequestedAt: TimeInterval?
+    @State private var pendingTabAfterPageReaderDismiss: AppTab?
 
     var body: some View {
         ScrollView {
@@ -204,7 +206,10 @@ struct CaptureView: View {
             .fullScreenCover(isPresented: $isPageReaderPresented, onDismiss: pageReaderDidDismiss) {
                 PageReaderView(
                     cameraScanner: cameraScanner,
-                    requestedAt: pageReaderRequestedAt
+                    requestedAt: pageReaderRequestedAt,
+                    onCloseToTab: { tab in
+                        pendingTabAfterPageReaderDismiss = tab
+                    }
                 )
             }
     }
@@ -252,12 +257,26 @@ struct CaptureView: View {
     }
 
     private func pageReaderDidDismiss() {
+        let destinationTab = pendingTabAfterPageReaderDismiss
+        pendingTabAfterPageReaderDismiss = nil
         captureMetricsLogger.info(
             "camera_handoff from=reader to=highlight active=\(isActive, privacy: .public) scene=\(String(describing: scenePhase), privacy: .public)"
         )
         cameraScanner.previewRouter.selectOwner("highlight")
-        lastExperienceMode = CaptureExperienceMode.highlight.rawValue
+        lastExperienceMode = destinationTab == nil || destinationTab == .capture
+            ? CaptureExperienceMode.highlight.rawValue
+            : CaptureExperienceMode.reader.rawValue
         pageReaderRequestedAt = nil
+
+        if let destinationTab, destinationTab != .capture {
+            cameraScanner.stop(
+                clearRecognitionResults: false,
+                owner: "highlight.reader_dismissed_for_tab"
+            )
+            selectAppTab(destinationTab)
+            return
+        }
+
         if isActive, scenePhase == .active, !cameraScanner.session.isRunning {
             scheduleCameraStart()
         } else if !isActive || scenePhase != .active {
@@ -269,6 +288,10 @@ struct CaptureView: View {
             captureMetricsLogger.info(
                 "camera_handoff session_reused=\(cameraScanner.session.isRunning, privacy: .public)"
             )
+        }
+
+        if let destinationTab {
+            selectAppTab(destinationTab)
         }
     }
 

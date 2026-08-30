@@ -950,6 +950,7 @@ struct PageReaderView: View {
 
     let cameraScanner: CameraTextScanner
     let requestedAt: TimeInterval?
+    let onCloseToTab: (AppTab) -> Void
 
     @State private var readingSession = PageReadingSession()
     @State private var isAwaitingFrozenFrame = false
@@ -973,6 +974,7 @@ struct PageReaderView: View {
     @State private var wasWaitingForNextPageBeforeCapture = false
     @State private var storedDraft: PageReadingDraft?
     @State private var activeDraftID: PageReadingDraft.ID?
+    @State private var pendingDestinationTab: AppTab?
 
     var body: some View {
         ZStack {
@@ -1007,6 +1009,15 @@ struct PageReaderView: View {
             .padding(.bottom, 4)
         }
         .interactiveDismissDisabled(!readingSession.pages.isEmpty)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            OverlineBottomMenuBar(
+                selectedTab: .capture,
+                isCompact: false,
+                selectTab: { tab in
+                    requestClose(to: tab)
+                }
+            )
+        }
         .confirmationDialog(
             "읽던 내용을 임시로 보관할까요?",
             isPresented: $showsExitConfirmation,
@@ -1014,7 +1025,9 @@ struct PageReaderView: View {
         ) {
             Button("7일간 임시 보관", action: requestTemporarySave)
             Button("지금 지우기", role: .destructive, action: discardCurrentAndClose)
-            Button("계속 읽기", role: .cancel) {}
+            Button("계속 읽기", role: .cancel) {
+                pendingDestinationTab = nil
+            }
         } message: {
             Text("임시 보관한 글은 7일간 저장됩니다.")
         }
@@ -1025,7 +1038,9 @@ struct PageReaderView: View {
         ) {
             Button("새 글로 바꾸기", role: .destructive, action: saveTemporaryDraftAndClose)
             Button("이전 글 유지", action: closeReader)
-            Button("계속 읽기", role: .cancel) {}
+            Button("계속 읽기", role: .cancel) {
+                pendingDestinationTab = nil
+            }
         } message: {
             Text("새 글을 보관하면 이전에 보관한 글은 지워집니다.")
         }
@@ -1510,9 +1525,12 @@ struct PageReaderView: View {
         }
     }
 
-    private func requestClose() {
+    private func requestClose(to destinationTab: AppTab? = nil) {
+        pendingDestinationTab = destinationTab
         if readingSession.pages.isEmpty {
             closeReader()
+        } else if currentContentMatchesStoredDraft {
+            saveStoredProgressAndClose()
         } else {
             showsExitConfirmation = true
         }
@@ -1659,6 +1677,55 @@ struct PageReaderView: View {
         }
     }
 
+    private var currentContentMatchesStoredDraft: Bool {
+        guard let storedDraft, activeDraftID == storedDraft.id else { return false }
+        return storedDraft.pages == currentDraftPages
+    }
+
+    private func saveStoredProgressAndClose() {
+        guard let storedDraft, activeDraftID == storedDraft.id else {
+            showsExitConfirmation = true
+            return
+        }
+
+        let updatedDraft = PageReadingDraft(
+            id: storedDraft.id,
+            createdAt: storedDraft.createdAt,
+            expiresAt: storedDraft.expiresAt,
+            currentPageIndex: readingSession.currentPageIndex,
+            activeCueIndex: readingSession.activeCueIndex,
+            pages: currentDraftPages
+        )
+        guard
+            updatedDraft.currentPageIndex != storedDraft.currentPageIndex
+                || updatedDraft.activeCueIndex != storedDraft.activeCueIndex
+        else {
+            closeReader()
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                try await PageReadingDraftStore.shared.save(updatedDraft)
+                self.storedDraft = updatedDraft
+                closeReader()
+            } catch {
+                errorMessage = "읽던 위치를 저장하지 못했습니다. 다시 시도해 주세요."
+            }
+        }
+    }
+
+    private var currentDraftPages: [PageReadingDraftPage] {
+        readingSession.pages.map { page in
+            PageReadingDraftPage(
+                text: page.text,
+                language: page.language,
+                recognizedLineCount: page.recognizedLineCount,
+                omittedLineCount: page.omittedLineCount
+            )
+        }
+    }
+
     private func makeTemporaryDraft(now: Date = .now) -> PageReadingDraft? {
         guard !readingSession.pages.isEmpty else { return nil }
         return PageReadingDraft(
@@ -1667,14 +1734,7 @@ struct PageReaderView: View {
             expiresAt: now.addingTimeInterval(PageReadingDraftStore.retentionInterval),
             currentPageIndex: readingSession.currentPageIndex,
             activeCueIndex: readingSession.activeCueIndex,
-            pages: readingSession.pages.map { page in
-                PageReadingDraftPage(
-                    text: page.text,
-                    language: page.language,
-                    recognizedLineCount: page.recognizedLineCount,
-                    omittedLineCount: page.omittedLineCount
-                )
-            }
+            pages: currentDraftPages
         )
     }
 
@@ -1682,6 +1742,7 @@ struct PageReaderView: View {
         guard
             let storedDraft,
             activeDraftID == storedDraft.id,
+            currentContentMatchesStoredDraft,
             !readingSession.pages.isEmpty
         else {
             return
@@ -1693,14 +1754,7 @@ struct PageReaderView: View {
             expiresAt: storedDraft.expiresAt,
             currentPageIndex: readingSession.currentPageIndex,
             activeCueIndex: readingSession.activeCueIndex,
-            pages: readingSession.pages.map { page in
-                PageReadingDraftPage(
-                    text: page.text,
-                    language: page.language,
-                    recognizedLineCount: page.recognizedLineCount,
-                    omittedLineCount: page.omittedLineCount
-                )
-            }
+            pages: currentDraftPages
         )
         self.storedDraft = updatedDraft
 
@@ -1728,6 +1782,8 @@ struct PageReaderView: View {
     }
 
     private func closeReader() {
+        let destinationTab = pendingDestinationTab
+        pendingDestinationTab = nil
         cancelPendingRecognition()
         initialDraftTask?.cancel()
         initialDraftTask = nil
@@ -1740,6 +1796,9 @@ struct PageReaderView: View {
         readingSession.endSession()
         cameraScanner.clearFrozenFrame()
         resetCaptureContext()
+        if let destinationTab {
+            onCloseToTab(destinationTab)
+        }
         dismiss()
     }
 

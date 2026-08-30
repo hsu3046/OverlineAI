@@ -32,13 +32,18 @@ final class CommunityViewModel {
     private var loadedRankingKey: String?
     private var selectedBookTitle = ""
     private var selectedBookAuthor = ""
+    private var hasInitializedArticleSearch = false
 
     init(client: OverlineAPIClient = OverlineAPIClient()) {
         self.client = client
     }
 
     func selectDefaultBook(from library: ReadingLibrary) {
-        guard selectedBookID == nil, articleSearchText.trimmed.isEmpty else { return }
+        guard
+            !hasInitializedArticleSearch,
+            selectedBookID == nil,
+            articleSearchText.trimmed.isEmpty
+        else { return }
         guard let book = library.selectedBook ?? library.books.first else { return }
         selectArticleBook(book)
     }
@@ -54,6 +59,7 @@ final class CommunityViewModel {
     }
 
     func selectArticleBook(_ book: ReadingBook) {
+        hasInitializedArticleSearch = true
         selectedBookID = book.id
         selectedBookTitle = book.title.trimmed
         selectedBookAuthor = book.author.trimmed
@@ -79,6 +85,7 @@ final class CommunityViewModel {
     }
 
     func clearArticleSearch() {
+        hasInitializedArticleSearch = true
         articleSearchText = ""
         selectedBookID = nil
         selectedBookTitle = ""

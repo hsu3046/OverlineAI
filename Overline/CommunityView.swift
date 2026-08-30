@@ -24,14 +24,11 @@ struct CommunityView: View {
 
     private var activeContent: some View {
         List {
-            SectionHeader(title: "커뮤니티", systemImage: "person.3")
-                .communityListRow(top: 16, bottom: 10)
-
             CommunitySectionTabBar(
                 selection: selectedSectionBinding,
                 namespace: sectionTabNamespace
             )
-            .communityListRow(top: 0, bottom: 16)
+            .communityListRow(top: 20, bottom: 16)
 
             switch selectedSection {
             case .nearby:
