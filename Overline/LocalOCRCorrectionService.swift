@@ -54,7 +54,10 @@ actor LocalOCRCorrectionService {
         for sourceText: String,
         language: CaptureLanguage
     ) async -> String? {
-        let model = SystemLanguageModel.default
+        let model = SystemLanguageModel(
+            useCase: .general,
+            guardrails: .permissiveContentTransformations
+        )
         guard model.availability == .available else {
             log.info("local_ocr_correction_skipped reason=model_unavailable")
             return nil
