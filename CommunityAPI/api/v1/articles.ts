@@ -36,6 +36,8 @@ export default createGETHandler(async (url) => {
 
   return {
     body,
-    cacheControl: "public, s-maxage=1800, stale-while-revalidate=3600",
+    cacheControl: result.warnings.length === 0
+      ? "public, s-maxage=1800, stale-while-revalidate=3600"
+      : "no-store",
   };
 });

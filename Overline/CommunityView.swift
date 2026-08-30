@@ -101,6 +101,13 @@ struct CommunityView: View {
         }
         .communityListRow(top: 0, bottom: 12)
 
+        if !model.placeWarnings.isEmpty && !model.places.isEmpty {
+            Label("일부 장소를 불러오지 못했습니다.", systemImage: "exclamationmark.circle")
+                .font(.overline(.caption))
+                .foregroundStyle(Color.overlineMutedInk)
+                .communityListRow(top: 0, bottom: 10)
+        }
+
         if let locationError = locationService.errorMessage {
             CommunityMessageRow(
                 systemImage: "location.slash",
@@ -125,6 +132,15 @@ struct CommunityView: View {
         } else if model.isLoadingPlaces && model.places.isEmpty {
             CommunityLoadingRow(message: "가까운 책 공간을 찾고 있습니다")
                 .communityListRow(top: 12, bottom: 16)
+        } else if !model.placeWarnings.isEmpty && model.places.isEmpty {
+            CommunityMessageRow(
+                systemImage: "exclamationmark.circle",
+                title: "일부 장소를 불러오지 못했습니다",
+                message: "잠시 후 다시 확인해 주세요.",
+                actionTitle: "다시 시도",
+                action: { Task { await loadSelectedSection(force: true) } }
+            )
+            .communityListRow(top: 0, bottom: 16)
         } else if model.places.isEmpty {
             CommunityMessageRow(
                 systemImage: "mappin.slash",
@@ -268,6 +284,15 @@ struct CommunityView: View {
         } else if model.isLoadingArticles && model.articles.isEmpty {
             CommunityLoadingRow(message: "책에 관한 글을 찾고 있습니다")
                 .communityListRow(top: 12, bottom: 16)
+        } else if !model.articleWarnings.isEmpty && model.articles.isEmpty {
+            CommunityMessageRow(
+                systemImage: "exclamationmark.circle",
+                title: "일부 출처를 불러오지 못했습니다",
+                message: "잠시 후 다시 확인해 주세요.",
+                actionTitle: "다시 시도",
+                action: { Task { await loadSelectedSection(force: true) } }
+            )
+            .communityListRow(top: 0, bottom: 16)
         } else if model.articles.isEmpty {
             CommunityMessageRow(
                 systemImage: "text.magnifyingglass",

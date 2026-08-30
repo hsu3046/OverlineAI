@@ -18,6 +18,7 @@ final class CommunityViewModel {
     private(set) var places: [CommunityPlace] = []
     private(set) var articles: [CommunityArticle] = []
     private(set) var rankings: [CommunityRankingItem] = []
+    private(set) var placeWarnings: [String] = []
     private(set) var articleWarnings: [String] = []
     private(set) var isLoadingPlaces = false
     private(set) var isLoadingArticles = false
@@ -139,6 +140,7 @@ final class CommunityViewModel {
         placeRequestID = requestID
         isLoadingPlaces = true
         placeError = nil
+        placeWarnings = []
         defer {
             if placeRequestID == requestID {
                 isLoadingPlaces = false
@@ -158,7 +160,8 @@ final class CommunityViewModel {
                 key == placeKey(latitude: latitude, longitude: longitude)
             else { return }
             places = response.items
-            loadedPlaceKey = key
+            placeWarnings = response.warnings ?? []
+            loadedPlaceKey = placeWarnings.isEmpty ? key : nil
         } catch is CancellationError {
             return
         } catch {
@@ -209,7 +212,7 @@ final class CommunityViewModel {
             else { return }
             articles = response.items
             articleWarnings = response.warnings ?? []
-            loadedArticleKey = key
+            loadedArticleKey = articleWarnings.isEmpty ? key : nil
         } catch is CancellationError {
             return
         } catch {
