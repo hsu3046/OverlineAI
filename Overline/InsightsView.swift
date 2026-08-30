@@ -1319,7 +1319,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
             title: "AI로 전송되는 정보",
-            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다."
+            body: "인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
@@ -1376,7 +1376,7 @@ private struct OverlineTermsView: View {
         OverlineTerm(
             systemImage: "sparkles",
             title: "AI 기능 사용",
-            body: "인사이트, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다."
+            body: "인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다."
         ),
         OverlineTerm(
             systemImage: "square.and.arrow.up",

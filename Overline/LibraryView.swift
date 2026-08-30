@@ -650,6 +650,20 @@ struct ScrapbookView: View {
                     }
                     .listRowChrome(top: 16, bottom: 18)
 
+                    ReadingRecordSection(
+                        book: book,
+                        addRecord: {
+                            presentedSheet = .editReadingRecord(book.id, nil)
+                        },
+                        editRecord: { recordID in
+                            presentedSheet = .editReadingRecord(book.id, recordID)
+                        },
+                        showHistory: {
+                            presentedSheet = .readingRecordHistory(book.id)
+                        }
+                    )
+                    .listRowChrome(top: 0, bottom: 16)
+
                     if !book.highlights.isEmpty {
                         OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
                             .listRowChrome(top: 0, bottom: 12)
@@ -712,6 +726,14 @@ struct ScrapbookView: View {
                         HighlightEditorSheet(highlightID: highlightID) { highlightID in
                             deleteHighlight(highlightID)
                         }
+                            .presentationDetents([.large])
+                            .presentationDragIndicator(.visible)
+                    case .readingRecordHistory(let bookID):
+                        ReadingRecordHistorySheet(bookID: bookID)
+                            .presentationDetents([.large])
+                            .presentationDragIndicator(.visible)
+                    case .editReadingRecord(let bookID, let recordID):
+                        ReadingRecordEditorSheet(bookID: bookID, recordID: recordID)
                             .presentationDetents([.large])
                             .presentationDragIndicator(.visible)
                     }
@@ -800,11 +822,16 @@ struct ScrapbookView: View {
 private enum ScrapbookSheet: Identifiable {
     case editBook(ReadingBook.ID)
     case editHighlight(Highlight.ID)
+    case readingRecordHistory(ReadingBook.ID)
+    case editReadingRecord(ReadingBook.ID, ReadingRecord.ID?)
 
     var id: String {
         switch self {
         case .editBook(let id): "editBook-\(id.uuidString)"
         case .editHighlight(let id): "editHighlight-\(id.uuidString)"
+        case .readingRecordHistory(let id): "readingRecordHistory-\(id.uuidString)"
+        case .editReadingRecord(let bookID, let recordID):
+            "editReadingRecord-\(bookID.uuidString)-\(recordID?.uuidString ?? "new")"
         }
     }
 }
