@@ -118,6 +118,14 @@ struct ContentView: View {
                     }
                 }
             }
+
+            if loadedTabs.contains(.community) {
+                persistentTabLayer(.community) {
+                    NavigationStack {
+                        CommunityView(isActive: selectedTab == .community)
+                    }
+                }
+            }
         }
     }
 
@@ -344,6 +352,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     case capture
     case library
     case insights
+    case community
 
     var id: String { rawValue }
 
@@ -352,6 +361,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .capture: "캡처"
         case .library: "책장"
         case .insights: "인사이트"
+        case .community: "커뮤니티"
         }
     }
 
@@ -360,6 +370,7 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
         case .capture: "text.viewfinder"
         case .library: "books.vertical"
         case .insights: "sparkles"
+        case .community: "person.3"
         }
     }
 
