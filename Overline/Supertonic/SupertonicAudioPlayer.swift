@@ -1,4 +1,10 @@
 import AVFoundation
+import OSLog
+
+private let supertonicAudioLogger = Logger(
+    subsystem: "aib.Overline",
+    category: "SupertonicAudio"
+)
 
 @MainActor
 final class SupertonicAudioPlayer {
@@ -6,6 +12,7 @@ final class SupertonicAudioPlayer {
     private let playerNode = AVAudioPlayerNode()
     private var completion: (() -> Void)?
     private var connectedSampleRate: Double?
+    private var isAudioSessionActive = false
 
     init() {
         engine.attach(playerNode)
@@ -16,7 +23,7 @@ final class SupertonicAudioPlayer {
     }
 
     func play(_ audio: SupertonicAudio, completion: @escaping () -> Void) throws {
-        stop()
+        cancelScheduledPlayback()
 
         guard
             !audio.samples.isEmpty,
@@ -41,14 +48,20 @@ final class SupertonicAudioPlayer {
             channel.update(from: sourceAddress, count: audio.samples.count)
         }
 
-        if connectedSampleRate != audio.sampleRate {
-            engine.disconnectNodeOutput(playerNode)
-            engine.connect(playerNode, to: engine.mainMixerNode, format: format)
-            connectedSampleRate = audio.sampleRate
-        }
-        if !engine.isRunning {
-            engine.prepare()
-            try engine.start()
+        do {
+            try activatePlaybackSessionIfNeeded()
+            if connectedSampleRate != audio.sampleRate {
+                engine.disconnectNodeOutput(playerNode)
+                engine.connect(playerNode, to: engine.mainMixerNode, format: format)
+                connectedSampleRate = audio.sampleRate
+            }
+            if !engine.isRunning {
+                engine.prepare()
+                try engine.start()
+            }
+        } catch {
+            stop()
+            throw error
         }
 
         self.completion = completion
@@ -72,19 +85,67 @@ final class SupertonicAudioPlayer {
     }
 
     func stop() {
-        playerNode.stop()
-        completion = nil
+        cancelScheduledPlayback()
+        if engine.isRunning {
+            engine.stop()
+        }
+        deactivateAudioSession()
     }
 
     func tearDown() {
         stop()
-        engine.stop()
     }
 
     private func finishScheduledPlayback() {
         let completion = completion
         self.completion = nil
         completion?()
+    }
+
+    private func cancelScheduledPlayback() {
+        playerNode.stop()
+        completion = nil
+    }
+
+    private func activatePlaybackSessionIfNeeded() throws {
+        let audioSession = AVAudioSession.sharedInstance()
+        guard
+            !isAudioSessionActive
+                || audioSession.category != .playback
+                || audioSession.mode != .default
+                || !engine.isRunning
+        else {
+            return
+        }
+
+        logAudioSession(event: "activation_requested", session: audioSession)
+        try audioSession.setCategory(.playback, mode: .default)
+        try audioSession.setActive(true)
+        isAudioSessionActive = true
+        logAudioSession(event: "activated", session: audioSession)
+    }
+
+    private func deactivateAudioSession() {
+        guard isAudioSessionActive else { return }
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+            isAudioSessionActive = false
+            logAudioSession(event: "deactivated", session: audioSession)
+        } catch {
+            supertonicAudioLogger.error(
+                "supertonic_audio event=deactivation_failed error=\(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    private func logAudioSession(event: String, session: AVAudioSession) {
+        let outputs = session.currentRoute.outputs
+            .map(\.portType.rawValue)
+            .joined(separator: ",")
+        supertonicAudioLogger.info(
+            "supertonic_audio event=\(event, privacy: .public) category=\(session.category.rawValue, privacy: .public) mode=\(session.mode.rawValue, privacy: .public) outputs=\(outputs, privacy: .public) engine_running=\(self.engine.isRunning, privacy: .public)"
+        )
     }
 }
 

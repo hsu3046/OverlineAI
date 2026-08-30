@@ -416,7 +416,6 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
 
         supertonicPlaybackTask?.cancel()
         supertonicPlaybackTask = nil
-        supertonicAudioPlayer.stop()
         currentPageIndex = pageIndex
         activeCueIndex = cueIndex
         activePlaybackUsesSupertonic = true
@@ -452,6 +451,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
             } catch {
                 guard supertonicPlaybackToken == token else { return }
                 supertonicSynthesisTasks[id] = nil
+                supertonicAudioPlayer.stop()
                 playbackErrorMessage = error.localizedDescription
                 activePlaybackUsesSupertonic = false
                 isPreparingSpeech = false
@@ -531,6 +531,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
                 speakCurrentPage(startingAtCueIndex: next.cueIndex)
             }
         } else {
+            supertonicAudioPlayer.stop()
             activePlaybackUsesSupertonic = false
             isWaitingForNextPage = true
         }

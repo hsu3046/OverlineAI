@@ -376,6 +376,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         guard supertonicPlaybackToken == token else { return }
         supertonicPlaybackTask = nil
         supertonicPlaybackToken = nil
+        supertonicAudioPlayer.stop()
         activeHighlightID = nil
         previewLanguage = nil
         releaseSupertonicRuntime()

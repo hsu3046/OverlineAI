@@ -53,6 +53,8 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 
 `AVSpeechSynthesizer.usesApplicationAudioSession` remains `false`. Overline does not create a separate spoken-audio processing session for quote playback.
 
+고품질 온디바이스 음성은 재생 직전에 공유 오디오 세션을 `playback` 카테고리와 `default` 모드로 활성화한다. 이 설정은 AirPods를 포함한 Bluetooth A2DP 출력 경로를 유지한다. 연속 페이지 낭독 중에는 세션을 유지하고, 미리 듣기 또는 낭독이 완전히 끝나면 `AVAudioEngine`을 중지한 뒤 세션을 비활성화한다.
+
 ## 실제 기기 검증
 
 1. On iPhone, install a high-quality or premium voice from Settings > Accessibility > Read & Speak > Voices. Siri voices are not selectable by third-party apps.
@@ -66,6 +68,7 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 9. 고품질 음성을 선택한 상태에서 한국어 페이지를 읽고, 첫 문장 준비 표시 뒤 다음 문장들이 연속 재생되는지 확인한다.
 10. 영어와 일본어 페이지가 기존 iPhone 음성으로 재생되는지 확인한다.
 11. 음성 팩을 삭제하면 iPhone 음성으로 돌아가고 다시 받을 수 있는지 확인한다.
+12. AirPods 연결 상태에서 미리 듣기와 페이지 낭독이 AirPods로 출력되고, 앱 안에서도 출력 장치를 바꿀 수 있는지 확인한다.
 
 ## 라이선스
 
