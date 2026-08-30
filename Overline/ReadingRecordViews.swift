@@ -399,27 +399,20 @@ struct ReadingRecordEditorSheet: View {
             Button {
                 showsReviewEditor = true
             } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    Text(review.trimmed.isEmpty ? "이 책을 읽고 남은 생각" : review)
-                        .font(.overline(.body, weight: review.trimmed.isEmpty ? .regular : .medium))
-                        .foregroundStyle(
-                            review.trimmed.isEmpty
-                                ? Color.overlineMutedInk.opacity(0.46)
-                                : Color.overlineInk
-                        )
-                        .lineLimit(4)
-                        .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-
-                    Image(systemName: "pencil")
-                        .font(.overline(.body, weight: .semibold))
-                        .foregroundStyle(Color.overlineAccent)
-                        .frame(width: 28, height: 28)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 18)
-                .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
-                .contentShape(Rectangle())
+                Text(review.trimmed.isEmpty ? "이 책을 읽고 남은 생각" : review)
+                    .font(.overline(.body, weight: review.trimmed.isEmpty ? .regular : .medium))
+                    .foregroundStyle(
+                        review.trimmed.isEmpty
+                            ? Color.overlineMutedInk.opacity(0.46)
+                            : Color.overlineInk
+                    )
+                    .lineLimit(4)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity, minHeight: 148, alignment: .topLeading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .overlineGlassControl(cornerRadius: 22)
@@ -790,8 +783,9 @@ private struct InteractiveReadingRatingStars: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 ForEach(1...5, id: \.self) { index in
-                    Image(systemName: symbolName(for: index))
-                        .font(.system(size: 30, weight: .semibold))
+                    let symbol = symbolName(for: index)
+                    Image(systemName: symbol)
+                        .font(.system(size: 30, weight: symbol == "star" ? .regular : .semibold))
                         .symbolRenderingMode(.monochrome)
                         .foregroundStyle(Color.overlineHighlight)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -854,8 +848,9 @@ private struct ReadingRatingStars: View {
     var body: some View {
         HStack(spacing: 3) {
             ForEach(1...5, id: \.self) { index in
-                Image(systemName: symbolName(for: index))
-                    .font(.system(size: size, weight: .semibold))
+                let symbol = symbolName(for: index)
+                Image(systemName: symbol)
+                    .font(.system(size: size, weight: symbol == "star" ? .regular : .semibold))
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(Color.overlineHighlight)
             }
