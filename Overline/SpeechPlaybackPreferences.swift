@@ -36,7 +36,7 @@ struct SpeechPlaybackControls: View {
     @Binding var sentencePause: Double
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 24) {
             SteppedSpeechSlider(
                 title: "읽기 속도",
                 value: $rateMultiplier,
@@ -46,8 +46,6 @@ struct SpeechPlaybackControls: View {
                 valueText: { preciseValueText($0, suffix: "×") },
                 tickText: { String(format: "%.1f", $0) }
             )
-
-            Divider()
 
             SteppedSpeechSlider(
                 title: "문장 간격",

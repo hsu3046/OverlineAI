@@ -927,7 +927,7 @@ private struct QuoteSpeechSettingsView: View {
                     rateMultiplier: speechRateBinding,
                     sentencePause: sentencePauseBinding
                 )
-                .settingsRowSeparator()
+                .listRowSeparator(.hidden)
 
                 if player.speechEngineChoice == .supertonic {
                     supertonicSettings
@@ -1016,7 +1016,7 @@ private struct QuoteSpeechSettingsView: View {
                     Label("고품질 음성 받기", systemImage: "arrow.down.circle")
                 }
             }
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
 
         case .downloading(let progress):
             VStack(alignment: .leading, spacing: 10) {
@@ -1027,7 +1027,7 @@ private struct QuoteSpeechSettingsView: View {
                 ProgressView(value: progress)
                     .tint(Color.overlineAccent)
             }
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
 
         case .installed:
             NavigationLink {
@@ -1038,36 +1038,59 @@ private struct QuoteSpeechSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
 
-            Picker("음질", selection: supertonicQualityBinding) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("음질")
+                    .font(.overline(.body, weight: .medium))
+
                 ForEach(SupertonicQuality.allCases) { quality in
-                    Text(quality.title)
-                        .tag(quality)
+                    Button {
+                        player.setSupertonicQuality(quality)
+                    } label: {
+                        HStack {
+                            Text(quality.title)
+                                .foregroundStyle(Color.primary)
+
+                            Spacer()
+
+                            Image(systemName: player.supertonicQuality == quality ? "circle.inset.filled" : "circle")
+                                .foregroundStyle(
+                                    player.supertonicQuality == quality
+                                        ? Color.overlineAccent
+                                        : Color.overlineMutedInk
+                                )
+                        }
+                        .frame(minHeight: 40)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(
+                        player.supertonicQuality == quality ? .isSelected : []
+                    )
                 }
             }
-            .pickerStyle(.segmented)
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
 
             Button(role: .destructive) {
                 showsRemovalConfirmation = true
             } label: {
                 Label("고품질 음성 팩 삭제", systemImage: "trash")
             }
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
 
         case .failed(let message):
             Text(message)
                 .font(.overline(.footnote))
                 .foregroundStyle(.red)
-                .settingsRowSeparator()
+                .listRowSeparator(.hidden)
 
             Button {
                 showsDownloadConfirmation = true
             } label: {
                 Label("다시 받기", systemImage: "arrow.clockwise")
             }
-            .settingsRowSeparator()
+            .listRowSeparator(.hidden)
         }
     }
 
@@ -1081,7 +1104,7 @@ private struct QuoteSpeechSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .settingsRowSeparator()
+        .listRowSeparator(.hidden)
     }
 
     private func selectedSystemVoiceTitle(for language: CaptureLanguage) -> String {
@@ -1101,13 +1124,6 @@ private struct QuoteSpeechSettingsView: View {
                     player.setSpeechEngineChoice(choice)
                 }
             }
-        )
-    }
-
-    private var supertonicQualityBinding: Binding<SupertonicQuality> {
-        Binding(
-            get: { player.supertonicQuality },
-            set: { player.setSupertonicQuality($0) }
         )
     }
 
