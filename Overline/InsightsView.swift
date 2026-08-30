@@ -920,14 +920,8 @@ private struct QuoteSpeechSettingsView: View {
     var body: some View {
         Form {
             Section("한국어") {
-                Picker("음성 방식", selection: engineBinding) {
-                    ForEach(SpeechEngineChoice.allCases) { engine in
-                        Text(engine.title)
-                            .tag(engine)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .settingsRowSeparator()
+                SpeechEnginePicker(selection: engineBinding)
+                    .listRowSeparator(.hidden, edges: .bottom)
 
                 if player.speechEngineChoice == .supertonic {
                     supertonicSettings
@@ -1111,6 +1105,39 @@ private struct QuoteSpeechSettingsView: View {
         )
     }
 
+}
+
+private struct SpeechEnginePicker: View {
+    @Binding var selection: SpeechEngineChoice
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(SpeechEngineChoice.allCases) { engine in
+                Button {
+                    selection = engine
+                } label: {
+                    Text(engine.title)
+                        .font(.overline(.body, weight: .medium))
+                        .foregroundStyle(
+                            selection == engine ? Color.overlineInk : Color.overlineMutedInk
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background {
+                            if selection == engine {
+                                Capsule(style: .continuous)
+                                    .fill(Color(uiColor: .systemBackground))
+                                    .shadow(color: Color.black.opacity(0.06), radius: 2, y: 1)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == engine ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Color(uiColor: .secondarySystemFill), in: Capsule(style: .continuous))
+    }
 }
 
 private struct SupertonicVoiceSelectionView: View {
