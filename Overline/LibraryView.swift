@@ -665,8 +665,10 @@ struct ScrapbookView: View {
                     .listRowChrome(top: 0, bottom: 16)
 
                     if !book.highlights.isEmpty {
-                        Divider()
-                            .overlay(Color.overlineInk.opacity(0.1))
+                        Rectangle()
+                            .fill(Color.overlineInk.opacity(0.1))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 1)
                             .listRowChrome(top: 0, bottom: 18)
 
                         OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")

@@ -285,12 +285,6 @@ struct ReadingRecordEditorSheet: View {
             }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .onAppear(perform: loadRecord)
-            .onChange(of: status) { _, newStatus in
-                if [.completed, .abandoned].contains(newStatus), !hasEndDate {
-                    hasEndDate = true
-                    endedAt = max(startedAt, Calendar.current.startOfDay(for: .now))
-                }
-            }
             .onChange(of: startedAt) { _, newStartDate in
                 if endedAt < newStartDate {
                     endedAt = newStartDate
@@ -324,7 +318,7 @@ struct ReadingRecordEditorSheet: View {
             Menu {
                 ForEach(ReadingStatus.allCases) { option in
                     Button {
-                        status = option
+                        selectStatus(option)
                     } label: {
                         Label(option.title, systemImage: option.systemImage)
                     }
@@ -443,6 +437,14 @@ struct ReadingRecordEditorSheet: View {
 
     private var book: ReadingBook? {
         library.book(with: bookID)
+    }
+
+    private func selectStatus(_ newStatus: ReadingStatus) {
+        status = newStatus
+        if [.completed, .abandoned].contains(newStatus), !hasEndDate {
+            hasEndDate = true
+            endedAt = max(startedAt, Calendar.current.startOfDay(for: .now))
+        }
     }
 
     private func loadRecord() {
