@@ -31,16 +31,6 @@ struct ContentView: View {
             }
             .tint(Color.overlineAccent)
             .background(OverlineCanvasBackground().ignoresSafeArea())
-            .scrollDismissesKeyboard(.interactively)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button(action: dismissKeyboard) {
-                        Image(systemName: "keyboard.chevron.compact.down")
-                    }
-                    .accessibilityLabel("키보드 닫기")
-                }
-            }
             .alert("음성을 재생하지 못했습니다", isPresented: quoteSpeechErrorIsPresented) {
                 Button("확인", role: .cancel) {
                     quoteSpeechPlayer.clearSpeechError()
@@ -97,11 +87,14 @@ struct ContentView: View {
             if loadedTabs.contains(.capture) {
                 persistentTabLayer(.capture) {
                     NavigationStack {
-                        if let cameraScanner {
-                            CaptureView(cameraScanner: cameraScanner, isActive: selectedTab == .capture)
-                        } else {
-                            CameraStartupPlaceholder()
+                        Group {
+                            if let cameraScanner {
+                                CaptureView(cameraScanner: cameraScanner, isActive: selectedTab == .capture)
+                            } else {
+                                CameraStartupPlaceholder()
+                            }
                         }
+                        .overlineKeyboardDismissToolbar(isEnabled: selectedTab == .capture)
                     }
                 }
             }
@@ -113,6 +106,7 @@ struct ContentView: View {
                             rootResetToken: libraryRootResetToken,
                             isActive: selectedTab == .library
                         )
+                        .overlineKeyboardDismissToolbar(isEnabled: selectedTab == .library)
                     }
                 }
             }
@@ -121,6 +115,7 @@ struct ContentView: View {
                 persistentTabLayer(.insights) {
                     NavigationStack {
                         InsightsView(isActive: selectedTab == .insights)
+                            .overlineKeyboardDismissToolbar(isEnabled: selectedTab == .insights)
                     }
                 }
             }
@@ -129,6 +124,7 @@ struct ContentView: View {
                 persistentTabLayer(.community) {
                     NavigationStack {
                         CommunityView(isActive: selectedTab == .community)
+                            .overlineKeyboardDismissToolbar(isEnabled: selectedTab == .community)
                     }
                 }
             }

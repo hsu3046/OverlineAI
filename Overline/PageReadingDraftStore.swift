@@ -8,18 +8,76 @@ nonisolated struct PageReadingDraftPage: Codable, Equatable, Sendable {
     let omittedLineCount: Int
 }
 
-nonisolated struct PageReadingDraft: Codable, Identifiable, Sendable {
+nonisolated struct PageReadingDraft: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     let createdAt: Date
+    let updatedAt: Date
     let expiresAt: Date
     let currentPageIndex: Int
     let activeCueIndex: Int
     let pages: [PageReadingDraftPage]
+
+    init(
+        id: UUID,
+        createdAt: Date,
+        updatedAt: Date? = nil,
+        expiresAt: Date,
+        currentPageIndex: Int,
+        activeCueIndex: Int,
+        pages: [PageReadingDraftPage]
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt ?? createdAt
+        self.expiresAt = expiresAt
+        self.currentPageIndex = currentPageIndex
+        self.activeCueIndex = activeCueIndex
+        self.pages = pages
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdAt
+        case updatedAt
+        case expiresAt
+        case currentPageIndex
+        case activeCueIndex
+        case pages
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        expiresAt = try container.decode(Date.self, forKey: .expiresAt)
+        currentPageIndex = try container.decode(Int.self, forKey: .currentPageIndex)
+        activeCueIndex = try container.decode(Int.self, forKey: .activeCueIndex)
+        pages = try container.decode([PageReadingDraftPage].self, forKey: .pages)
+    }
+}
+
+private nonisolated struct PageReadingDraftArchive: Codable {
+    static let currentVersion = 1
+
+    let version: Int
+    let drafts: [PageReadingDraft]
+
+    init(drafts: [PageReadingDraft]) {
+        version = Self.currentVersion
+        self.drafts = drafts
+    }
+}
+
+private nonisolated struct DecodedPageReadingDraftArchive {
+    let drafts: [PageReadingDraft]
+    let needsRewrite: Bool
 }
 
 actor PageReadingDraftStore {
     static let shared = PageReadingDraftStore()
     nonisolated static let retentionInterval: TimeInterval = 7 * 24 * 60 * 60
+    nonisolated static let maximumDraftCount = 3
 
     private static let folderName = "TemporaryPageReading"
     private static let fileName = "reading-session.json"
@@ -36,30 +94,33 @@ actor PageReadingDraftStore {
             .appendingPathComponent(Self.fileName, isDirectory: false)
     }
 
-    func load(now: Date = .now) async -> PageReadingDraft? {
-        guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
+    func load(now: Date = .now) async -> [PageReadingDraft] {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
 
         let data: Data
         do {
             data = try await readProtectedData()
         } catch {
-            return nil
+            return []
         }
 
+        let decodedArchive: DecodedPageReadingDraftArchive
         do {
-            let draft = try JSONDecoder().decode(PageReadingDraft.self, from: data)
-            guard isValid(draft), draft.expiresAt > now else {
-                try? delete()
-                return nil
-            }
-            return draft
+            decodedArchive = try decodeArchive(from: data)
         } catch {
-            try? delete()
-            return nil
+            try? deleteFile()
+            return []
         }
+
+        let drafts = normalized(decodedArchive.drafts, now: now)
+        if decodedArchive.needsRewrite || drafts != decodedArchive.drafts {
+            try? persist(drafts)
+        }
+        return drafts
     }
 
-    func save(_ draft: PageReadingDraft, now: Date = .now) throws {
+    @discardableResult
+    func save(_ draft: PageReadingDraft, now: Date = .now) async throws -> [PageReadingDraft] {
         guard
             isValid(draft),
             draft.expiresAt > draft.createdAt,
@@ -68,21 +129,76 @@ actor PageReadingDraftStore {
             throw CocoaError(.fileWriteInvalidFileName)
         }
 
-        try prepareFolder()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(draft)
-        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
-        try excludeFromBackup(fileURL)
+        var drafts = await load(now: now)
+        drafts.removeAll { $0.id == draft.id }
+        drafts.append(draft)
+        drafts = normalized(drafts, now: now)
+        try persist(drafts)
+        return drafts
     }
 
-    func delete() throws {
-        guard fileManager.fileExists(atPath: fileURL.path) else { return }
-        try fileManager.removeItem(at: fileURL)
+    @discardableResult
+    func delete(id: PageReadingDraft.ID, now: Date = .now) async throws -> [PageReadingDraft] {
+        var drafts = await load(now: now)
+        drafts.removeAll { $0.id == id }
+        try persist(drafts)
+        return drafts
     }
 
     func removeIfExpired(now: Date = .now) async {
         _ = await load(now: now)
+    }
+
+    private func decodeArchive(from data: Data) throws -> DecodedPageReadingDraftArchive {
+        let decoder = JSONDecoder()
+        if let archive = try? decoder.decode(PageReadingDraftArchive.self, from: data) {
+            return DecodedPageReadingDraftArchive(
+                drafts: archive.drafts,
+                needsRewrite: archive.version != PageReadingDraftArchive.currentVersion
+            )
+        }
+
+        let legacyDraft = try decoder.decode(PageReadingDraft.self, from: data)
+        return DecodedPageReadingDraftArchive(drafts: [legacyDraft], needsRewrite: true)
+    }
+
+    private func normalized(_ drafts: [PageReadingDraft], now: Date) -> [PageReadingDraft] {
+        var draftsByID: [PageReadingDraft.ID: PageReadingDraft] = [:]
+        for draft in drafts where isValid(draft) && draft.expiresAt > now {
+            if let existing = draftsByID[draft.id], existing.updatedAt >= draft.updatedAt {
+                continue
+            }
+            draftsByID[draft.id] = draft
+        }
+
+        return draftsByID.values
+            .sorted { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
+                return lhs.createdAt > rhs.createdAt
+            }
+            .prefix(Self.maximumDraftCount)
+            .map { $0 }
+    }
+
+    private func persist(_ drafts: [PageReadingDraft]) throws {
+        guard !drafts.isEmpty else {
+            try deleteFile()
+            return
+        }
+
+        try prepareFolder()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(PageReadingDraftArchive(drafts: drafts))
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        try excludeFromBackup(fileURL)
+    }
+
+    private func deleteFile() throws {
+        guard fileManager.fileExists(atPath: fileURL.path) else { return }
+        try fileManager.removeItem(at: fileURL)
     }
 
     private func readProtectedData() async throws -> Data {

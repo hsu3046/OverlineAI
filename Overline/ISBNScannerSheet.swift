@@ -53,6 +53,7 @@ struct ISBNScannerSheet: View {
                     #endif
                 }
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 

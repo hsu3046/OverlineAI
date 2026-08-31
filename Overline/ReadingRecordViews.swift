@@ -616,6 +616,7 @@ private struct ReadingReviewFullScreenEditor: View {
                     dismissButton: .cancel(Text("확인"))
                 )
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 
@@ -928,6 +929,7 @@ private struct ReadingReviewDraftPreviewSheet: View {
                     draftText = String(newValue.prefix(3_000))
                 }
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 }

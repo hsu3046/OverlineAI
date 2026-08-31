@@ -87,18 +87,6 @@ struct LibraryView: View {
                     systemImage: "quote.opening"
                 )
 
-                if library.highlightCount > displayedHighlights.count {
-                    Button {
-                        presentedSheet = .highlightBrowser
-                    } label: {
-                        Text("모두 보기")
-                            .font(.overline(.caption, weight: .semibold))
-                            .foregroundStyle(Color.overlineAccent.opacity(0.86))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("최근 글조각 모두 보기")
-                }
-
                 if !library.recentHighlights.isEmpty {
                     Button {
                         presentedSheet = .highlightSpeech
@@ -117,6 +105,21 @@ struct LibraryView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("글조각 이어듣기")
+                }
+
+                if library.highlightCount > displayedHighlights.count {
+                    Button {
+                        presentedSheet = .highlightBrowser
+                    } label: {
+                        Image(systemName: "tray.full")
+                            .font(.system(size: 17, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
+                            .frame(width: 34, height: 34)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("최근 글조각 모두 보기")
                 }
             }
             .listRowChrome(top: 10, bottom: 8)
@@ -832,6 +835,7 @@ private struct HighlightBrowserSheet: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            .overlineKeyboardDismissToolbar()
         }
         .presentationBackground(.thinMaterial)
         .onDisappear {
@@ -1397,30 +1401,30 @@ struct ScrapbookCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(highlight.stickyTone.paper.opacity(0.94))
-                    .frame(width: 6)
+            VStack(alignment: .leading, spacing: 10) {
+                if let bookTitle = visibleBookTitle {
+                    HStack(alignment: .center, spacing: 6) {
+                        Image(systemName: "book.closed")
+                            .font(.overline(.caption, weight: .bold))
+                            .symbolRenderingMode(.hierarchical)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    if let bookTitle = visibleBookTitle {
-                        HStack(alignment: .center, spacing: 6) {
-                            Image(systemName: "book.closed")
-                                .font(.overline(.caption, weight: .bold))
-                                .symbolRenderingMode(.hierarchical)
-
-                            SearchHighlightedText(
-                                text: bookTitle,
-                                query: searchQuery,
-                                font: .overline(.caption, weight: .semibold),
-                                foregroundStyle: Color.overlineMutedInk.opacity(0.76),
-                                lineSpacing: 0
-                            )
-                            .lineLimit(1)
-                        }
-                        .foregroundStyle(Color.overlineMutedInk.opacity(0.76))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        SearchHighlightedText(
+                            text: bookTitle,
+                            query: searchQuery,
+                            font: .overline(.caption, weight: .semibold),
+                            foregroundStyle: Color.overlineMutedInk.opacity(0.76),
+                            lineSpacing: 0
+                        )
+                        .lineLimit(1)
                     }
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.76))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                HStack(alignment: .top, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(highlight.stickyTone.paper.opacity(0.94))
+                        .frame(width: 6)
 
                     SearchHighlightedText(
                         text: highlight.text,
@@ -1429,17 +1433,18 @@ struct ScrapbookCard: View {
                         foregroundStyle: Color.overlineInk,
                         lineSpacing: 5
                     )
-
-                    if !highlight.memo.isEmpty {
-                        ScrapbookMemoNote(
-                            memo: highlight.memo,
-                            tone: highlight.stickyTone,
-                            searchQuery: searchQuery
-                        )
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !highlight.memo.isEmpty {
+                    ScrapbookMemoNote(
+                        memo: highlight.memo,
+                        tone: highlight.stickyTone,
+                        searchQuery: searchQuery
+                    )
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture(perform: edit)
             .accessibilityElement(children: .combine)

@@ -36,7 +36,6 @@ struct CaptureView: View {
     @State private var delayedCameraStartTask: Task<Void, Never>?
     @State private var delayedCameraStopTask: Task<Void, Never>?
     @State private var isHighlighterGestureActive = false
-    @AppStorage("capture.autoRecognitionEnabled") private var isAutoRecognitionEnabled = true
     @AppStorage("capture.lastExperienceMode") private var lastExperienceMode = CaptureExperienceMode.highlight.rawValue
     @State private var selectedTone: StickyTone = .yellow
     @State private var isPageReaderPresented = false
@@ -57,7 +56,6 @@ struct CaptureView: View {
                         selectedLineIDs: $selectedLineIDs,
                         selectedCameraLineIDs: $selectedCameraLineIDs,
                         selectedPhotoItem: $selectedPhotoItem,
-                        isAutoRecognitionEnabled: $isAutoRecognitionEnabled,
                         cameraScanner: cameraScanner,
                         isRecognizingText: isRecognizingText,
                         selectedTone: selectedTone,
@@ -1207,7 +1205,6 @@ private struct CaptureStage: View {
     @Binding var selectedLineIDs: Set<Int>
     @Binding var selectedCameraLineIDs: Set<CameraRecognizedTextLine.ID>
     @Binding var selectedPhotoItem: PhotosPickerItem?
-    @Binding var isAutoRecognitionEnabled: Bool
     let cameraScanner: CameraTextScanner
     let isRecognizingText: Bool
     let selectedTone: StickyTone
@@ -1236,6 +1233,9 @@ private struct CaptureStage: View {
     @State private var pendingCameraSelectionMode: CameraGestureSelectionMode?
     @State private var cameraRecognitionAttemptCount = 0
     @State private var cameraFeedbackPhase: CameraCaptureFeedbackPhase = .idle
+    @State private var primaryCaptureMode: CameraPrimaryCaptureMode = .live
+    @State private var isWholePageRecognitionPending = false
+    @State private var primaryCaptureTimeoutTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { proxy in
@@ -1328,7 +1328,6 @@ private struct CaptureStage: View {
                 if !isCaptureLocked {
                     CameraHUD(
                         selectedPhotoItem: $selectedPhotoItem,
-                        isAutoRecognitionEnabled: $isAutoRecognitionEnabled,
                         scannerStatus: cameraScanner.status,
                         isRecognizingText: isRecognizingText || cameraScanner.isAnalyzingText,
                         isTorchOn: cameraScanner.isTorchOn,
@@ -1344,42 +1343,11 @@ private struct CaptureStage: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
 
-                if isCaptureLocked {
-                    CompletedCameraCaptureActions(
-                        canContinue: canContinueCapture,
-                        startNew: restartLiveCameraCapture,
-                        continueCapture: continueLiveCameraCapture
-                    )
+                if !isCaptureLocked {
+                    CameraCaptureFeedbackPill(phase: cameraFeedbackPhase)
                         .padding(.bottom, 22)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .transition(
-                            .move(edge: .bottom)
-                                .combined(with: .opacity)
-                                .combined(with: .scale(scale: 0.96))
-                        )
-                } else {
-                    if showsManualRecognitionControls {
-                        ManualCameraRecognitionControls(
-                            phase: cameraFeedbackPhase,
-                            canRecognize: showsManualRecognitionButton,
-                            recognizeAction: {
-                                startManualCameraRecognition(in: proxy.size)
-                            },
-                            resetAction: resetManualCameraSelection
-                        )
-                        .padding(.bottom, 22)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .transition(
-                            .move(edge: .bottom)
-                                .combined(with: .opacity)
-                                .combined(with: .scale(scale: 0.96))
-                        )
-                    } else {
-                        CameraCaptureFeedbackPill(phase: cameraFeedbackPhase)
-                            .padding(.bottom, 22)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                            .allowsHitTesting(false)
-                    }
+                        .allowsHitTesting(false)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -1390,6 +1358,10 @@ private struct CaptureStage: View {
             .shadow(color: .black.opacity(0.22), radius: 18, y: 10)
             .accessibilityLabel("Overline capture preview")
             .onChange(of: cameraScanner.recognitionUpdateCount) { _, _ in
+                if isWholePageRecognitionPending {
+                    resolveWholePageSelection()
+                    return
+                }
                 guard recognitionStartedStrokeID == pendingCameraStrokeID else { return }
                 resolvePendingCameraSelection(in: proxy.size)
             }
@@ -1397,6 +1369,10 @@ private struct CaptureStage: View {
                 if !isAnalyzing {
                     guard !isCaptureLocked else { return }
                     if pendingCameraCommitTask == nil {
+                        if isWholePageRecognitionPending {
+                            finishFailedWholePageRecognition()
+                            return
+                        }
                         let shouldShowMiss = pendingCameraCommit &&
                             recognitionStartedStrokeID == pendingCameraStrokeID &&
                             selectedCameraLineIDs.isEmpty &&
@@ -1405,7 +1381,9 @@ private struct CaptureStage: View {
                         pendingCameraDragRects.removeAll()
                         activeHighlighterPoints.removeAll()
                         pendingCameraGestures.removeAll()
-                        cameraScanner.clearFrozenFrame()
+                        if primaryCaptureMode == .live {
+                            cameraScanner.clearFrozenFrame()
+                        }
                         pendingCameraCommit = false
                         pendingCameraStrokeID = nil
                         recognitionStartedStrokeID = nil
@@ -1417,16 +1395,53 @@ private struct CaptureStage: View {
                     }
                 }
             }
-            .onChange(of: isAutoRecognitionEnabled) { _, isEnabled in
-                guard isEnabled else { return }
-                resetManualCameraSelection()
+            .onChange(of: cameraScanner.frozenFrameImage != nil) { _, hasFrozenFrame in
+                guard primaryCaptureMode == .freezing, hasFrozenFrame else { return }
+                primaryCaptureTimeoutTask?.cancel()
+                primaryCaptureTimeoutTask = nil
+                withAnimation(.smooth(duration: 0.20, extraBounce: 0.02)) {
+                    primaryCaptureMode = .frozen
+                }
+                setCameraFeedbackPhase(.idle)
+            }
+            .overlay(alignment: .bottom) {
+                if cameraScanner.canUseLiveCamera {
+                    Group {
+                        if isCaptureLocked {
+                            CompletedCameraCaptureActions(
+                                canContinue: canContinueCapture,
+                                startNew: restartLiveCameraCapture,
+                                continueCapture: continueLiveCameraCapture
+                            )
+                        } else {
+                            CameraPrimaryCaptureControls(
+                                action: primaryCaptureAction,
+                                isBusy: isPrimaryCaptureBusy,
+                                showsRetake: primaryCaptureMode != .live,
+                                primaryAction: {
+                                    performPrimaryCaptureAction(in: proxy.size)
+                                },
+                                retakeAction: returnToLiveCamera
+                            )
+                        }
+                    }
+                    .offset(y: CaptureStageMetrics.primaryControlOffset)
+                    .transition(
+                        .move(edge: .bottom)
+                            .combined(with: .opacity)
+                            .combined(with: .scale(scale: 0.96))
+                    )
+                }
             }
         }
         .aspectRatio(0.84, contentMode: .fit)
+        .padding(.bottom, cameraScanner.canUseLiveCamera ? CaptureStageMetrics.primaryControlSpace : 0)
         .onDisappear {
             cancelPendingCameraCommit()
             cancelPendingCameraMiss()
             cancelDelayedCameraRecognition()
+            primaryCaptureTimeoutTask?.cancel()
+            primaryCaptureTimeoutTask = nil
             pendingCameraDragRects.removeAll()
             activeHighlighterPoints.removeAll()
             pendingCameraGestures.removeAll()
@@ -1439,8 +1454,29 @@ private struct CaptureStage: View {
             pendingCameraSelectionMode = nil
             cameraGestureStartLocation = nil
             ignoresCurrentCameraDrag = false
+            primaryCaptureMode = .live
+            isWholePageRecognitionPending = false
             setCameraFeedbackPhase(.idle)
         }
+    }
+
+    private var isAutoRecognitionEnabled: Bool {
+        primaryCaptureMode == .live
+    }
+
+    private var primaryCaptureAction: CameraPrimaryCaptureAction {
+        guard primaryCaptureMode != .live else { return .capture }
+        return pendingCameraGestures.isEmpty ? .wholePage : .selectedText
+    }
+
+    private var isPrimaryCaptureBusy: Bool {
+        if isRecognizingText || primaryCaptureMode == .freezing || cameraScanner.isAnalyzingText {
+            return true
+        }
+        if primaryCaptureAction == .selectedText {
+            return !showsManualRecognitionButton
+        }
+        return false
     }
 
     private var showsManualRecognitionButton: Bool {
@@ -1452,14 +1488,111 @@ private struct CaptureStage: View {
             !cameraScanner.isAnalyzingText
     }
 
-    private var showsManualRecognitionControls: Bool {
-        !isAutoRecognitionEnabled &&
-            pendingCameraCommit &&
-            !pendingCameraGestures.isEmpty
-    }
-
     private var hasPendingCameraGesturePoints: Bool {
         !activeHighlighterPoints.isEmpty || pendingCameraGestures.contains { !$0.points.isEmpty }
+    }
+
+    private func performPrimaryCaptureAction(in size: CGSize) {
+        switch primaryCaptureAction {
+        case .capture:
+            captureCurrentFrame()
+        case .wholePage:
+            beginWholePageRecognition()
+        case .selectedText:
+            startManualCameraRecognition(in: size)
+        }
+    }
+
+    private func captureCurrentFrame() {
+        guard primaryCaptureMode == .live else { return }
+        guard !isCaptureLocked, !isRecognizingText, !cameraScanner.isAnalyzingText else { return }
+
+        cancelPendingCameraCommit()
+        cancelPendingCameraMiss()
+        cancelDelayedCameraRecognition()
+        pendingCameraCommit = false
+        pendingCameraDragRects.removeAll()
+        pendingCameraGestures.removeAll()
+        activeHighlighterPoints.removeAll()
+        selectedCameraLineIDs.removeAll()
+        confirmedCameraLines.removeAll()
+        pendingCameraStrokeID = nil
+        recognitionStartedStrokeID = nil
+        pendingCameraSelectionMode = nil
+        cameraScanner.stopSwipeRecognition()
+        cameraScanner.start(owner: "highlight.capture_button")
+
+        withAnimation(.smooth(duration: 0.20, extraBounce: 0.02)) {
+            primaryCaptureMode = .freezing
+        }
+        setCameraFeedbackPhase(.holding)
+        cameraScanner.freezeNextFrame()
+        schedulePrimaryCaptureTimeout()
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    private func beginWholePageRecognition() {
+        guard primaryCaptureMode == .frozen else { return }
+        guard cameraScanner.frozenFrameImage != nil else {
+            returnToLiveCamera()
+            return
+        }
+        guard !cameraScanner.isAnalyzingText else { return }
+
+        selectedCameraLineIDs.removeAll()
+        confirmedCameraLines.removeAll()
+        pendingCameraCommit = true
+        isWholePageRecognitionPending = true
+        setCameraFeedbackPhase(.reading)
+        cameraScanner.beginFrozenFrameRecognition()
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    private func resolveWholePageSelection() {
+        guard isWholePageRecognitionPending else { return }
+        let selectedIDs = cameraScanner.fullPageBodyLineIDs()
+        guard !selectedIDs.isEmpty else { return }
+
+        isWholePageRecognitionPending = false
+        selectedCameraLineIDs = selectedIDs
+        cameraScanner.cacheSelectedLines(for: selectedIDs)
+        commitPendingCameraSelection()
+    }
+
+    private func finishFailedWholePageRecognition() {
+        guard isWholePageRecognitionPending else { return }
+        isWholePageRecognitionPending = false
+        pendingCameraCommit = false
+        selectedCameraLineIDs.removeAll()
+        setCameraFeedbackPhase(.idle)
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        onMiss()
+    }
+
+    private func returnToLiveCamera() {
+        primaryCaptureTimeoutTask?.cancel()
+        primaryCaptureTimeoutTask = nil
+        isWholePageRecognitionPending = false
+        resetManualCameraSelection()
+        withAnimation(.smooth(duration: 0.20, extraBounce: 0.02)) {
+            primaryCaptureMode = .live
+        }
+        cameraScanner.start(owner: "highlight.retake")
+    }
+
+    private func schedulePrimaryCaptureTimeout() {
+        primaryCaptureTimeoutTask?.cancel()
+        primaryCaptureTimeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, primaryCaptureMode == .freezing else { return }
+
+            cameraScanner.clearFrozenFrame()
+            primaryCaptureMode = .live
+            primaryCaptureTimeoutTask = nil
+            setCameraFeedbackPhase(.idle)
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            onMiss()
+        }
     }
 
     private func selectLine(from previousLocation: CGPoint?, to location: CGPoint, in size: CGSize) {
@@ -1487,7 +1620,7 @@ private struct CaptureStage: View {
                 let hasQueuedManualGestures = !isAutoRecognitionEnabled && !pendingCameraGestures.isEmpty
                 activeHighlighterPoints.removeAll()
                 pendingCameraDragRects.removeAll()
-                if !hasQueuedManualGestures {
+                if !hasQueuedManualGestures, primaryCaptureMode == .live {
                     cameraScanner.clearFrozenFrame()
                 }
                 cameraScanner.stopSwipeRecognition()
@@ -1742,6 +1875,9 @@ private struct CaptureStage: View {
     }
 
     private func resetLockedCameraCapture() {
+        primaryCaptureTimeoutTask?.cancel()
+        primaryCaptureTimeoutTask = nil
+        isWholePageRecognitionPending = false
         cancelPendingCameraCommit()
         cancelPendingCameraMiss()
         cancelDelayedCameraRecognition()
@@ -1761,6 +1897,7 @@ private struct CaptureStage: View {
 
         withAnimation(.smooth(duration: 0.22, extraBounce: 0.02)) {
             isCaptureLocked = false
+            primaryCaptureMode = .live
         }
     }
 
@@ -1876,7 +2013,9 @@ private struct CaptureStage: View {
             pendingCameraDragRects.removeAll()
             activeHighlighterPoints.removeAll()
             pendingCameraGestures.removeAll()
-            cameraScanner.clearFrozenFrame()
+            if primaryCaptureMode == .live {
+                cameraScanner.clearFrozenFrame()
+            }
             pendingCameraMissTask = nil
             pendingCameraStrokeID = nil
             recognitionStartedStrokeID = nil
@@ -1899,7 +2038,7 @@ private struct CaptureStage: View {
         cancelDelayedCameraRecognition()
         cameraScanner.stopSwipeRecognition()
         cameraScanner.start(owner: "highlight.stroke")
-        if isAutoRecognitionEnabled || pendingCameraGestures.isEmpty || cameraScanner.frozenFrameImage == nil {
+        if primaryCaptureMode == .live {
             cameraScanner.freezeNextFrame()
         }
         activeCameraStrokeID += 1
@@ -2451,6 +2590,8 @@ private enum CaptureStageMetrics {
     static let focusHorizontalPadding: CGFloat = 26
     static let focusTopPadding: CGFloat = 46
     static let focusBottomPadding: CGFloat = 30
+    static let primaryControlOffset: CGFloat = 64
+    static let primaryControlSpace: CGFloat = 72
 
     static func focusRect(in size: CGSize) -> CGRect {
         CGRect(
@@ -2747,6 +2888,88 @@ private struct PendingCameraGesture: Identifiable {
     let mode: CameraGestureSelectionMode
 }
 
+private enum CameraPrimaryCaptureMode: Equatable {
+    case live
+    case freezing
+    case frozen
+}
+
+private enum CameraPrimaryCaptureAction: Equatable {
+    case capture
+    case wholePage
+    case selectedText
+
+    var title: String {
+        switch self {
+        case .capture: "캡처"
+        case .wholePage: "전체"
+        case .selectedText: "선택 완료"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .capture: "camera.fill"
+        case .wholePage: "doc.text.magnifyingglass"
+        case .selectedText: "checkmark"
+        }
+    }
+}
+
+private struct CameraPrimaryCaptureControls: View {
+    let action: CameraPrimaryCaptureAction
+    let isBusy: Bool
+    let showsRetake: Bool
+    let primaryAction: () -> Void
+    let retakeAction: () -> Void
+
+    var body: some View {
+        ZStack {
+            Button(action: primaryAction) {
+                HStack(spacing: 8) {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: action.systemImage)
+                    }
+
+                    Text(action.title)
+                }
+                .font(.overline(.callout, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 124, height: 54)
+                .background(Color.overlineAccent, in: Capsule(style: .continuous))
+                .shadow(color: Color.overlineAccent.opacity(0.24), radius: 10, y: 5)
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .accessibilityLabel(action.title)
+
+            HStack {
+                if showsRetake {
+                    Button(action: retakeAction) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.overline(.headline, weight: .semibold))
+                            .foregroundStyle(Color.overlineMutedInk)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isBusy)
+                    .accessibilityLabel("다시 촬영")
+                }
+
+                Spacer()
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .padding(.horizontal, 8)
+    }
+}
+
 private enum CameraCaptureFeedbackPhase: Equatable {
     case idle
     case drawing
@@ -2757,9 +2980,9 @@ private enum CameraCaptureFeedbackPhase: Equatable {
 
     var isVisible: Bool {
         switch self {
-        case .manualReady, .holding, .reading, .saving:
+        case .holding, .reading, .saving:
             return true
-        case .idle, .drawing:
+        case .idle, .drawing, .manualReady:
             return false
         }
     }
@@ -2846,24 +3069,30 @@ private struct CompletedCameraCaptureActions: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            actionButton("새 글조각", systemImage: "camera", action: startNew)
+            actionButton("새 밑줄긋기", systemImage: "plus", action: startNew)
 
             if canContinue {
                 actionButton("이어 밑줄긋기", systemImage: "text.append", action: continueCapture)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .padding(.horizontal, 8)
     }
 
     private func actionButton(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.overline(.caption, weight: .bold))
-                .foregroundStyle(Color.white.opacity(0.90))
+                .foregroundStyle(Color.overlineAccent)
                 .lineLimit(1)
                 .padding(.horizontal, 15)
                 .padding(.vertical, 10)
-                .cameraCaptureFeedbackSurface()
+                .background(Color.overlineAccent.opacity(0.10), in: Capsule(style: .continuous))
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(Color.overlineAccent.opacity(0.18), lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -2898,43 +3127,6 @@ private struct ContinuationCaptureStrip: View {
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.46), lineWidth: 1)
-        }
-    }
-}
-
-private struct ManualCameraRecognitionControls: View {
-    let phase: CameraCaptureFeedbackPhase
-    let canRecognize: Bool
-    let recognizeAction: () -> Void
-    let resetAction: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button(action: resetAction) {
-                Image(systemName: "xmark")
-                    .font(.overline(.caption, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.86))
-                    .frame(width: 34, height: 34)
-                    .cameraCaptureFeedbackSurface()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("선택 취소")
-
-            if canRecognize {
-                Button(action: recognizeAction) {
-                    Label("인식", systemImage: "text.viewfinder")
-                        .font(.overline(.caption, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.90))
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .cameraCaptureFeedbackSurface()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("선택한 글조각 인식")
-            } else {
-                CameraCaptureFeedbackPill(phase: phase)
-            }
         }
     }
 }
@@ -3142,7 +3334,6 @@ private struct CaptureStatusStrip: View {
 
 private struct CameraHUD: View {
     @Binding var selectedPhotoItem: PhotosPickerItem?
-    @Binding var isAutoRecognitionEnabled: Bool
     let scannerStatus: CameraScannerStatus
     let isRecognizingText: Bool
     let isTorchOn: Bool
@@ -3170,16 +3361,6 @@ private struct CameraHUD: View {
             .buttonStyle(.plain)
             .disabled(isRecognizingText)
             .accessibilityLabel("사진에서 OCR")
-
-            Button {
-                isAutoRecognitionEnabled.toggle()
-            } label: {
-                HUDAutoButton(isActive: isAutoRecognitionEnabled)
-            }
-            .buttonStyle(.plain)
-            .disabled(isRecognizingText)
-            .accessibilityLabel("자동 인식")
-            .accessibilityValue(isAutoRecognitionEnabled ? "켜짐" : "꺼짐")
 
             Button(action: toggleTorch) {
                 HUDIconButton(
@@ -3223,40 +3404,6 @@ private struct CameraHUD: View {
             return "\(torchState), 어두움, 밝기 \(brightnessPercent)%"
         }
         return "\(torchState), 밝기 \(brightnessPercent)%"
-    }
-}
-
-private struct HUDAutoButton: View {
-    let isActive: Bool
-
-    var body: some View {
-        ZStack {
-            Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .semibold))
-                .symbolRenderingMode(.hierarchical)
-
-            if !isActive {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.58))
-                    .frame(width: 24, height: 1.4)
-                    .rotationEffect(.degrees(45))
-            }
-        }
-        .foregroundStyle(isActive ? Color.overlineAccent : Color.white.opacity(0.40))
-        .frame(width: 36, height: 36)
-        .background {
-            if isActive {
-                Circle()
-                    .fill(Color.overlineAccent.opacity(0.20))
-            }
-        }
-        .overlay {
-            if isActive {
-                Circle()
-                    .stroke(Color.overlineAccent.opacity(0.58), lineWidth: 1)
-            }
-        }
-        .contentShape(Rectangle())
     }
 }
 

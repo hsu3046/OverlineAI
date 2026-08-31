@@ -104,6 +104,7 @@ struct BookEditorSheet: View {
                     applyScannedISBN(isbn, didScanBarcode: didScanBarcode)
                 }
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 

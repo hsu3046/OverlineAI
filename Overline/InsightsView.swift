@@ -799,6 +799,7 @@ struct OverlineSettingsSheet: View {
             } message: {
                 Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 
@@ -1818,6 +1819,7 @@ private struct HighlightPickerSheet: View {
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .presentationBackground(.thinMaterial)
+        .overlineKeyboardDismissToolbar()
     }
 
     private func toggle(_ book: ReadingBook) {
