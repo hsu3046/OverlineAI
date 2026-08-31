@@ -122,6 +122,7 @@ struct HighlightEditorSheet: View {
             .onAppear {
                 loadHighlight()
             }
+            .overlineKeyboardDismissToolbar()
         }
     }
 
