@@ -41,6 +41,13 @@ struct ContentView: View {
                     .accessibilityLabel("키보드 닫기")
                 }
             }
+            .alert("음성을 재생하지 못했습니다", isPresented: quoteSpeechErrorIsPresented) {
+                Button("확인", role: .cancel) {
+                    quoteSpeechPlayer.clearSpeechError()
+                }
+            } message: {
+                Text(quoteSpeechPlayer.speechErrorMessage ?? "잠시 후 다시 시도해 주세요.")
+            }
             .environment(\.setBottomMenuCompact, setBottomMenuCompact)
             .environment(\.selectAppTab, selectTab)
             .onAppear {
@@ -56,7 +63,6 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else {
-                    quoteSpeechPlayer.stop()
                     Task {
                         await library.flushPendingPersistence()
                     }
@@ -70,20 +76,15 @@ struct ContentView: View {
             }
             .onChange(of: selectedTab) { _, _ in
                 setBottomMenuCompact(false)
-                if selectedTab != .library {
-                    quoteSpeechPlayer.stop()
-                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .overlineHighlightsRemoved)) { notification in
                 guard
-                    let activeHighlightID = quoteSpeechPlayer.activeHighlightID,
                     let removedHighlightIDs = notification.userInfo?[OverlineNotificationUserInfoKey.highlightIDs]
-                        as? [Highlight.ID],
-                    removedHighlightIDs.contains(activeHighlightID)
+                        as? [Highlight.ID]
                 else {
                     return
                 }
-                quoteSpeechPlayer.stop()
+                quoteSpeechPlayer.removeHighlights(Set(removedHighlightIDs))
             }
             .onChange(of: intentRouter.request) { _, request in
                 apply(request)
@@ -189,6 +190,20 @@ struct ContentView: View {
             try? await Task.sleep(nanoseconds: 450_000_000)
             AppUsageMetricsStore.recordOpen()
         }
+    }
+
+    private var quoteSpeechErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: {
+                quoteSpeechPlayer.speechErrorHighlightID != nil
+                    && quoteSpeechPlayer.speechErrorMessage != nil
+            },
+            set: { isPresented in
+                if !isPresented {
+                    quoteSpeechPlayer.clearSpeechError()
+                }
+            }
+        )
     }
 
 }

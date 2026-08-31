@@ -22,6 +22,10 @@ final class SupertonicAudioPlayer {
         playerNode.isPlaying
     }
 
+    func prepareForPlayback() throws {
+        try activatePlaybackSessionIfNeeded()
+    }
+
     func play(_ audio: SupertonicAudio, completion: @escaping () -> Void) throws {
         cancelScheduledPlayback()
 
@@ -79,8 +83,17 @@ final class SupertonicAudioPlayer {
         playerNode.pause()
     }
 
-    func resume() {
+    func markAudioSessionInterrupted() {
+        isAudioSessionActive = false
+    }
+
+    func resume() throws {
         guard !playerNode.isPlaying else { return }
+        try activatePlaybackSessionIfNeeded()
+        if !engine.isRunning, connectedSampleRate != nil {
+            engine.prepare()
+            try engine.start()
+        }
         playerNode.play()
     }
 

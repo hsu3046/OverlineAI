@@ -536,18 +536,33 @@ private struct InsightSectionHeader: View {
     }
 }
 
+enum OverlineSettingsDestination: Hashable {
+    case textSpeech
+}
+
 struct OverlineSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
     let settings: LLMSettingsStore
+    private let presentsTextSpeechDirectly: Bool
+    @State private var navigationPath: [OverlineSettingsDestination]
     @State private var isTestingConnection = false
     @State private var connectionTestResult: LLMConnectionTestResult?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
 
+    init(
+        settings: LLMSettingsStore,
+        initialDestination: OverlineSettingsDestination? = nil
+    ) {
+        self.settings = settings
+        presentsTextSpeechDirectly = initialDestination == .textSpeech
+        _navigationPath = State(initialValue: initialDestination.map { [$0] } ?? [])
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Form {
                 Section {
                     LLMActiveModelSummary(settings: settings)
@@ -686,9 +701,7 @@ struct OverlineSettingsSheet: View {
                 }
 
                 Section("텍스트 낭독") {
-                    NavigationLink {
-                        QuoteSpeechSettingsView(player: quoteSpeechPlayer)
-                    } label: {
+                    NavigationLink(value: OverlineSettingsDestination.textSpeech) {
                         Label {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("음성 선택")
@@ -750,6 +763,15 @@ struct OverlineSettingsSheet: View {
             }
             .navigationTitle("설정")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: OverlineSettingsDestination.self) { destination in
+                switch destination {
+                case .textSpeech:
+                    QuoteSpeechSettingsView(
+                        player: quoteSpeechPlayer,
+                        onDone: presentsTextSpeechDirectly ? { dismiss() } : nil
+                    )
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     OverlineDoneToolbarButton {
@@ -914,8 +936,14 @@ struct OverlineSettingsSheet: View {
 
 private struct QuoteSpeechSettingsView: View {
     let player: QuoteSpeechPlayer
+    let onDone: (() -> Void)?
     @State private var showsDownloadConfirmation = false
     @State private var showsRemovalConfirmation = false
+
+    init(player: QuoteSpeechPlayer, onDone: (() -> Void)? = nil) {
+        self.player = player
+        self.onDone = onDone
+    }
 
     var body: some View {
         Form {
@@ -954,6 +982,13 @@ private struct QuoteSpeechSettingsView: View {
         }
         .navigationTitle("텍스트 낭독")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let onDone {
+                ToolbarItem(placement: .topBarTrailing) {
+                    OverlineDoneToolbarButton(action: onDone)
+                }
+            }
+        }
         .confirmationDialog(
             "고품질 음성 팩을 받을까요?",
             isPresented: $showsDownloadConfirmation,
