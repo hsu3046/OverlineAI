@@ -28,7 +28,7 @@ Overline은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독�
 - 다운로드 후에는 인터넷 연결 없이 합성한다. 낭독 본문은 외부로 전송하지 않는다.
 - 여성 5종(`F1`~`F5`)과 남성 5종(`M1`~`M5`)을 모두 제공하며 기본은 `F1`이다.
 - 생성 단계는 `균형` 8단계를 기본으로 하고, 사용자가 `고음질` 12단계를 선택할 수 있다.
-- 모델은 앱 시작이나 카메라 전환 때 준비하지 않는다. 실제 고품질 낭독 요청 시 지연 로드하고 낭독 세션이 끝나면 메모리에서 해제한다.
+- 모델은 앱 시작이나 카메라 전환 때 준비하지 않는다. 페이지 촬영을 완료하거나 임시 글을 불러온 뒤 첫 문장을 소리 없이 준비하고, 낭독 세션이 끝나면 메모리에서 해제한다.
 - 페이지 읽어주기는 문장 단위로 합성한다. 현재 문장을 재생하는 동안 다음 문장을 미리 합성해 문장 사이 대기를 줄인다.
 - 고품질 음성 팩이 없거나 한국어가 아닌 경우 기존 iPhone 음성 경로를 유지한다.
 
@@ -60,9 +60,11 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 
 ## 오디오 세션
 
-`AVSpeechSynthesizer.usesApplicationAudioSession` remains `false`. Overline does not create a separate spoken-audio processing session for quote playback.
+저장된 글조각 미리 듣기는 기존처럼 `AVSpeechSynthesizer.usesApplicationAudioSession`을 `false`로 유지한다. 페이지 읽어주기는 백그라운드 낭독을 위해 앱의 `playback` 오디오 세션을 사용한다.
 
 고품질 온디바이스 음성은 재생 직전에 공유 오디오 세션을 `playback` 카테고리와 `default` 모드로 활성화한다. 이 설정은 AirPods를 포함한 Bluetooth A2DP 출력 경로를 유지한다. 연속 페이지 낭독 중에는 세션을 유지하고, 미리 듣기 또는 낭독이 완전히 끝나면 `AVAudioEngine`을 중지한 뒤 세션을 비활성화한다.
+
+페이지 읽어주기는 Background Audio 모드를 사용한다. 사용자가 재생을 시작한 뒤에는 화면 잠금과 다른 앱 사용 중에도 낭독을 유지하며, 잠금 화면·제어 센터·AirPods의 재생과 일시정지 명령을 처리한다. 출력 장치가 분리되면 예기치 않은 스피커 재생을 막기 위해 일시정지한다. 앱을 강제로 종료한 경우에는 iOS가 프로세스를 끝내므로 재생을 유지하지 않는다.
 
 ## 실제 기기 검증
 
@@ -79,6 +81,8 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 11. 음성 팩을 삭제하면 iPhone 음성으로 돌아가고 다시 받을 수 있는지 확인한다.
 12. AirPods 연결 상태에서 미리 듣기와 페이지 낭독이 AirPods로 출력되고, 앱 안에서도 출력 장치를 바꿀 수 있는지 확인한다.
 13. 읽기 속도와 문장 간격을 바꾼 뒤 iPhone 음성과 고품질 온디바이스 음성에 각각 적용되는지 확인한다.
+14. 페이지 촬영 완료와 임시 글 복원 직후 자동 재생되지 않고, 재생 버튼을 눌렀을 때만 소리가 시작되는지 확인한다.
+15. iPhone 음성과 고품질 온디바이스 음성 각각에서 화면 잠금·앱 전환 중 재생과 잠금 화면 제어가 정상인지 확인한다.
 
 ## 라이선스
 
