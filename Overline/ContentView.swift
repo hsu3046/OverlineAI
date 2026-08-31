@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import AVFoundation
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -56,7 +57,6 @@ struct ContentView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else {
-                    quoteSpeechPlayer.stop()
                     Task {
                         await library.flushPendingPersistence()
                     }
@@ -70,20 +70,21 @@ struct ContentView: View {
             }
             .onChange(of: selectedTab) { _, _ in
                 setBottomMenuCompact(false)
-                if selectedTab != .library {
-                    quoteSpeechPlayer.stop()
-                }
             }
             .onReceive(NotificationCenter.default.publisher(for: .overlineHighlightsRemoved)) { notification in
                 guard
-                    let activeHighlightID = quoteSpeechPlayer.activeHighlightID,
                     let removedHighlightIDs = notification.userInfo?[OverlineNotificationUserInfoKey.highlightIDs]
-                        as? [Highlight.ID],
-                    removedHighlightIDs.contains(activeHighlightID)
+                        as? [Highlight.ID]
                 else {
                     return
                 }
-                quoteSpeechPlayer.stop()
+                quoteSpeechPlayer.removeHighlights(Set(removedHighlightIDs))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
+                quoteSpeechPlayer.handleAudioInterruption(notification)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
+                quoteSpeechPlayer.handleAudioRouteChange(notification)
             }
             .onChange(of: intentRouter.request) { _, request in
                 apply(request)

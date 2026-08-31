@@ -262,6 +262,9 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func togglePlayback() {
+        voiceSettings?.stop()
+        activateRemoteControlsIfNeeded()
+
         if isPaused {
             if activePlaybackUsesSupertonic {
                 if let pendingSupertonicAudio {
@@ -310,6 +313,16 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         let startCueIndex = pendingStartCueIndex ?? 0
         pendingStartCueIndex = nil
         speakCurrentPage(startingAtCueIndex: startCueIndex)
+    }
+
+    func stopForExternalPlayback() {
+        guard isSpeaking || isPaused || isPreparingSpeech else {
+            remoteControls.deactivate()
+            return
+        }
+        pendingStartCueIndex = activeCueIndex
+        stopPlayback()
+        remoteControls.deactivate()
     }
 
     func pauseIfNeeded() {
@@ -1315,6 +1328,9 @@ struct PageReaderView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
             readingSession.handleAudioRouteChange(notification)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .overlineQuoteSpeechWillStart)) { _ in
+            readingSession.stopForExternalPlayback()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
             cancelPendingRecognition()
