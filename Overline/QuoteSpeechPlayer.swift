@@ -83,6 +83,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     @ObservationIgnored private var prefetchedPlaylistItemID: Highlight.ID?
     @ObservationIgnored private var prefetchedPlaylistSynthesisTask: Task<SupertonicAudio, Error>?
     @ObservationIgnored private var supertonicIdleReleaseTask: Task<Void, Never>?
+    @ObservationIgnored private var pageReadingRuntimeOwnerID: ObjectIdentifier?
     @ObservationIgnored private let defaults = UserDefaults.standard
     @ObservationIgnored private let supertonicAssetStore: SupertonicAssetStore
     @ObservationIgnored private let supertonicEngine = SupertonicSpeechEngine()
@@ -346,10 +347,22 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func releaseSupertonicRuntime() {
+        pageReadingRuntimeOwnerID = nil
         cancelScheduledSupertonicRelease()
         Task { [supertonicEngine] in
             await supertonicEngine.unload()
         }
+    }
+
+    func claimSupertonicRuntime(for owner: AnyObject) {
+        pageReadingRuntimeOwnerID = ObjectIdentifier(owner)
+        cancelScheduledSupertonicRelease()
+    }
+
+    func releaseSupertonicRuntime(for owner: AnyObject) {
+        guard pageReadingRuntimeOwnerID == ObjectIdentifier(owner) else { return }
+        pageReadingRuntimeOwnerID = nil
+        scheduleSupertonicRelease()
     }
 
     func setSelectedVoiceIdentifier(_ identifier: String, for language: CaptureLanguage) {
@@ -514,7 +527,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func handleAudioInterruption(rawType: UInt?, rawOptions: UInt?) {
         guard
-            isActive,
+            isActive || previewVoiceKey != nil,
             let rawType,
             let type = AVAudioSession.InterruptionType(rawValue: rawType)
         else {
@@ -523,6 +536,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
         switch type {
         case .began:
+            if previewVoiceKey != nil, !isActive {
+                shouldResumeAfterInterruption = false
+                supertonicAudioPlayer.markAudioSessionInterrupted()
+                stopPlayback(releaseSupertonicRuntime: false)
+                return
+            }
             shouldResumeAfterInterruption = !isPaused
             supertonicAudioPlayer.markAudioSessionInterrupted()
             pause()
@@ -540,10 +559,14 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     private func handleAudioRouteChange(rawReason: UInt?) {
         guard
-            isActive,
+            isActive || previewVoiceKey != nil,
             let rawReason,
             AVAudioSession.RouteChangeReason(rawValue: rawReason) == .oldDeviceUnavailable
         else {
+            return
+        }
+        if previewVoiceKey != nil, !isActive {
+            stopPlayback(releaseSupertonicRuntime: false)
             return
         }
         pause()
