@@ -1222,6 +1222,7 @@ struct PageReaderView: View {
     @State private var isLyricsContentReady = false
     @State private var pageCountBeforeCapture = 0
     @State private var wasWaitingForNextPageBeforeCapture = false
+    @State private var wasPlayingBeforeCapture = false
     @State private var pageIndexBeforeCapture = 0
     @State private var cueIndexBeforeCapture = 0
     @State private var storedDrafts: [PageReadingDraft] = []
@@ -1317,6 +1318,10 @@ struct PageReaderView: View {
             Button("취소", role: .cancel, action: cancelNewReadingRequest)
         } message: {
             Text(newReadingConfirmationMessage)
+        }
+        .onChange(of: showsNewReadingConfirmation) { wasPresented, isPresented in
+            guard wasPresented, !isPresented, !isStartingNewReading else { return }
+            cancelNewReadingRequest()
         }
         .sheet(isPresented: $showsDraftPicker) {
             PageReadingDraftPickerSheet(
@@ -1761,6 +1766,7 @@ struct PageReaderView: View {
         errorMessage = nil
         pageCountBeforeCapture = readingSession.pages.count
         wasWaitingForNextPageBeforeCapture = readingSession.isWaitingForNextPage
+        wasPlayingBeforeCapture = readingSession.isSpeaking && !readingSession.isPaused
         pageIndexBeforeCapture = readingSession.currentPageIndex
         cueIndexBeforeCapture = readingSession.activeCueIndex
         readingSession.pauseIfNeeded()
@@ -1787,6 +1793,7 @@ struct PageReaderView: View {
         let originalPages = Array(readingSession.pages.prefix(pageCountBeforeCapture))
         let returnPageIndex = pageIndexBeforeCapture
         let returnCueIndex = cueIndexBeforeCapture
+        let shouldResumePlayback = wasPlayingBeforeCapture
 
         cancelPendingRecognition()
         finishTransitionTask?.cancel()
@@ -1810,6 +1817,9 @@ struct PageReaderView: View {
             atPageIndex: returnPageIndex,
             cueIndex: returnCueIndex
         )
+        if shouldResumePlayback {
+            readingSession.togglePlayback()
+        }
         resetCaptureContext()
     }
 
@@ -2230,9 +2240,11 @@ struct PageReaderView: View {
 
     private func makeTemporaryDraft(now: Date = .now) -> PageReadingDraft? {
         guard !readingSession.pages.isEmpty else { return nil }
-        let storedDraft = activeStoredDraft
+        let storedDraft = activeStoredDraft.flatMap { draft in
+            draft.expiresAt > now ? draft : nil
+        }
         return PageReadingDraft(
-            id: activeDraftID ?? UUID(),
+            id: storedDraft?.id ?? UUID(),
             createdAt: storedDraft?.createdAt ?? now,
             updatedAt: now,
             expiresAt: storedDraft?.expiresAt ?? now.addingTimeInterval(PageReadingDraftStore.retentionInterval),
@@ -2298,7 +2310,9 @@ struct PageReaderView: View {
 
     private var activeStoredDraft: PageReadingDraft? {
         guard let activeDraftID else { return nil }
-        return storedDrafts.first { $0.id == activeDraftID }
+        return storedDrafts.first {
+            $0.id == activeDraftID && $0.expiresAt > .now
+        }
     }
 
     private func deleteStoredDraft(_ draft: PageReadingDraft) {
@@ -2350,6 +2364,7 @@ struct PageReaderView: View {
     private func resetCaptureContext() {
         pageCountBeforeCapture = 0
         wasWaitingForNextPageBeforeCapture = false
+        wasPlayingBeforeCapture = false
         pageIndexBeforeCapture = 0
         cueIndexBeforeCapture = 0
     }

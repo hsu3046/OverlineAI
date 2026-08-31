@@ -104,17 +104,19 @@ actor PageReadingDraftStore {
             return []
         }
 
+        let decodedArchive: DecodedPageReadingDraftArchive
         do {
-            let decodedArchive = try decodeArchive(from: data)
-            let drafts = normalized(decodedArchive.drafts, now: now)
-            if decodedArchive.needsRewrite || drafts != decodedArchive.drafts {
-                try persist(drafts)
-            }
-            return drafts
+            decodedArchive = try decodeArchive(from: data)
         } catch {
             try? deleteFile()
             return []
         }
+
+        let drafts = normalized(decodedArchive.drafts, now: now)
+        if decodedArchive.needsRewrite || drafts != decodedArchive.drafts {
+            try? persist(drafts)
+        }
+        return drafts
     }
 
     @discardableResult

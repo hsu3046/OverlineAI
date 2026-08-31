@@ -1448,12 +1448,20 @@ final class CameraTextScanner {
     }
 
     func fullPageBodyLineIDs() -> Set<CameraRecognizedTextLine.ID> {
-        guard let pageBoundingBox = detectedPage?.boundingBox.standardized else { return [] }
-        let expandedPageBox = pageBoundingBox.insetBy(dx: -0.02, dy: -0.02)
-        let pageLines = lines.filter { line in
-            expandedPageBox.contains(
-                CGPoint(x: line.boundingBox.midX, y: line.boundingBox.midY)
-            )
+        let pageBoundingBox = detectedPage?.boundingBox.standardized
+        let pageLines: [CameraRecognizedTextLine]
+        if let pageBoundingBox {
+            let expandedPageBox = pageBoundingBox.insetBy(dx: -0.02, dy: -0.02)
+            let containedLines = lines.filter { line in
+                expandedPageBox.contains(
+                    CGPoint(x: line.boundingBox.midX, y: line.boundingBox.midY)
+                )
+            }
+            pageLines = containedLines.count >= max(3, lines.count / 2)
+                ? containedLines
+                : lines
+        } else {
+            pageLines = lines
         }
 
         let bodyLines = OCRPageMarginMetadataFilter.bodyLines(
@@ -1461,7 +1469,16 @@ final class CameraTextScanner {
             referenceLines: pageLines,
             pageBoundingBox: pageBoundingBox
         )
-        return Set(bodyLines.map(\.id))
+        if !bodyLines.isEmpty {
+            return Set(bodyLines.map(\.id))
+        }
+
+        let fallbackLines = OCRPageMarginMetadataFilter.bodyLines(
+            from: lines,
+            referenceLines: lines,
+            pageBoundingBox: nil
+        )
+        return Set(fallbackLines.map(\.id))
     }
 
     func toggleTorch() {
