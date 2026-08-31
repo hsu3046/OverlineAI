@@ -6,6 +6,7 @@ import SwiftUI
 extension Notification.Name {
     static let overlineHighlightsRemoved = Notification.Name("overline.highlightsRemoved")
     static let overlineQuoteSpeechWillStart = Notification.Name("overline.quoteSpeechWillStart")
+    static let overlinePageReadingWillStart = Notification.Name("overline.pageReadingWillStart")
 }
 
 enum OverlineNotificationUserInfoKey {

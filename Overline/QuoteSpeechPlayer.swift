@@ -62,6 +62,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private(set) var supertonicAssetState: SupertonicAssetState = .unavailable
     private(set) var speechRateMultiplier = SpeechPlaybackPreferences.defaultRate
     private(set) var sentencePause = SpeechPlaybackPreferences.defaultSentencePause
+    private(set) var playbackConfigurationRevision = 0
     private(set) var speechErrorMessage: String?
     private(set) var speechErrorHighlightID: Highlight.ID?
 
@@ -87,6 +88,8 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     @ObservationIgnored private let supertonicEngine = SupertonicSpeechEngine()
     @ObservationIgnored private let supertonicAudioPlayer = SupertonicAudioPlayer()
     @ObservationIgnored private let remoteControls = QuoteSpeechRemoteControls()
+    @ObservationIgnored private var audioInterruptionObserver: NSObjectProtocol?
+    @ObservationIgnored private var audioRouteChangeObserver: NSObjectProtocol?
 
     override init() {
         supertonicAssetStore = SupertonicAssetStore()
@@ -95,6 +98,16 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         loadPlaybackPreferences()
         supertonicAssetState = supertonicAssetStore.state
         loadSupertonicSelections()
+        registerAudioNotifications()
+    }
+
+    deinit {
+        if let audioInterruptionObserver {
+            NotificationCenter.default.removeObserver(audioInterruptionObserver)
+        }
+        if let audioRouteChangeObserver {
+            NotificationCenter.default.removeObserver(audioRouteChangeObserver)
+        }
     }
 
     var currentPlaylistItem: QuoteSpeechPlaylistItem? {
@@ -145,6 +158,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
 
         stopPlayback(releaseSupertonicRuntime: false)
+        NotificationCenter.default.post(name: .overlineQuoteSpeechWillStart, object: nil)
 
         previewVoiceKey = previewKey
         speakSystemText(
@@ -166,6 +180,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
 
         stopPlayback(releaseSupertonicRuntime: false)
+        NotificationCenter.default.post(name: .overlineQuoteSpeechWillStart, object: nil)
         previewVoiceKey = previewKey
         startSupertonicPlayback(
             text: CaptureLanguage.korean.speechPreviewText,
@@ -235,21 +250,27 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func setSpeechEngineChoice(_ choice: SpeechEngineChoice) {
+        guard speechEngineChoice != choice else { return }
         stop()
         speechEngineChoice = choice
         defaults.set(choice.rawValue, forKey: Self.supertonicEngineDefaultsKey)
+        playbackConfigurationRevision += 1
     }
 
     func setSelectedSupertonicVoice(_ voice: SupertonicVoicePreset) {
+        guard selectedSupertonicVoice != voice else { return }
         stop()
         selectedSupertonicVoice = voice
         defaults.set(voice.rawValue, forKey: Self.supertonicVoiceDefaultsKey)
+        playbackConfigurationRevision += 1
     }
 
     func setSupertonicQuality(_ quality: SupertonicQuality) {
+        guard supertonicQuality != quality else { return }
         stop()
         supertonicQuality = quality
         defaults.set(quality.rawValue, forKey: Self.supertonicQualityDefaultsKey)
+        playbackConfigurationRevision += 1
     }
 
     func setSpeechRateMultiplier(_ multiplier: Double) {
@@ -257,6 +278,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         guard abs(speechRateMultiplier - normalized) > 0.001 else { return }
         speechRateMultiplier = normalized
         defaults.set(normalized, forKey: SpeechPlaybackPreferences.rateDefaultsKey)
+        playbackConfigurationRevision += 1
     }
 
     func setSentencePause(_ pause: Double) {
@@ -264,6 +286,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         guard abs(sentencePause - normalized) > 0.001 else { return }
         sentencePause = normalized
         defaults.set(normalized, forKey: SpeechPlaybackPreferences.sentencePauseDefaultsKey)
+        playbackConfigurationRevision += 1
     }
 
     func installSupertonicPack() async {
@@ -331,10 +354,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
 
     func setSelectedVoiceIdentifier(_ identifier: String, for language: CaptureLanguage) {
         guard voiceOptions(for: language).contains(where: { $0.id == identifier }) else { return }
+        guard selectedVoiceIdentifier(for: language) != identifier else { return }
 
         stop()
         selectedVoiceIdentifiers[language.rawValue] = identifier
         defaults.set(identifier, forKey: voiceDefaultsKey(for: language))
+        playbackConfigurationRevision += 1
     }
 
     func logVoiceCatalog() {
@@ -459,10 +484,38 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    func handleAudioInterruption(_ notification: Notification) {
+    private func registerAudioNotifications() {
+        let callbackTarget = QuoteSpeechPlayerWeakReference(self)
+        audioInterruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            Task { @MainActor in
+                callbackTarget.value?.handleAudioInterruption(
+                    rawType: rawType,
+                    rawOptions: rawOptions
+                )
+            }
+        }
+        audioRouteChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor in
+                callbackTarget.value?.handleAudioRouteChange(rawReason: rawReason)
+            }
+        }
+    }
+
+    private func handleAudioInterruption(rawType: UInt?, rawOptions: UInt?) {
         guard
             isActive,
-            let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let rawType,
             let type = AVAudioSession.InterruptionType(rawValue: rawType)
         else {
             return
@@ -471,10 +524,10 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         switch type {
         case .began:
             shouldResumeAfterInterruption = !isPaused
+            supertonicAudioPlayer.markAudioSessionInterrupted()
             pause()
         case .ended:
-            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions ?? 0)
             let shouldResume = shouldResumeAfterInterruption && options.contains(.shouldResume)
             shouldResumeAfterInterruption = false
             if shouldResume {
@@ -485,10 +538,10 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    func handleAudioRouteChange(_ notification: Notification) {
+    private func handleAudioRouteChange(rawReason: UInt?) {
         guard
             isActive,
-            let rawReason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            let rawReason,
             AVAudioSession.RouteChangeReason(rawValue: rawReason) == .oldDeviceUnavailable
         else {
             return
@@ -1180,6 +1233,14 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     private static let supertonicEngineDefaultsKey = "overline.quoteSpeech.supertonic.engine"
     private static let supertonicVoiceDefaultsKey = "overline.quoteSpeech.supertonic.voice"
     private static let supertonicQualityDefaultsKey = "overline.quoteSpeech.supertonic.quality"
+}
+
+private final class QuoteSpeechPlayerWeakReference: @unchecked Sendable {
+    weak var value: QuoteSpeechPlayer?
+
+    init(_ value: QuoteSpeechPlayer) {
+        self.value = value
+    }
 }
 
 private extension CaptureLanguage {

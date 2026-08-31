@@ -7,7 +7,6 @@
 
 import SwiftUI
 import UIKit
-import AVFoundation
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -41,6 +40,13 @@ struct ContentView: View {
                     }
                     .accessibilityLabel("키보드 닫기")
                 }
+            }
+            .alert("음성을 재생하지 못했습니다", isPresented: quoteSpeechErrorIsPresented) {
+                Button("확인", role: .cancel) {
+                    quoteSpeechPlayer.clearSpeechError()
+                }
+            } message: {
+                Text(quoteSpeechPlayer.speechErrorMessage ?? "잠시 후 다시 시도해 주세요.")
             }
             .environment(\.setBottomMenuCompact, setBottomMenuCompact)
             .environment(\.selectAppTab, selectTab)
@@ -79,12 +85,6 @@ struct ContentView: View {
                     return
                 }
                 quoteSpeechPlayer.removeHighlights(Set(removedHighlightIDs))
-            }
-            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
-                quoteSpeechPlayer.handleAudioInterruption(notification)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { notification in
-                quoteSpeechPlayer.handleAudioRouteChange(notification)
             }
             .onChange(of: intentRouter.request) { _, request in
                 apply(request)
@@ -190,6 +190,20 @@ struct ContentView: View {
             try? await Task.sleep(nanoseconds: 450_000_000)
             AppUsageMetricsStore.recordOpen()
         }
+    }
+
+    private var quoteSpeechErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: {
+                quoteSpeechPlayer.speechErrorHighlightID != nil
+                    && quoteSpeechPlayer.speechErrorMessage != nil
+            },
+            set: { isPresented in
+                if !isPresented {
+                    quoteSpeechPlayer.clearSpeechError()
+                }
+            }
+        )
     }
 
 }

@@ -83,6 +83,10 @@ final class SupertonicAudioPlayer {
         playerNode.pause()
     }
 
+    func markAudioSessionInterrupted() {
+        isAudioSessionActive = false
+    }
+
     func resume() throws {
         guard !playerNode.isPlaying else { return }
         try activatePlaybackSessionIfNeeded()
