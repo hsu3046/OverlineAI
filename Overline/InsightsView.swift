@@ -575,41 +575,15 @@ struct OverlineSettingsSheet: View {
                 Section {
                     LLMActiveModelSummary(settings: settings)
                         .settingsRowSeparator()
-
-                    Button {
-                        Task {
-                            await testConnection()
-                        }
-                    } label: {
-                        HStack {
-                            Label(connectionTestTitle, systemImage: connectionTestSystemImage)
-                            Spacer()
-
-                            if isTestingConnection {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(
-                        isTestingConnection
-                            || !settings.allowsExternalAIDataSharing
-                            || !settings.hasCredential(for: settings.provider)
-                    )
-                    .listRowSeparator(.hidden, edges: .bottom)
-                    .settingsRowSeparator()
-
-                    if let connectionTestResult, !connectionTestResult.isSuccess {
-                        Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
-                            .font(.overline(.caption))
-                            .foregroundStyle(Color.overlineCoral)
-                            .settingsRowSeparator()
-                    }
                 } header: {
                     Text("현재 사용 중인 AI")
                 }
 
                 Section {
+                    Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
+                        .tint(Color.overlineAccent)
+                        .settingsRowSeparator()
+
                     Picker("제공자", selection: providerBinding) {
                         ForEach(LLMProvider.settingsOrder) { provider in
                             HStack(spacing: 10) {
@@ -642,7 +616,7 @@ struct OverlineSettingsSheet: View {
                                 .multilineTextAlignment(.trailing)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .font(.overline(.caption))
+                                .font(.overline(.body))
                                 .foregroundStyle(.secondary)
                         }
 
@@ -653,31 +627,50 @@ struct OverlineSettingsSheet: View {
                     }
                     .settingsRowSeparator()
 
-                    Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
-                        .tint(Color.overlineAccent)
-                        .settingsRowSeparator()
-                } header: {
-                    Text("AI 설정")
-                }
-
-                Section {
-                    ForEach(LLMProvider.settingsOrder) { provider in
-                        LLMAPIKeyRow(
-                            provider: provider,
-                            apiKey: Binding(
-                                get: { settings.apiKey(for: provider) },
-                                set: {
-                                    settings.setAPIKey($0, for: provider)
-                                    if provider == settings.provider {
-                                        connectionTestResult = nil
-                                    }
-                                }
-                            )
+                    LLMAPIKeyRow(
+                        provider: settings.provider,
+                        apiKey: Binding(
+                            get: { settings.apiKey(for: settings.provider) },
+                            set: {
+                                settings.setAPIKey($0, for: settings.provider)
+                                connectionTestResult = nil
+                            }
                         )
-                        .settingsRowSeparator()
+                    )
+                    .id(settings.provider)
+                    .settingsRowSeparator()
+
+                    Button {
+                        Task {
+                            await testConnection()
+                        }
+                    } label: {
+                        HStack {
+                            Label(connectionTestTitle, systemImage: connectionTestSystemImage)
+                            Spacer()
+
+                            if isTestingConnection {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .disabled(
+                        isTestingConnection
+                            || !settings.allowsExternalAIDataSharing
+                            || !settings.hasCredential(for: settings.provider)
+                    )
+                    .listRowSeparator(.hidden, edges: .bottom)
+                    .settingsRowSeparator()
+
+                    if let connectionTestResult, !connectionTestResult.isSuccess {
+                        Label(connectionTestResult.message, systemImage: "exclamationmark.circle")
+                            .font(.overline(.caption))
+                            .foregroundStyle(Color.overlineCoral)
+                            .settingsRowSeparator()
                     }
                 } header: {
-                    Text("API 키 설정")
+                    Text("외부 AI 설정")
                 }
 
                 Section("텍스트 낭독") {
@@ -738,6 +731,8 @@ struct OverlineSettingsSheet: View {
                     Text("보관함")
                 } footer: {
                     Text("API 키와 앱 설정은 포함하지 않습니다.")
+                        .font(.overline(.caption2))
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("개인 정보와 이용 조건") {
@@ -1719,7 +1714,7 @@ private struct LLMAPIKeyRow: View {
             LLMProviderIcon(provider: provider)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(provider.title)
+                Text("\(provider.title) API 키")
                     .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk)
 
@@ -1741,12 +1736,17 @@ private struct LLMActiveModelSummary: View {
             LLMProviderIcon(provider: settings.provider)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(settings.provider.title)
-                    .font(.overline(.subheadline, weight: .semibold))
-                    .foregroundStyle(Color.overlineInk)
-                Text(settings.selectedModelTitle)
-                    .font(.overline(.caption))
-                    .foregroundStyle(Color.overlineMutedInk)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(settings.provider.title)
+                        .font(.overline(.subheadline, weight: .semibold))
+                        .foregroundStyle(Color.overlineInk)
+
+                    Text(settings.selectedModelTitle)
+                        .font(.overline(.caption))
+                        .foregroundStyle(Color.overlineMutedInk)
+                        .lineLimit(1)
+                }
+
                 Text(settings.allowsExternalAIDataSharing ? "API 키 사용" : "AI 기능 꺼짐")
                     .font(.overline(.caption2, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
