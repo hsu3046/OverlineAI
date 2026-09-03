@@ -424,7 +424,7 @@ struct InsightsView: View {
 
     private func missingCredentialMessage(for provider: LLMProvider) -> String {
         if !llmSettings.allowsExternalAIDataSharing {
-            return "AI 설정에서 ‘AI로 글 보내기’를 켜 주세요."
+            return "AI 설정에서 ‘외부 AI 사용’을 켜 주세요."
         }
 
         if llmSettings.isCredentialRejected(for: provider) {
@@ -479,6 +479,7 @@ private extension View {
 
     func settingsRowSeparator() -> some View {
         self
+            .frame(maxWidth: .infinity, alignment: .leading)
             .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
             .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
     }
@@ -635,35 +636,28 @@ struct OverlineSettingsSheet: View {
                     .pickerStyle(.navigationLink)
                     .settingsRowSeparator()
 
-                    LabeledContent("모델 ID 직접 입력") {
-                        TextField(settings.provider.defaultModelID, text: modelBinding)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("모델 ID 직접 입력") {
+                            TextField(settings.provider.defaultModelID, text: modelBinding)
+                                .multilineTextAlignment(.trailing)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.overline(.caption))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
                             .font(.overline(.caption))
                             .foregroundStyle(.secondary)
-                    }
-                    .listRowSeparator(.hidden, edges: .bottom)
-                    .settingsRowSeparator()
-
-                    Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
-                        .font(.overline(.caption))
-                        .foregroundStyle(.secondary)
-                        .settingsRowSeparator()
-
-                    LabeledContent("인증") {
-                        Text("API 키 사용")
-                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .settingsRowSeparator()
 
-                    Toggle("AI로 글 보내기", isOn: aiDataSharingBinding)
+                    Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
                         .tint(Color.overlineAccent)
                         .settingsRowSeparator()
                 } header: {
                     Text("AI 설정")
-                } footer: {
-                    Text("켜면 AI 기능에 필요한 글조각, 메모와 책 정보가 \(settings.provider.title)에 전송됩니다. 제공자를 바꾸면 다시 확인합니다.")
                 }
 
                 Section {
@@ -683,7 +677,7 @@ struct OverlineSettingsSheet: View {
                         .settingsRowSeparator()
                     }
                 } header: {
-                    Text("API 키")
+                    Text("API 키 설정")
                 }
 
                 Section("텍스트 낭독") {
@@ -743,7 +737,7 @@ struct OverlineSettingsSheet: View {
                 } header: {
                     Text("보관함")
                 } footer: {
-                    Text("책, 글조각, 독서 기록과 인사이트를 한 파일로 보관합니다. API 키와 앱 설정은 포함하지 않습니다.")
+                    Text("API 키와 앱 설정은 포함하지 않습니다.")
                 }
 
                 Section("개인 정보와 이용 조건") {
@@ -1507,7 +1501,7 @@ private struct PrivacyTransmissionPolicyView: View {
     var body: some View {
         List {
             Section {
-                Toggle("AI로 글 보내기", isOn: aiDataSharingBinding)
+                Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
                     .tint(Color.overlineAccent)
             } footer: {
                 Text("켜면 AI 기능에 필요한 글조각, 메모와 책 정보가 \(settings.provider.title)에 전송됩니다. 끄면 AI 요청이 전송되지 않습니다.")
