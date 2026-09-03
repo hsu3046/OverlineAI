@@ -34,7 +34,7 @@ BZOGAK은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독한�
 
 의존성은 ONNX Runtime Swift Package `1.24.2`에 고정한다. 모델은 Supertonic 3 리비전 `3cadd1ee6394adea1bd021217a0e650ede09a323`, Swift 추론 도우미는 Supertonic 저장소 커밋 `7e2804f96016a7028cb1ed627353c61c1e9dd281`을 기준으로 한다.
 
-ONNX Runtime `1.24.2`의 iOS 바이너리는 실행 코드의 최소 버전을 iOS 17로 빌드하지만, 앱에 포함되는 프레임워크의 `Info.plist`에는 iOS 15.1이 남을 수 있다. 이 불일치로 App Store의 `ITMS-90208` 검사가 실패하지 않도록 마지막 빌드 단계에서 해당 프레임워크의 `MinimumOSVersion`을 앱의 `IPHONEOS_DEPLOYMENT_TARGET`과 동일하게 맞추고 결과를 검증한다. 이 단계는 빌드 산출물의 배포 메타데이터만 수정하며 ONNX 모델이나 추론 동작은 변경하지 않는다.
+ONNX Runtime `1.24.2`의 iOS 바이너리는 실행 코드의 최소 버전을 iOS 17로 빌드하지만, 앱에 포함되는 프레임워크의 `Info.plist`에는 iOS 15.1이 남을 수 있다. 이 불일치로 App Store의 `ITMS-90208` 검사가 실패하지 않도록 마지막 빌드 단계에서 해당 프레임워크의 `MinimumOSVersion`을 앱의 `IPHONEOS_DEPLOYMENT_TARGET`과 동일하게 맞춘다. `Info.plist` 수정은 기존 코드 서명을 무효화하므로 같은 단계에서 현재 빌드 인증서로 프레임워크를 다시 서명하고 즉시 검증한다. 이 단계는 빌드 산출물의 배포 메타데이터만 수정하며 ONNX 모델이나 추론 동작은 변경하지 않는다.
 
 ## iPhone 음성 선택
 

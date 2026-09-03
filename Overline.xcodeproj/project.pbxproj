@@ -74,7 +74,7 @@
 				EC56B16A2FEBE5AF00188824 /* Sources */,
 				EC56B16B2FEBE5AF00188824 /* Frameworks */,
 				EC56B16C2FEBE5AF00188824 /* Resources */,
-				EC56B1942FF0000200188824 /* Fix ONNX Runtime MinimumOSVersion */,
+				EC56B1942FF0000200188824 /* Fix and Sign ONNX Runtime */,
 			);
 			buildRules = (
 			);
@@ -139,7 +139,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		EC56B1942FF0000200188824 /* Fix ONNX Runtime MinimumOSVersion */ = {
+		EC56B1942FF0000200188824 /* Fix and Sign ONNX Runtime */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -149,14 +149,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Fix ONNX Runtime MinimumOSVersion";
+			name = "Fix and Sign ONNX Runtime";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\nFRAMEWORK_INFO_PLIST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/onnxruntime.framework/Info.plist\"\n\nif [ ! -f \"${FRAMEWORK_INFO_PLIST}\" ]; then\n    echo \"note: ONNX Runtime framework is not embedded; no deployment metadata to update\"\n    exit 0\nfi\n\n/usr/libexec/PlistBuddy -c \"Set :MinimumOSVersion ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\" 2>/dev/null || \\\n/usr/libexec/PlistBuddy -c \"Add :MinimumOSVersion string ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\"\n\nACTUAL_MINIMUM_OS=$(/usr/libexec/PlistBuddy -c \"Print :MinimumOSVersion\" \"${FRAMEWORK_INFO_PLIST}\")\nif [ \"${ACTUAL_MINIMUM_OS}\" != \"${IPHONEOS_DEPLOYMENT_TARGET}\" ]; then\n    echo \"error: ONNX Runtime MinimumOSVersion is ${ACTUAL_MINIMUM_OS}; expected ${IPHONEOS_DEPLOYMENT_TARGET}\"\n    exit 1\nfi\n\necho \"note: ONNX Runtime MinimumOSVersion set to ${ACTUAL_MINIMUM_OS}\"\n";
+			shellScript = "set -eu\n\nFRAMEWORK_PATH=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/onnxruntime.framework\"\nFRAMEWORK_INFO_PLIST=\"${FRAMEWORK_PATH}/Info.plist\"\n\nif [ ! -f \"${FRAMEWORK_INFO_PLIST}\" ]; then\n    echo \"note: ONNX Runtime framework is not embedded; no deployment metadata to update\"\n    exit 0\nfi\n\n/usr/libexec/PlistBuddy -c \"Set :MinimumOSVersion ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\" 2>/dev/null || \\\n/usr/libexec/PlistBuddy -c \"Add :MinimumOSVersion string ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\"\n\nACTUAL_MINIMUM_OS=$(/usr/libexec/PlistBuddy -c \"Print :MinimumOSVersion\" \"${FRAMEWORK_INFO_PLIST}\")\nif [ \"${ACTUAL_MINIMUM_OS}\" != \"${IPHONEOS_DEPLOYMENT_TARGET}\" ]; then\n    echo \"error: ONNX Runtime MinimumOSVersion is ${ACTUAL_MINIMUM_OS}; expected ${IPHONEOS_DEPLOYMENT_TARGET}\"\n    exit 1\nfi\n\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n    SIGNING_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}\"\n    if [ -z \"${SIGNING_IDENTITY}\" ]; then\n        echo \"error: No code signing identity is available for ONNX Runtime\"\n        exit 1\n    fi\n\n    /usr/bin/codesign --force --sign \"${SIGNING_IDENTITY}\" --timestamp=none --preserve-metadata=identifier,entitlements,flags --generate-entitlement-der \"${FRAMEWORK_PATH}\"\n    /usr/bin/codesign --verify --strict --verbose=2 \"${FRAMEWORK_PATH}\"\n    echo \"note: ONNX Runtime re-signed after deployment metadata update\"\nfi\n\necho \"note: ONNX Runtime MinimumOSVersion set to ${ACTUAL_MINIMUM_OS}\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
