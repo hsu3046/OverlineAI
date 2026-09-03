@@ -72,9 +72,9 @@
               "value" : "normal"
             }
           ],
-          "fill" : "none",
-          "glass" : true,
-          "hidden" : true,
+          "fill" : "automatic",
+          "glass" : false,
+          "hidden" : false,
           "image-name" : "bgback.png",
           "name" : "bgback",
           "opacity-specializations" : [
