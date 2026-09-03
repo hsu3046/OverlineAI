@@ -2,6 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "regions": ["icn1"],
+  "rewrites": [
+    {
+      "source": "/privacy",
+      "destination": "/api/privacy"
+    }
+  ],
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 10

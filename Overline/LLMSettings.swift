@@ -58,15 +58,6 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    var supportsSubscriptionAuth: Bool {
-        switch self {
-        case .anthropic, .openai:
-            return true
-        case .openrouter, .gemini:
-            return false
-        }
-    }
-
     var defaultModelID: String {
         modelOptions.first?.id ?? ""
     }
@@ -105,56 +96,23 @@ enum LLMProvider: String, CaseIterable, Codable, Identifiable {
 
 enum LLMAuthMode: String, CaseIterable, Codable, Identifiable {
     case apiKey
-    case subscription
 
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .apiKey:
-            return "API 키 사용"
-        case .subscription:
-            return "구독 플랜 사용"
-        }
+        "API 키 사용"
     }
 
     var systemImage: String {
-        switch self {
-        case .apiKey:
-            return "key"
-        case .subscription:
-            return "person.crop.circle.badge.checkmark"
-        }
-    }
-}
-
-struct LLMSubscriptionToken: Codable, Equatable {
-    var accessToken: String
-    var accountID: String
-    var expiresAt: Date?
-
-    static let empty = LLMSubscriptionToken(
-        accessToken: "",
-        accountID: "",
-        expiresAt: nil
-    )
-
-    var hasAccessToken: Bool {
-        !accessToken.trimmed.isEmpty
+        "key"
     }
 }
 
 enum LLMAuthCredential: Equatable {
     case apiKey(String)
-    case subscription(LLMSubscriptionToken)
 
     var mode: LLMAuthMode {
-        switch self {
-        case .apiKey:
-            return .apiKey
-        case .subscription:
-            return .subscription
-        }
+        .apiKey
     }
 }
 
@@ -171,19 +129,19 @@ final class LLMSettingsStore {
         didSet {
             guard provider != oldValue else { return }
             saveProvider()
+            setAllowsExternalAIDataSharing(false)
         }
     }
 
     private(set) var apiKeys: [LLMProvider: String]
-    private(set) var subscriptionTokens: [LLMProvider: LLMSubscriptionToken]
-    private var authModes: [LLMProvider: LLMAuthMode]
+    private(set) var allowsExternalAIDataSharing: Bool
     private var selectedModelIDs: [LLMProvider: String]
     private var rejectedCredentialKeys: Set<String>
     @ObservationIgnored private var loadedAPIKeyProviders: Set<LLMProvider> = []
-    @ObservationIgnored private var loadedSubscriptionTokenProviders: Set<LLMProvider> = []
 
     init() {
         let defaults = UserDefaults.standard
+        Self.purgeLegacySubscriptionCredentials(defaults: defaults)
         if
             let rawProvider = defaults.string(forKey: Self.providerKey),
             let storedProvider = LLMProvider(rawValue: rawProvider)
@@ -194,15 +152,7 @@ final class LLMSettingsStore {
         }
 
         apiKeys = [:]
-        subscriptionTokens = [:]
-
-        authModes = Dictionary(
-            uniqueKeysWithValues: LLMProvider.allCases.map { provider in
-                let stored = defaults.string(forKey: Self.authModeKey(for: provider))
-                let mode = stored.flatMap(LLMAuthMode.init(rawValue:)) ?? .apiKey
-                return (provider, provider.supportsSubscriptionAuth ? mode : .apiKey)
-            }
-        )
+        allowsExternalAIDataSharing = defaults.bool(forKey: Self.externalAIDataSharingKey)
 
         selectedModelIDs = Dictionary(
             uniqueKeysWithValues: LLMProvider.allCases.map { provider in
@@ -219,11 +169,9 @@ final class LLMSettingsStore {
         )
 
         rejectedCredentialKeys = Set(
-            LLMProvider.allCases.flatMap { provider in
-                LLMAuthMode.allCases.compactMap { mode in
-                    let key = Self.rejectedCredentialKey(for: provider, mode: mode)
-                    return defaults.bool(forKey: key) ? key : nil
-                }
+            LLMProvider.allCases.compactMap { provider in
+                let key = Self.rejectedCredentialKey(for: provider, mode: .apiKey)
+                return defaults.bool(forKey: key) ? key : nil
             }
         )
     }
@@ -250,13 +198,13 @@ final class LLMSettingsStore {
         guard !trimmedModelID.isEmpty else {
             selectedModelIDs[provider] = provider.defaultModelID
             UserDefaults.standard.set(provider.defaultModelID, forKey: Self.modelKey(for: provider))
-            clearCredentialRejection(for: provider, mode: authMode(for: provider))
+            clearCredentialRejection(for: provider, mode: .apiKey)
             return
         }
 
         selectedModelIDs[provider] = trimmedModelID
         UserDefaults.standard.set(trimmedModelID, forKey: Self.modelKey(for: provider))
-        clearCredentialRejection(for: provider, mode: authMode(for: provider))
+        clearCredentialRejection(for: provider, mode: .apiKey)
     }
 
     func apiKey(for provider: LLMProvider) -> String {
@@ -276,64 +224,31 @@ final class LLMSettingsStore {
     }
 
     func authMode(for provider: LLMProvider) -> LLMAuthMode {
-        guard provider.supportsSubscriptionAuth else { return .apiKey }
-        return authModes[provider] ?? .apiKey
+        .apiKey
     }
 
-    func setAuthMode(_ mode: LLMAuthMode, for provider: LLMProvider) {
-        let normalizedMode: LLMAuthMode = provider.supportsSubscriptionAuth ? mode : .apiKey
-        authModes[provider] = normalizedMode
-        UserDefaults.standard.set(normalizedMode.rawValue, forKey: Self.authModeKey(for: provider))
-    }
-
-    func subscriptionToken(for provider: LLMProvider) -> LLMSubscriptionToken {
-        ensureSubscriptionTokenLoaded(for: provider)
-        return subscriptionTokens[provider] ?? .empty
-    }
-
-    func setSubscriptionToken(_ token: LLMSubscriptionToken, for provider: LLMProvider) {
-        loadedSubscriptionTokenProviders.insert(provider)
-        subscriptionTokens[provider] = token
-        clearCredentialRejection(for: provider, mode: .subscription)
-
-        guard token.hasAccessToken || !token.accountID.trimmed.isEmpty else {
-            Self.subscriptionKeychain.delete(account: provider.rawValue)
-            return
-        }
-
-        guard let data = try? JSONEncoder().encode(token) else { return }
-        Self.subscriptionKeychain.set(String(decoding: data, as: UTF8.self), account: provider.rawValue)
-    }
-
-    func hasSubscriptionToken(for provider: LLMProvider) -> Bool {
-        provider.supportsSubscriptionAuth && subscriptionToken(for: provider).hasAccessToken
+    func setAllowsExternalAIDataSharing(_ isAllowed: Bool) {
+        allowsExternalAIDataSharing = isAllowed
+        UserDefaults.standard.set(isAllowed, forKey: Self.externalAIDataSharingKey)
     }
 
     func hasCredential(for provider: LLMProvider) -> Bool {
-        switch authMode(for: provider) {
-        case .apiKey:
-            return hasAPIKey(for: provider)
-        case .subscription:
-            return hasSubscriptionToken(for: provider)
-        }
+        hasAPIKey(for: provider)
     }
 
     func isReady(for provider: LLMProvider) -> Bool {
-        hasCredential(for: provider) && !isCredentialRejected(for: provider)
+        allowsExternalAIDataSharing
+            && hasCredential(for: provider)
+            && !isCredentialRejected(for: provider)
     }
 
     func credential(for provider: LLMProvider) -> LLMAuthCredential {
-        switch authMode(for: provider) {
-        case .apiKey:
-            return .apiKey(apiKey(for: provider))
-        case .subscription:
-            return .subscription(subscriptionToken(for: provider))
-        }
+        .apiKey(apiKey(for: provider))
     }
 
     func isCredentialRejected(for provider: LLMProvider) -> Bool {
         rejectedCredentialKeys.contains(
-            Self.rejectedCredentialKey(for: provider, mode: authMode(for: provider))
+            Self.rejectedCredentialKey(for: provider, mode: .apiKey)
         )
     }
 
@@ -373,28 +288,11 @@ final class LLMSettingsStore {
         apiKeys[provider] = Self.keychain.string(account: provider.rawValue) ?? ""
     }
 
-    private func ensureSubscriptionTokenLoaded(for provider: LLMProvider) {
-        guard loadedSubscriptionTokenProviders.insert(provider).inserted else { return }
-        guard
-            let storedToken = Self.subscriptionKeychain.string(account: provider.rawValue),
-            let tokenData = storedToken.data(using: .utf8),
-            let token = try? JSONDecoder().decode(LLMSubscriptionToken.self, from: tokenData)
-        else {
-            subscriptionTokens[provider] = .empty
-            return
-        }
-
-        subscriptionTokens[provider] = token
-    }
-
     private static let providerKey = "overline.llm.provider"
+    private static let externalAIDataSharingKey = "overline.llm.externalAIDataSharingAllowed"
 
     private static func modelKey(for provider: LLMProvider) -> String {
         "overline.llm.model.\(provider.rawValue)"
-    }
-
-    private static func authModeKey(for provider: LLMProvider) -> String {
-        "overline.llm.authMode.\(provider.rawValue)"
     }
 
     private func clearCredentialRejection(for provider: LLMProvider, mode: LLMAuthMode) {
@@ -412,6 +310,16 @@ final class LLMSettingsStore {
 
     private static func rejectedCredentialKey(for provider: LLMProvider, mode: LLMAuthMode) -> String {
         "overline.llm.credentialRejected.\(provider.rawValue).\(mode.rawValue)"
+    }
+
+    private static func purgeLegacySubscriptionCredentials(defaults: UserDefaults) {
+        for provider in LLMProvider.allCases {
+            subscriptionKeychain.delete(account: provider.rawValue)
+            defaults.removeObject(forKey: "overline.llm.authMode.\(provider.rawValue)")
+            defaults.removeObject(
+                forKey: "overline.llm.credentialRejected.\(provider.rawValue).subscription"
+            )
+        }
     }
 
     private static func normalizedModelID(_ modelID: String, for provider: LLMProvider) -> String {

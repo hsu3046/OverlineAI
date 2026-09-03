@@ -16,6 +16,8 @@ export interface HandlerResult {
 }
 
 export type GETHandler = (url: URL) => Promise<HandlerResult>;
+export type JSONBody = Readonly<Record<string, unknown>>;
+export type POSTHandler = (body: JSONBody) => Promise<HandlerResult>;
 
 export function createGETHandler(handler: GETHandler) {
   return async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -32,6 +34,32 @@ export function createGETHandler(handler: GETHandler) {
       const url = new URL(request.url ?? "/", `https://${host}`);
       const result = await handler(url);
       sendJSON(response, 200, result.body, result.cacheControl ?? "no-store");
+    } catch (error) {
+      if (error instanceof HTTPError) {
+        sendJSON(response, error.status, { error: error.message }, "no-store");
+        return;
+      }
+
+      console.error("community_api_request_failed", safeErrorMessage(error));
+      sendJSON(response, 502, { error: "외부 정보를 불러오지 못했습니다." }, "no-store");
+    }
+  };
+}
+
+export function createPOSTHandler(handler: POSTHandler, maximumBodyBytes = 8_192) {
+  return async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    setSecurityHeaders(response);
+
+    if (request.method !== "POST") {
+      response.setHeader("Allow", "POST");
+      sendJSON(response, 405, { error: "지원하지 않는 요청입니다." }, "no-store");
+      return;
+    }
+
+    try {
+      const body = await readJSONBody(request, maximumBodyBytes);
+      const result = await handler(body);
+      sendJSON(response, 200, result.body, "no-store");
     } catch (error) {
       if (error instanceof HTTPError) {
         sendJSON(response, error.status, { error: error.message }, "no-store");
@@ -99,6 +127,79 @@ export function enumQuery<const T extends readonly string[]>(
   const value = url.searchParams.get(name);
   if (value === null || value.length === 0) return fallback;
   if (!allowedValues.includes(value)) {
+    throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
+  }
+  return value as T[number];
+}
+
+export function requiredBodyString(
+  body: JSONBody,
+  name: string,
+  maximumLength: number,
+): string {
+  const rawValue = body[name];
+  const value = typeof rawValue === "string" ? rawValue.trim() : "";
+  if (value.length === 0) {
+    throw new HTTPError(400, `${name} 값이 필요합니다.`);
+  }
+  if (value.length > maximumLength) {
+    throw new HTTPError(400, `${name} 값이 너무 깁니다.`);
+  }
+  return value;
+}
+
+export function optionalBodyString(
+  body: JSONBody,
+  name: string,
+  maximumLength: number,
+): string | undefined {
+  const rawValue = body[name];
+  if (rawValue === undefined || rawValue === null) return undefined;
+  if (typeof rawValue !== "string") {
+    throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
+  }
+  const value = rawValue.trim();
+  if (value.length === 0) return undefined;
+  if (value.length > maximumLength) {
+    throw new HTTPError(400, `${name} 값이 너무 깁니다.`);
+  }
+  return value;
+}
+
+export function numberBody(
+  body: JSONBody,
+  name: string,
+  range: { minimum: number; maximum: number },
+): number {
+  const rawValue = body[name];
+  const value = typeof rawValue === "number" ? rawValue : Number.NaN;
+  if (!Number.isFinite(value) || value < range.minimum || value > range.maximum) {
+    throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
+  }
+  return value;
+}
+
+export function integerBody(
+  body: JSONBody,
+  name: string,
+  range: { minimum: number; maximum: number },
+): number {
+  const value = numberBody(body, name, range);
+  if (!Number.isInteger(value)) {
+    throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
+  }
+  return value;
+}
+
+export function enumBody<const T extends readonly string[]>(
+  body: JSONBody,
+  name: string,
+  allowedValues: T,
+  fallback: T[number],
+): T[number] {
+  const value = body[name];
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || !allowedValues.includes(value)) {
     throw new HTTPError(400, `${name} 값이 올바르지 않습니다.`);
   }
   return value as T[number];
@@ -178,6 +279,38 @@ function sendJSON(
   response.statusCode = status;
   response.setHeader("Cache-Control", cacheControl);
   response.end(JSON.stringify(body));
+}
+
+async function readJSONBody(
+  request: IncomingMessage,
+  maximumBodyBytes: number,
+): Promise<JSONBody> {
+  const chunks: Buffer[] = [];
+  let byteCount = 0;
+
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteCount += buffer.byteLength;
+    if (byteCount > maximumBodyBytes) {
+      throw new HTTPError(413, "요청 내용이 너무 깁니다.");
+    }
+    chunks.push(buffer);
+  }
+
+  if (chunks.length === 0) {
+    throw new HTTPError(400, "요청 내용이 필요합니다.");
+  }
+
+  try {
+    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
+    }
+    return value as JSONBody;
+  } catch (error) {
+    if (error instanceof HTTPError) throw error;
+    throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
+  }
 }
 
 function decodeHTMLEntities(value: string): string {

@@ -1246,17 +1246,18 @@ final class CameraTextScanner {
             cameraLifecycleLogger.info(
                 "camera_authorization_requested owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public)"
             )
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                Task { @MainActor in
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
                     if granted {
-                        self?.status = .running
-                        self?.core.start(
+                        self.status = .running
+                        self.core.start(
                             requestID: requestID,
                             owner: owner,
                             authorization: authorization
                         )
                     } else {
-                        self?.status = .unavailable("카메라 권한이 필요합니다.")
+                        self.status = .unavailable("카메라 권한이 필요합니다.")
                         cameraLifecycleLogger.error(
                             "camera_authorization_denied owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public)"
                         )

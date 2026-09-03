@@ -422,16 +422,15 @@ struct InsightsView: View {
     }
 
     private func missingCredentialMessage(for provider: LLMProvider) -> String {
+        if !llmSettings.allowsExternalAIDataSharing {
+            return "AI 설정에서 ‘AI로 글 보내기’를 켜 주세요."
+        }
+
         if llmSettings.isCredentialRejected(for: provider) {
             return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
         }
 
-        switch llmSettings.authMode(for: provider) {
-        case .apiKey:
-            return "\(provider.title) API 키를 먼저 입력해 주세요."
-        case .subscription:
-            return "\(provider.title) 구독 토큰을 먼저 연결해 주세요."
-        }
+        return "\(provider.title) API 키를 먼저 입력해 주세요."
     }
 
     private func logInsightGenerationRequested(
@@ -583,7 +582,11 @@ struct OverlineSettingsSheet: View {
                             }
                         }
                     }
-                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
+                    .disabled(
+                        isTestingConnection
+                            || !settings.allowsExternalAIDataSharing
+                            || !settings.hasCredential(for: settings.provider)
+                    )
                     .listRowSeparator(.hidden, edges: .bottom)
                     .settingsRowSeparator()
 
@@ -640,24 +643,19 @@ struct OverlineSettingsSheet: View {
                         .foregroundStyle(.secondary)
                         .settingsRowSeparator()
 
-                    if settings.provider.supportsSubscriptionAuth {
-                        Picker("인증", selection: authModeBinding) {
-                            ForEach(LLMAuthMode.allCases) { mode in
-                                Label(mode.title, systemImage: mode.systemImage)
-                                    .tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .settingsRowSeparator()
-                    } else {
-                        LabeledContent("인증") {
-                            Text("API 키")
-                                .foregroundStyle(.secondary)
-                        }
-                        .settingsRowSeparator()
+                    LabeledContent("인증") {
+                        Text("API 키 사용")
+                            .foregroundStyle(.secondary)
                     }
+                    .settingsRowSeparator()
+
+                    Toggle("AI로 글 보내기", isOn: aiDataSharingBinding)
+                        .tint(Color.overlineAccent)
+                        .settingsRowSeparator()
                 } header: {
                     Text("AI 설정")
+                } footer: {
+                    Text("켜면 AI 기능에 필요한 글조각, 메모와 책 정보가 \(settings.provider.title)에 전송됩니다. 제공자를 바꾸면 다시 확인합니다.")
                 }
 
                 Section {
@@ -678,26 +676,6 @@ struct OverlineSettingsSheet: View {
                     }
                 } header: {
                     Text("API 키")
-                }
-
-                Section {
-                    ForEach(LLMProvider.settingsOrder.filter(\.supportsSubscriptionAuth)) { provider in
-                        LLMSubscriptionTokenRow(
-                            provider: provider,
-                            token: Binding(
-                                get: { settings.subscriptionToken(for: provider) },
-                                set: {
-                                    settings.setSubscriptionToken($0, for: provider)
-                                    if provider == settings.provider {
-                                        connectionTestResult = nil
-                                    }
-                                }
-                            )
-                        )
-                        .settingsRowSeparator()
-                    }
-                } header: {
-                    Text("구독 플랜 토큰")
                 }
 
                 Section("텍스트 낭독") {
@@ -747,9 +725,9 @@ struct OverlineSettingsSheet: View {
 
                 Section("개인 정보와 이용 조건") {
                     NavigationLink {
-                        PrivacyTransmissionPolicyView()
+                        PrivacyTransmissionPolicyView(settings: settings)
                     } label: {
-                        Label("AI 데이터 처리", systemImage: "lock.shield")
+                        Label("개인정보 처리방침", systemImage: "lock.shield")
                     }
                     .settingsRowSeparator()
 
@@ -757,6 +735,13 @@ struct OverlineSettingsSheet: View {
                         OverlineTermsView()
                     } label: {
                         Label("이용 조건", systemImage: "doc.text")
+                    }
+                    .settingsRowSeparator()
+
+                    NavigationLink {
+                        OpenSourceLicensesView()
+                    } label: {
+                        Label("오픈소스 라이선스", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                     .settingsRowSeparator()
                 }
@@ -823,11 +808,11 @@ struct OverlineSettingsSheet: View {
         )
     }
 
-    private var authModeBinding: Binding<LLMAuthMode> {
+    private var aiDataSharingBinding: Binding<Bool> {
         Binding(
-            get: { settings.authMode(for: settings.provider) },
+            get: { settings.allowsExternalAIDataSharing },
             set: {
-                settings.setAuthMode($0, for: settings.provider)
+                settings.setAllowsExternalAIDataSharing($0)
                 connectionTestResult = nil
             }
         )
@@ -854,6 +839,7 @@ struct OverlineSettingsSheet: View {
     @MainActor
     private func testConnection() async {
         guard !isTestingConnection else { return }
+        guard settings.allowsExternalAIDataSharing else { return }
         guard settings.hasCredential(for: settings.provider) else { return }
 
         let provider = settings.provider
@@ -1320,8 +1306,6 @@ private extension Error {
         switch llmError {
         case .missingCredential(_, let mode):
             return "missing_\(mode.rawValue)"
-        case .unsupportedSubscription:
-            return "unsupported_subscription"
         case .invalidURL:
             return "invalid_url"
         case .invalidResponse:
@@ -1341,6 +1325,8 @@ private extension Error {
 }
 
 private struct PrivacyTransmissionPolicyView: View {
+    let settings: LLMSettingsStore
+
     private let policies: [PrivacyTransmissionPolicy] = [
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
@@ -1350,7 +1336,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "key",
             title: "인증 정보 보호",
-            body: "API 키와 구독 토큰은 이 기기의 iOS Keychain에 저장됩니다."
+            body: "API 키는 이 기기의 iOS Keychain에 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
@@ -1360,12 +1346,24 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
             title: "Overline의 처리",
-            body: "Overline은 전송 내용을 자체 서버에 저장하거나 학습에 사용하지 않습니다. 외부 AI에서 처리되는 방식은 연결한 서비스의 정책을 따릅니다."
+            body: "AI 요청은 선택한 제공자에게 직접 전송됩니다. Overline은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다."
+        ),
+        PrivacyTransmissionPolicy(
+            systemImage: "location",
+            title: "주변 장소와 검색",
+            body: "주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 Overline 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 Overline 서버에는 내용을 저장하지 않습니다."
         )
     ]
 
     var body: some View {
         List {
+            Section {
+                Toggle("AI로 글 보내기", isOn: aiDataSharingBinding)
+                    .tint(Color.overlineAccent)
+            } footer: {
+                Text("켜면 AI 기능에 필요한 글조각, 메모와 책 정보가 \(settings.provider.title)에 전송됩니다. 끄면 AI 요청이 전송되지 않습니다.")
+            }
+
             Section {
                 ForEach(policies) { policy in
                     HStack(alignment: .top, spacing: 12) {
@@ -1389,9 +1387,24 @@ private struct PrivacyTransmissionPolicyView: View {
                     .settingsRowSeparator()
                 }
             }
+
+            if let privacyPolicyURL = OverlineAPIConfiguration.privacyPolicyURL {
+                Section {
+                    Link(destination: privacyPolicyURL) {
+                        Label("웹에서 개인정보 처리방침 보기", systemImage: "arrow.up.right.square")
+                    }
+                }
+            }
         }
-        .navigationTitle("AI 데이터 처리")
+        .navigationTitle("개인정보 처리방침")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var aiDataSharingBinding: Binding<Bool> {
+        Binding(
+            get: { settings.allowsExternalAIDataSharing },
+            set: { settings.setAllowsExternalAIDataSharing($0) }
+        )
     }
 }
 
@@ -1459,6 +1472,101 @@ private struct OverlineTerm: Identifiable {
     let body: String
 }
 
+private struct OpenSourceLicensesView: View {
+    private let notices: [OpenSourceLicenseNotice] = [
+        OpenSourceLicenseNotice(
+            name: "Pretendard Variable",
+            detail: "SIL Open Font License 1.1",
+            resourceName: "Pretendard-OFL"
+        ),
+        OpenSourceLicenseNotice(
+            name: "Supertonic",
+            detail: "MIT License",
+            resourceName: "Supertonic-MIT"
+        ),
+        OpenSourceLicenseNotice(
+            name: "ONNX Runtime",
+            detail: "MIT License",
+            resourceName: "ONNXRuntime-MIT"
+        )
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(notices) { notice in
+                    NavigationLink {
+                        OpenSourceLicenseTextView(notice: notice)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(notice.name)
+                                .font(.overline(.subheadline, weight: .semibold))
+                            Text(notice.detail)
+                                .font(.overline(.caption))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .settingsRowSeparator()
+                }
+            }
+
+            Section {
+                if let modelURL = URL(string: "https://huggingface.co/Supertone/supertonic-3") {
+                    Link(destination: modelURL) {
+                        Label("Supertonic 3 · OpenRAIL-M", systemImage: "arrow.up.right.square")
+                    }
+                }
+            } header: {
+                Text("다운로드 음성 모델")
+            } footer: {
+                Text("고품질 음성 모델과 라이선스는 사용자가 음성 팩을 받을 때 함께 저장됩니다.")
+            }
+        }
+        .navigationTitle("오픈소스 라이선스")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct OpenSourceLicenseTextView: View {
+    let notice: OpenSourceLicenseNotice
+
+    var body: some View {
+        ScrollView {
+            Text(notice.licenseText)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .navigationTitle(notice.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct OpenSourceLicenseNotice: Identifiable {
+    let name: String
+    let detail: String
+    let resourceName: String
+
+    var id: String { resourceName }
+
+    var licenseText: String {
+        let candidateURLs = [
+            Bundle.main.url(forResource: resourceName, withExtension: "txt"),
+            Bundle.main.url(forResource: resourceName, withExtension: "txt", subdirectory: "Resources/Licenses"),
+            Bundle.main.url(forResource: resourceName, withExtension: "txt", subdirectory: "Resources/Fonts")
+        ]
+
+        for url in candidateURLs.compactMap({ $0 }) {
+            if let text = try? String(contentsOf: url, encoding: .utf8) {
+                return text
+            }
+        }
+
+        return "라이선스 내용을 불러올 수 없습니다."
+    }
+}
+
 private struct LLMAPIKeyRow: View {
     let provider: LLMProvider
     @Binding var apiKey: String
@@ -1482,67 +1590,6 @@ private struct LLMAPIKeyRow: View {
     }
 }
 
-private struct LLMSubscriptionTokenRow: View {
-    let provider: LLMProvider
-    @Binding var token: LLMSubscriptionToken
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                LLMProviderIcon(provider: provider)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(provider.title)
-                        .font(.overline(.caption, weight: .semibold))
-                        .foregroundStyle(Color.overlineMutedInk)
-                    Text(token.hasAccessToken ? "구독 토큰 연결됨" : "구독 토큰 없음")
-                        .font(.overline(.caption2, weight: .semibold))
-                        .foregroundStyle(token.hasAccessToken ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.72))
-                }
-
-                Spacer()
-
-                if token.hasAccessToken || !token.accountID.trimmed.isEmpty {
-                    Button {
-                        token = .empty
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                            .font(.overline(.body, weight: .semibold))
-                            .foregroundStyle(Color.overlineMutedInk.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(provider.title) 구독 토큰 삭제")
-                }
-            }
-
-            SecureField("Access token", text: $token.accessToken)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.overline(.caption))
-                .privacySensitive()
-
-            switch provider {
-            case .openai:
-                DisclosureGroup("고급 설정") {
-                    TextField("ChatGPT account ID", text: $token.accountID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.overline(.caption))
-                        .foregroundStyle(.secondary)
-
-                    Text("여러 ChatGPT 워크스페이스를 사용하는 경우에만 필요합니다.")
-                        .font(.overline(.caption2))
-                        .foregroundStyle(.secondary)
-                }
-                .font(.overline(.caption))
-            case .anthropic, .openrouter, .gemini:
-                EmptyView()
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 private struct LLMActiveModelSummary: View {
     let settings: LLMSettingsStore
 
@@ -1557,7 +1604,7 @@ private struct LLMActiveModelSummary: View {
                 Text(settings.selectedModelTitle)
                     .font(.overline(.caption))
                     .foregroundStyle(Color.overlineMutedInk)
-                Text(settings.authMode(for: settings.provider).title)
+                Text(settings.allowsExternalAIDataSharing ? "API 키 사용" : "AI 기능 꺼짐")
                     .font(.overline(.caption2, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
             }
