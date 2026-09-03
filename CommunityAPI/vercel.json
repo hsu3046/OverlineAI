@@ -1,11 +1,25 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
+  "cleanUrls": true,
   "regions": ["icn1"],
-  "rewrites": [
+  "headers": [
     {
-      "source": "/privacy",
-      "destination": "/api/privacy"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
     }
   ],
   "functions": {
