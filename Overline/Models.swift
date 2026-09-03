@@ -2397,6 +2397,34 @@ final class ReadingLibrary {
         await persistenceTask?.value
     }
 
+    func makeBackupData(exportedAt: Date = .now) throws -> Data {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        return try LibraryBackupCodec.encode(
+            snapshot: currentSnapshot,
+            exportedAt: exportedAt,
+            appVersion: appVersion
+        )
+    }
+
+    func replaceLibrary(with snapshot: LibraryStateSnapshot) {
+        let previousSnapshot = currentSnapshot
+        let previousHighlightIDs = previousSnapshot.books.flatMap { $0.highlights.map(\.id) }
+
+        pendingResetBackupCleanupData = nil
+        if !previousSnapshot.isEmpty {
+            resetBackupAvailable = Self.saveSnapshotBackup(previousSnapshot, key: Self.resetBackupKey)
+        }
+
+        books = snapshot.books
+        savedInsights = snapshot.insights
+        selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
+            ? snapshot.selectedBookID
+            : snapshot.books.first?.id
+        persist()
+        postRemovedHighlights(previousHighlightIDs)
+        cleanupSnapshotFilesIfNeeded()
+    }
+
     private func cleanupSnapshotFilesIfNeeded() {
         HighlightSnapshotStore.cleanup()
         HighlightSnapshotStore.clearResetBackup()

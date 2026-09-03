@@ -61,5 +61,27 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>글조각 서랍 백업</string>
+			<key>UTTypeIdentifier</key>
+			<string>vote.aib.bzogak.backup</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>bzogak</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.aib.bzogak+json</string>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

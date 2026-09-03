@@ -1,6 +1,7 @@
 import Foundation
 import OSLog
 import SwiftUI
+import UniformTypeIdentifiers
 
 private let insightMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "InsightMetrics")
 
@@ -550,6 +551,13 @@ struct OverlineSettingsSheet: View {
     @State private var connectionTestResult: LLMConnectionTestResult?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
+    @State private var backupDocument: LibraryBackupDocument?
+    @State private var backupFilename = ""
+    @State private var isBackupExporterPresented = false
+    @State private var isBackupImporterPresented = false
+    @State private var pendingBackupImport: DecodedLibraryBackup?
+    @State private var showsBackupImportConfirmation = false
+    @State private var backupNotice: LibraryBackupNotice?
 
     init(
         settings: LLMSettingsStore,
@@ -697,6 +705,21 @@ struct OverlineSettingsSheet: View {
 
                 Section {
                     Button {
+                        prepareBackupExport()
+                    } label: {
+                        Label("백업 파일 내보내기", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(library.books.isEmpty && library.savedInsights.isEmpty)
+                    .settingsRowSeparator()
+
+                    Button {
+                        isBackupImporterPresented = true
+                    } label: {
+                        Label("백업 파일 가져오기", systemImage: "square.and.arrow.down")
+                    }
+                    .settingsRowSeparator()
+
+                    Button {
                         showsRestoreResetConfirmation = true
                     } label: {
                         HStack {
@@ -720,7 +743,7 @@ struct OverlineSettingsSheet: View {
                 } header: {
                     Text("보관함")
                 } footer: {
-                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다.")
+                    Text("책, 글조각, 독서 기록과 인사이트를 한 파일로 보관합니다. API 키와 앱 설정은 포함하지 않습니다.")
                 }
 
                 Section("개인 정보와 이용 조건") {
@@ -784,8 +807,128 @@ struct OverlineSettingsSheet: View {
             } message: {
                 Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
             }
+            .confirmationDialog(
+                "이 백업으로 보관함을 바꿀까요?",
+                isPresented: $showsBackupImportConfirmation,
+                titleVisibility: .visible,
+                presenting: pendingBackupImport
+            ) { backup in
+                Button("백업 가져오기") {
+                    importBackup(backup)
+                }
+                Button("취소", role: .cancel) {
+                    pendingBackupImport = nil
+                }
+            } message: { backup in
+                Text(backupImportMessage(for: backup))
+            }
+            .fileExporter(
+                isPresented: $isBackupExporterPresented,
+                document: backupDocument,
+                contentType: .bzogakBackup,
+                defaultFilename: backupFilename
+            ) { result in
+                backupDocument = nil
+                switch result {
+                case .success:
+                    backupNotice = LibraryBackupNotice(
+                        title: "백업 파일을 내보냈습니다",
+                        message: "선택한 위치에 독서 기록을 저장했습니다."
+                    )
+                case let .failure(error):
+                    presentBackupError(error, title: "백업 파일을 내보내지 못했습니다")
+                }
+            }
+            .fileImporter(
+                isPresented: $isBackupImporterPresented,
+                allowedContentTypes: [.bzogakBackup],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case let .success(urls):
+                    guard let url = urls.first else { return }
+                    loadBackup(from: url)
+                case let .failure(error):
+                    presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+                }
+            }
+            .alert(item: $backupNotice) { notice in
+                Alert(
+                    title: Text(notice.title),
+                    message: Text(notice.message),
+                    dismissButton: .default(Text("확인"))
+                )
+            }
             .overlineKeyboardDismissToolbar()
         }
+    }
+
+    private func prepareBackupExport() {
+        let exportedAt = Date()
+        do {
+            backupDocument = LibraryBackupDocument(data: try library.makeBackupData(exportedAt: exportedAt))
+            backupFilename = backupFilename(for: exportedAt)
+            isBackupExporterPresented = true
+        } catch {
+            presentBackupError(error, title: "백업 파일을 만들지 못했습니다")
+        }
+    }
+
+    private func loadBackup(from url: URL) {
+        Task {
+            do {
+                let backup = try await Task.detached(priority: .userInitiated) {
+                    try LibraryBackupCodec.decode(contentsOf: url)
+                }.value
+                pendingBackupImport = backup
+                showsBackupImportConfirmation = true
+            } catch is CancellationError {
+                return
+            } catch {
+                presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+            }
+        }
+    }
+
+    private func importBackup(_ backup: DecodedLibraryBackup) {
+        let hadExistingLibrary = !library.books.isEmpty || !library.savedInsights.isEmpty
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.replaceLibrary(with: backup.snapshot)
+        }
+        pendingBackupImport = nil
+
+        let recoveryMessage = hadExistingLibrary
+            ? " 가져오기 전 상태는 ‘최근 초기화 복구’에서 되돌릴 수 있습니다."
+            : ""
+        backupNotice = LibraryBackupNotice(
+            title: "보관함을 가져왔습니다",
+            message: "\(backup.summary.description)\(recoveryMessage)"
+        )
+    }
+
+    private func backupImportMessage(for backup: DecodedLibraryBackup) -> String {
+        let recoveryMessage = library.books.isEmpty && library.savedInsights.isEmpty
+            ? ""
+            : "\n현재 보관함은 최근 초기화 복구에 보관됩니다."
+        return "\(backup.summary.description)\(recoveryMessage)"
+    }
+
+    private func backupFilename(for date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? 0
+        let month = components.month ?? 0
+        let day = components.day ?? 0
+        return String(format: "글조각서랍-%04d-%02d-%02d", year, month, day)
+    }
+
+    private func presentBackupError(_ error: Error, title: String) {
+        let nsError = error as NSError
+        guard !(nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError) else { return }
+
+        backupNotice = LibraryBackupNotice(
+            title: title,
+            message: error.localizedDescription
+        )
     }
 
     private var providerBinding: Binding<LLMProvider> {
@@ -919,6 +1062,12 @@ struct OverlineSettingsSheet: View {
             && settings.selectedModelID == configuration.modelID
             && settings.credential(for: configuration.provider) == configuration.credential
     }
+}
+
+private struct LibraryBackupNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 private struct QuoteSpeechSettingsView: View {
