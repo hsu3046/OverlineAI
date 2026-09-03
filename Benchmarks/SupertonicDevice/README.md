@@ -1,6 +1,6 @@
 # Supertonic Device Benchmark
 
-Overline에 Supertonic 3를 연결하기 전에 실제 iPhone에서 한국어 품질과 성능을 확인하는 독립 앱입니다. Overline 앱 타깃에는 ONNX Runtime이나 모델 파일을 추가하지 않습니다.
+BZOGAK에 Supertonic 3를 연결하기 전에 실제 iPhone에서 한국어 품질과 성능을 확인하는 독립 앱입니다. BZOGAK 앱 타깃에는 ONNX Runtime이나 모델 파일을 추가하지 않습니다.
 
 ## 준비
 
@@ -47,7 +47,7 @@ open SupertonicDeviceBenchmark.xcodeproj
 - 설치된 iOS Premium 음성보다 한국어 낭독 품질이 명확히 좋아야 합니다.
 - 생성 음성을 파일로 저장하지 않는 구조를 유지해야 합니다.
 
-위 기준을 통과한 뒤에만 Overline에 음성 엔진 선택 계층과 선택형 모델 다운로드를 추가합니다. 약 400MB 모델을 기본 앱 번들에 포함하는 방식은 사용하지 않습니다.
+위 기준을 통과한 뒤에만 BZOGAK에 음성 엔진 선택 계층과 선택형 모델 다운로드를 추가합니다. 약 400MB 모델을 기본 앱 번들에 포함하는 방식은 사용하지 않습니다.
 
 ## 배포 전 확인
 

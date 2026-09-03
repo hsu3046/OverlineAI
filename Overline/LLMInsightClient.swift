@@ -110,8 +110,8 @@ struct LLMInsightClient {
                 request,
                 endpoint: URL(string: "https://openrouter.ai/api/v1/chat/completions"),
                 extraHeaders: [
-                    "HTTP-Referer": "https://overline.local",
-                    "X-OpenRouter-Title": "Overline AI"
+                    "HTTP-Referer": "https://www.aib.vote",
+                    "X-OpenRouter-Title": "BZOGAK AI"
                 ],
                 usesMaxCompletionTokens: false
             )
@@ -433,7 +433,7 @@ struct LLMInsightClient {
     private func systemPrompt(for request: LLMInsightRequest) -> String {
         if request.category == "OCR교정" {
             return """
-            당신은 Overline의 OCR 교정 엔진입니다.
+            당신은 BZOGAK의 OCR 교정 엔진입니다.
             목적은 책에서 캡처한 원문 글조각의 OCR 실패만 보수적으로 고치는 것입니다.
 
             절대 규칙:
@@ -451,7 +451,7 @@ struct LLMInsightClient {
         }
 
         return """
-        당신은 Overline의 한국어 독서 인사이트 엔진입니다.
+        당신은 BZOGAK의 한국어 독서 인사이트 엔진입니다.
         입력은 사용자가 책을 읽다가 직접 선택한 글조각과 그 글조각이 속한 책의 배경 정보입니다.
 
         공통 원칙:

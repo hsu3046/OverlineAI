@@ -131,7 +131,7 @@ actor LocalOCRCorrectionService {
     #endif
 
     nonisolated private static var log: Logger {
-        Logger(subsystem: "aib.Overline", category: "LocalOCRCorrection")
+        Logger(subsystem: "vote.aib.bzogak", category: "LocalOCRCorrection")
     }
 }
 

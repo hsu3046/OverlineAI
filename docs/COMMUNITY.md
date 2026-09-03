@@ -16,7 +16,7 @@
 
 ```text
 iPhone app
-  -> Overline Vercel API
+  -> BZOGAK Vercel API
        -> Kakao Local / Kakao Book / Daum Blog
        -> NAVER Blog Search
        -> Aladin Open API
@@ -57,7 +57,7 @@ iPhone app
 1. Vercel에서 새 프로젝트를 만들고 Root Directory를 `CommunityAPI`로 지정한다.
 2. `CommunityAPI/.env.example`의 다섯 환경변수를 Production, Preview, Development에 등록한다.
 3. 배포 후 `/api/v1/health` 응답을 확인한다.
-4. 로컬 `Config/Secrets.xcconfig`에 `OVERLINE_API_BASE_URL`을 설정한다.
+4. Preview 또는 로컬 서버를 시험할 때만 `Config/Secrets.xcconfig`에서 `OVERLINE_API_BASE_URL`을 덮어쓴다.
 5. 앱에서 책 검색, 관련 글, 순위, 위치 권한 허용·거부를 각각 확인한다.
 6. 배포 주소의 `/privacy`가 로그인 없이 열리는지 확인한다.
 

@@ -1,6 +1,6 @@
 # Typography
 
-Overline uses Pretendard Variable as its default text typeface. A single variable font file covers the full weight range while keeping the app bundle smaller than a set of static font files.
+BZOGAK uses Pretendard Variable as its default text typeface. A single variable font file covers the full weight range while keeping the app bundle smaller than a set of static font files.
 
 ## Font asset
 

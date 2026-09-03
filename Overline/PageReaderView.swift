@@ -5,7 +5,7 @@ import OSLog
 import SwiftUI
 import UIKit
 
-private let pageReaderMetricsLogger = Logger(subsystem: "aib.Overline", category: "PageReaderMetrics")
+private let pageReaderMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "PageReaderMetrics")
 
 enum CaptureExperienceMode: String, CaseIterable, Identifiable {
     case highlight

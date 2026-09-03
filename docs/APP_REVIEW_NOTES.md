@@ -1,6 +1,6 @@
 # App Review Notes
 
-Overline is a Korean-language personal reading companion for physical books. No account, purchase, or demo credentials are required.
+BZOGAK (Korean display name: 글조각 서랍) is a Korean-language personal reading companion for physical books. No account, purchase, or demo credentials are required.
 
 ## Core review path
 
@@ -8,7 +8,7 @@ Overline is a Korean-language personal reading companion for physical books. No 
 2. In Underline mode, point the camera at a printed book page. Capture the page, swipe across recognized lines, and save the selected passage.
 3. In Read Aloud mode, capture up to 10 pages, tap Done, and then tap Play. Playback can continue while the app is in the background or the screen is locked.
 4. The Bookshelf stores books, passages, reading records, and generated insights locally on the device.
-5. Community provides read-only nearby bookstores/libraries, book-related article links, and public book rankings. Location is requested only for Nearby.
+5. Community provides read-only nearby bookstores/libraries, public book rankings, and book-related NAVER/Daum blog search results. Search result titles and short snippets are shown in the app, and the original article opens in the system browser. Users cannot publish, comment, message, follow, or browse arbitrary web addresses in the app. Location is requested only for Nearby.
 
 ## Photos, OCR, and copyrighted text
 
@@ -31,4 +31,4 @@ The optional Supertonic 3 voice pack is approximately 401 MB. It is downloaded o
 - Location When In Use: nearby bookstores and libraries.
 - Background Audio: continuation of user-started text-to-speech playback.
 
-Privacy policy: `https://overline-community-api.vercel.app/privacy`
+Privacy policy: `https://bzogak.aib.vote/privacy`

@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 import SwiftUI
 
-private let insightMetricsLogger = Logger(subsystem: "aib.Overline", category: "InsightMetrics")
+private let insightMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "InsightMetrics")
 
 struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
@@ -865,11 +865,11 @@ struct OverlineSettingsSheet: View {
                     credential: configuration.credential,
                     category: "연결 테스트",
                     instruction: "연결이 정상인지 확인하기 위해 한 문장으로만 답하세요.",
-                    userPrompt: "Overline AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
+                    userPrompt: "BZOGAK AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
                     sources: [
                         LLMInsightSource(
-                            bookTitle: "Overline Test",
-                            bookAuthor: "Overline",
+                            bookTitle: "BZOGAK Test",
+                            bookAuthor: "BZOGAK",
                             bookSummary: "독자가 책 속 글조각을 저장하고, 선택한 문장을 바탕으로 생각을 정리하는 테스트용 책입니다.",
                             text: "독서 메모를 안전하게 정리한다.",
                             memo: "연결 확인용 테스트 문장"
@@ -1345,13 +1345,13 @@ private struct PrivacyTransmissionPolicyView: View {
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
-            title: "Overline의 처리",
-            body: "AI 요청은 선택한 제공자에게 직접 전송됩니다. Overline은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다."
+            title: "글조각 서랍의 처리",
+            body: "AI 요청은 선택한 제공자에게 직접 전송됩니다. 글조각 서랍은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "location",
             title: "주변 장소와 검색",
-            body: "주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 Overline 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 Overline 서버에는 내용을 저장하지 않습니다."
+            body: "주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 커뮤니티 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 커뮤니티 서버에는 내용을 저장하지 않습니다."
         )
     ]
 

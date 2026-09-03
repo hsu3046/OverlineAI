@@ -30,7 +30,7 @@ targets:
           - UIInterfaceOrientationPortrait
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: aib.Overline.SupertonicBenchmark
+        PRODUCT_BUNDLE_IDENTIFIER: vote.aib.bzogak.SupertonicBenchmark
         PRODUCT_NAME: SupertonicBenchmark
         SWIFT_VERSION: 5.0
         GENERATE_INFOPLIST_FILE: NO

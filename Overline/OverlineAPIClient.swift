@@ -21,7 +21,7 @@ nonisolated enum OverlineAPIConfiguration {
     }
 
     static var privacyPolicyURL: URL? {
-        baseURL?.appendingPathComponent("privacy")
+        URL(string: "https://bzogak.aib.vote/privacy")
     }
 }
 
@@ -192,7 +192,7 @@ nonisolated enum OverlineAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingServerURL:
-            "Overline 서버 연결이 아직 설정되지 않았습니다."
+            "커뮤니티 서버 연결이 아직 설정되지 않았습니다."
         case .invalidURL:
             "서버 요청 주소를 만들 수 없습니다."
         case .invalidResponse:

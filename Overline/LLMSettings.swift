@@ -348,8 +348,8 @@ final class LLMSettingsStore {
         }
     }
 
-    private static let keychain = KeychainStringStore(service: "aib.Overline.llm")
-    private static let subscriptionKeychain = KeychainStringStore(service: "aib.Overline.llm.subscription")
+    private static let keychain = KeychainStringStore(service: "vote.aib.bzogak.llm")
+    private static let subscriptionKeychain = KeychainStringStore(service: "vote.aib.bzogak.llm.subscription")
 }
 
 struct KeychainStringStore {

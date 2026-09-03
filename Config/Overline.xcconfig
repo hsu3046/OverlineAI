@@ -1,4 +1,4 @@
-// Shared build settings for Overline.
+// Shared build settings for BZOGAK.
 // Keep real secrets in Config/Secrets.xcconfig, which is ignored by git.
-OVERLINE_API_BASE_URL =
+OVERLINE_API_BASE_URL = https:/$()/bzogak.aib.vote
 #include? "Secrets.xcconfig"

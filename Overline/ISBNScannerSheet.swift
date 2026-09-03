@@ -177,7 +177,7 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
     var onUnavailable: ((String) -> Void)?
 
     private let session = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "aib.overline.isbn-scanner")
+    private let sessionQueue = DispatchQueue(label: "vote.aib.bzogak.isbn-scanner")
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var didDetectISBN = false
 

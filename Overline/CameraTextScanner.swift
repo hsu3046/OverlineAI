@@ -6,7 +6,7 @@ import SwiftUI
 import UIKit
 @preconcurrency import Vision
 
-nonisolated private let cameraLifecycleLogger = Logger(subsystem: "aib.Overline", category: "CameraLifecycle")
+nonisolated private let cameraLifecycleLogger = Logger(subsystem: "vote.aib.bzogak", category: "CameraLifecycle")
 
 struct CameraRecognizedTextLine: Identifiable, Hashable {
     let id: String
@@ -976,7 +976,7 @@ nonisolated enum CameraDeviceSelection {
         let switchFactors = camera.virtualDeviceSwitchOverVideoZoomFactors
             .map { String(format: "%.2f", $0.doubleValue) }
             .joined(separator: ",")
-        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+        let logger = Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner")
 
         logger.info(
             "camera_selected type=\(camera.deviceType.rawValue, privacy: .public) name=\(camera.localizedName, privacy: .public) virtual=\(camera.isVirtualDevice, privacy: .public) constituents=\(constituentTypes, privacy: .public) switch_factors=\(switchFactors, privacy: .public)"
@@ -984,7 +984,7 @@ nonisolated enum CameraDeviceSelection {
     }
 
     static func configureMacroFallbackBehavior(for camera: AVCaptureDevice) {
-        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+        let logger = Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner")
 
         guard camera.isVirtualDevice, !camera.constituentDevices.isEmpty else {
             logger.info(
@@ -1023,7 +1023,7 @@ nonisolated enum CameraDeviceSelection {
     }
 
     static func logActivePrimaryConstituent(_ camera: AVCaptureDevice) {
-        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+        let logger = Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner")
 
         guard camera.isVirtualDevice else {
             logger.info(
@@ -1047,7 +1047,7 @@ nonisolated enum CameraDeviceSelection {
     }
 
     static func applyPreferredCenterCropZoom(to camera: AVCaptureDevice) {
-        let logger = Logger(subsystem: "aib.Overline", category: "CameraScanner")
+        let logger = Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner")
         let minimumZoomFactor = camera.minAvailableVideoZoomFactor
         let maximumZoomFactor = camera.maxAvailableVideoZoomFactor
         let targetZoomFactor = preferredVideoZoomFactor(for: camera)
@@ -1602,7 +1602,7 @@ private enum CameraFrozenFrameRecognizer {
             let detectionSource = visionPage != nil ? "vision" : (fallbackPage != nil ? "text_fallback" : "none")
             let detectedArea = Double(detectedPage?.area ?? 0)
 
-            Logger(subsystem: "aib.Overline", category: "CameraScanner").info(
+            Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner").info(
                 "camera_page_detection_frozen source=\(detectionSource, privacy: .public) candidates=\((documentRequest.results ?? []).count, privacy: .public) line_count=\(recognizedLines.count, privacy: .public) area=\(detectedArea, format: .fixed(precision: 3), privacy: .public)"
             )
 
@@ -1886,10 +1886,10 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     var onFailure: ((String) -> Void)?
 
     private let sessionQueue = DispatchQueue(
-        label: "aib.overline.camera.session",
+        label: "vote.aib.bzogak.camera.session",
         qos: .userInitiated
     )
-    private let visionQueue = DispatchQueue(label: "aib.overline.camera.vision", qos: .utility)
+    private let visionQueue = DispatchQueue(label: "vote.aib.bzogak.camera.vision", qos: .utility)
     private let videoOutput = AVCaptureVideoDataOutput()
     private let sampleBufferDelegate = CameraSampleBufferDelegate()
     private let ciContextProvider = CameraCIContextProvider()
@@ -2326,7 +2326,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
         let pixelHeight = CVPixelBufferGetHeight(pixelBuffer)
         let imageWidth = image.cgImage?.width ?? 0
         let imageHeight = image.cgImage?.height ?? 0
-        Logger(subsystem: "aib.Overline", category: "CameraScanner").info(
+        Logger(subsystem: "vote.aib.bzogak", category: "CameraScanner").info(
             "camera_freeze_frame pixel=\(pixelWidth, privacy: .public)x\(pixelHeight, privacy: .public) orientation=\(orientation.debugName, privacy: .public) image=\(imageWidth, privacy: .public)x\(imageHeight, privacy: .public)"
         )
         #endif

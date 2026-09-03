@@ -1,4 +1,4 @@
-# App Store 출시 점검표
+# BZOGAK App Store 출시 점검표
 
 기준일: 2026년 9월 3일
 
@@ -15,19 +15,27 @@
 - OpenAI와 Anthropic의 비공식 구독 토큰 경로 제거 및 예전 토큰 삭제
 - 위치, 관련 글과 책 검색을 `POST` 본문으로 전송하고 서버 응답 캐시 비활성화
 - 앱 안 개인정보 처리방침과 오픈소스 라이선스 화면 추가
-- 개인정보 처리방침 공개 경로 `/privacy` 추가
+- 앱의 개인정보 처리방침을 AIB 공식 사이트의 전용 공개 주소로 분리
+- ONNX Runtime 프레임워크의 최소 iOS 버전 표기를 앱과 동일하게 보정하고 빌드 중 검증
+- Version 1.0, Build 2의 서명 Archive 검증 및 App Store Connect 업로드 완료
 
 ## 배포 전에 사용자가 할 일
 
-- [ ] 이 변경이 포함된 Community API를 앱보다 먼저 Vercel Production에 배포
-- [ ] `https://overline-community-api.vercel.app/privacy`가 로그인 없이 열리는지 확인
-- [ ] App Store Connect의 개인정보 처리방침 URL에 `https://overline-community-api.vercel.app/privacy` 입력
-- [ ] Support URL은 실제 문의가 가능한 공개 페이지로 입력
+- [x] Community API를 앱보다 먼저 Vercel Production에 배포
+- [x] `https://bzogak.aib.vote/privacy`가 로그인 없이 열리는지 확인
+- [ ] App Store Connect의 개인정보 처리방침 URL에 `https://bzogak.aib.vote/privacy` 입력
+- [x] 실제 문의가 가능한 `https://bzogak.aib.vote/support` 공개
+- [ ] App Store Connect의 Support URL에 `https://bzogak.aib.vote/support` 입력
 - [ ] 앱 개인정보 답변을 아래 표와 동일하게 입력
 - [ ] 새 연령 등급 설문을 완료하고 관련 글의 외부 블로그 콘텐츠 노출을 사실대로 답변
 - [ ] 콘텐츠 권리 항목에서 Kakao, NAVER, Aladin, 도서관 정보나루 API 사용과 원문 링크 제공 방식을 설명
 - [ ] 심사 메모에 `APP_REVIEW_NOTES.md` 내용을 붙여 넣기
+- [ ] 6.9형 iPhone 스크린샷 5장을 저작권·개인정보가 없는 예시 데이터로 촬영
+- [ ] 앱 이름, 부제, 설명, 키워드와 카테고리를 `APP_STORE_METADATA.md`대로 입력
+- [x] Version 1.0, Build 2로 새 Archive를 만들고 아래 ONNX 산출물 검증 완료
 - [ ] 실기기에서 아래 회귀 테스트 완료
+
+연령 등급에서는 `사용자 생성 콘텐츠`만 있음으로 답변하고, `무제한 웹 접근`, `소셜 미디어`, `메시지 및 채팅`, `광고`는 없음으로 답변한다. 공개 블로그 검색 결과를 앱 안에서 작성하거나 재배포하는 기능이 아니라 읽기 전용으로 보여주며, 원문은 시스템 브라우저에서 연다.
 
 ## App Privacy 권장 답변
 
@@ -38,6 +46,16 @@
 | 기타 사용자 콘텐츠 | 아니요 | 아니요 | 앱 기능 |
 
 앱은 계정, 광고 ID, 결제 정보, 연락처를 수집하지 않는다. 분석 SDK와 광고 SDK도 사용하지 않는다. App Store Connect 답변은 배포된 서버의 실제 로그 및 외부 제공자 정책과 다시 대조한다.
+
+## ONNX Archive 검증
+
+App Store에 올릴 Archive 안에서 다음 세 값이 모두 `17.0`인지 확인한다.
+
+- `BZOGAK.app/Info.plist`의 `MinimumOSVersion`
+- `BZOGAK.app/Frameworks/onnxruntime.framework/Info.plist`의 `MinimumOSVersion`
+- `onnxruntime.framework/onnxruntime` 실행 파일의 iOS `minos`
+
+셋 중 하나라도 다르면 업로드하지 않는다. Xcode에서 `Product > Clean Build Folder`를 실행한 뒤 Version 1.0, Build 2를 다시 Archive한다.
 
 ## 실기기 회귀 테스트
 

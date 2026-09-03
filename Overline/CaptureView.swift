@@ -4,7 +4,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-private let captureMetricsLogger = Logger(subsystem: "aib.Overline", category: "CaptureMetrics")
+private let captureMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "CaptureMetrics")
 
 struct CaptureView: View {
     let cameraScanner: CameraTextScanner
@@ -1356,7 +1356,7 @@ private struct CaptureStage: View {
                     .stroke(Color.white.opacity(0.18), lineWidth: 1)
             }
             .shadow(color: .black.opacity(0.22), radius: 18, y: 10)
-            .accessibilityLabel("Overline capture preview")
+            .accessibilityLabel("글조각 서랍 캡처 미리보기")
             .onChange(of: cameraScanner.recognitionUpdateCount) { _, _ in
                 if isWholePageRecognitionPending {
                     resolveWholePageSelection()

@@ -2276,7 +2276,7 @@ final class ReadingLibrary {
         if books.isEmpty {
             let inbox = ReadingBook(
                 title: "Inbox",
-                author: "Overline",
+                author: "BZOGAK",
                 summary: "캡처한 글조각이 임시로 모이는 개인 보관함.",
                 coverTheme: .cobalt,
                 highlights: [highlight]
@@ -2505,7 +2505,7 @@ final class ReadingLibrary {
 
 enum SampleData {
     nonisolated static let pageLines: [SamplePageLine] = [
-        SamplePageLine(id: 0, text: "Overline AI", weight: .semibold),
+        SamplePageLine(id: 0, text: "BZOGAK AI", weight: .semibold),
         SamplePageLine(id: 1, text: "도서관 책에는 아무 표시도 남길 수 없었다.", weight: .regular),
         SamplePageLine(id: 2, text: "그래서 그는 손가락으로만 문장을 건넜다.", weight: .regular),
         SamplePageLine(id: 3, text: "The line did not belong to the page alone.", weight: .regular),
