@@ -541,6 +541,11 @@ enum OverlineSettingsDestination: Hashable {
     case textSpeech
 }
 
+private enum LLMModelPickerSelection: Hashable {
+    case preset(String)
+    case custom
+}
+
 struct OverlineSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
@@ -559,6 +564,8 @@ struct OverlineSettingsSheet: View {
     @State private var pendingBackupImport: DecodedLibraryBackup?
     @State private var showsBackupImportConfirmation = false
     @State private var backupNotice: LibraryBackupNotice?
+    @State private var customModelProviders: Set<LLMProvider> = []
+    @State private var customModelDrafts: [LLMProvider: String] = [:]
 
     init(
         settings: LLMSettingsStore,
@@ -596,36 +603,36 @@ struct OverlineSettingsSheet: View {
                     .pickerStyle(.navigationLink)
                     .settingsRowSeparator()
 
-                    Picker("모델 선택", selection: modelBinding) {
+                    Picker("모델 선택", selection: modelPickerBinding) {
                         ForEach(settings.provider.modelOptions) { model in
                             Text(model.title)
-                            .tag(model.id)
+                                .tag(LLMModelPickerSelection.preset(model.id))
                         }
 
-                        if !selectedModelIsPreset {
-                            Text(settings.selectedModelID)
-                                .tag(settings.selectedModelID)
-                        }
+                        Text("직접 입력")
+                            .tag(LLMModelPickerSelection.custom)
                     }
                     .pickerStyle(.navigationLink)
                     .settingsRowSeparator()
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        LabeledContent("모델 ID 직접 입력") {
-                            TextField(settings.provider.defaultModelID, text: modelBinding)
-                                .multilineTextAlignment(.trailing)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.overline(.body))
-                                .foregroundStyle(.secondary)
-                        }
+                    if isEnteringCustomModelID {
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent("모델 ID") {
+                                TextField(settings.provider.defaultModelID, text: customModelIDBinding)
+                                    .multilineTextAlignment(.trailing)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .font(.overline(.body))
+                                    .foregroundStyle(.secondary)
+                            }
 
-                        Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
-                            .font(.overline(.caption))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                            Text("입력한 모델 ID를 목록에서 선택한 모델 대신 사용합니다.")
+                                .font(.overline(.caption))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .settingsRowSeparator()
                     }
-                    .settingsRowSeparator()
 
                     LLMAPIKeyRow(
                         provider: settings.provider,
@@ -659,6 +666,7 @@ struct OverlineSettingsSheet: View {
                         isTestingConnection
                             || !settings.allowsExternalAIDataSharing
                             || !settings.hasCredential(for: settings.provider)
+                            || !hasUsableModelID
                     )
                     .listRowSeparator(.hidden, edges: .bottom)
                     .settingsRowSeparator()
@@ -930,11 +938,48 @@ struct OverlineSettingsSheet: View {
         )
     }
 
-    private var modelBinding: Binding<String> {
+    private var modelPickerBinding: Binding<LLMModelPickerSelection> {
         Binding(
-            get: { settings.selectedModelID },
-            set: {
-                settings.setSelectedModelID($0)
+            get: {
+                if isEnteringCustomModelID {
+                    return .custom
+                }
+                return .preset(settings.selectedModelID)
+            },
+            set: { selection in
+                switch selection {
+                case let .preset(modelID):
+                    customModelProviders.remove(settings.provider)
+                    settings.setSelectedModelID(modelID)
+                case .custom:
+                    let provider = settings.provider
+                    customModelProviders.insert(provider)
+                    if customModelDrafts[provider] == nil {
+                        customModelDrafts[provider] = selectedModelIsPreset
+                            ? ""
+                            : settings.selectedModelID
+                    }
+                }
+                connectionTestResult = nil
+            }
+        )
+    }
+
+    private var customModelIDBinding: Binding<String> {
+        Binding(
+            get: {
+                let provider = settings.provider
+                if let draft = customModelDrafts[provider] {
+                    return draft
+                }
+                return selectedModelIsPreset ? "" : settings.selectedModelID
+            },
+            set: { modelID in
+                let provider = settings.provider
+                customModelDrafts[provider] = modelID
+                if !modelID.trimmed.isEmpty {
+                    settings.setSelectedModelID(modelID)
+                }
                 connectionTestResult = nil
             }
         )
@@ -952,6 +997,14 @@ struct OverlineSettingsSheet: View {
 
     private var selectedModelIsPreset: Bool {
         settings.provider.modelOptions.contains { $0.id == settings.selectedModelID }
+    }
+
+    private var isEnteringCustomModelID: Bool {
+        customModelProviders.contains(settings.provider) || !selectedModelIsPreset
+    }
+
+    private var hasUsableModelID: Bool {
+        !isEnteringCustomModelID || !customModelIDBinding.wrappedValue.trimmed.isEmpty
     }
 
     private var connectionTestTitle: String {
@@ -973,6 +1026,7 @@ struct OverlineSettingsSheet: View {
         guard !isTestingConnection else { return }
         guard settings.allowsExternalAIDataSharing else { return }
         guard settings.hasCredential(for: settings.provider) else { return }
+        guard hasUsableModelID else { return }
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
