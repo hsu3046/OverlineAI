@@ -30,6 +30,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
     <link rel="preload" as="image" type="image/webp" href="/assets/hero-reading.webp" fetchpriority="high">
     <link rel="stylesheet" href="/site.css">
+    <script src="/site.js" defer></script>
     <title>글조각 서랍 | 종이책 문장 수집과 독서 기록 앱</title>
     <script type="application/ld+json">
       {
@@ -92,7 +93,7 @@
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/" aria-label="글조각 서랍 홈">
-          <img src="/assets/bzogak-icon.webp" alt="" width="32" height="32">
+          <img src="/assets/bzogak-header-logo.webp" alt="" width="28" height="28">
           <span class="brand-name" aria-label="글조각 서랍">
             <span class="brand-pink" aria-hidden="true">글</span><span class="brand-yellow" aria-hidden="true">조</span><span class="brand-green" aria-hidden="true">각</span><span class="brand-blue brand-drawer" aria-hidden="true">서랍</span>
           </span>
@@ -233,6 +234,42 @@
         </div>
       </section>
 
+      <section class="section screenshot-section" aria-labelledby="screenshots-title">
+        <div class="section-inner">
+          <div class="gallery-heading">
+            <h2 id="screenshots-title">앱 미리보기</h2>
+            <div class="gallery-controls" hidden>
+              <button class="gallery-icon-button" type="button" data-gallery-step="-1" aria-label="이전 스크린샷" aria-controls="screenshots" title="이전 스크린샷" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+              </button>
+              <button class="gallery-icon-button" type="button" data-gallery-step="1" aria-label="다음 스크린샷" aria-controls="screenshots" title="다음 스크린샷">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+              </button>
+            </div>
+          </div>
+          <ol class="screenshot-track" id="screenshots" aria-label="앱 스크린샷">
+            <li><a class="screenshot-link" href="/assets/screenshot-1-full.webp" data-title="문장 캡처와 저장" aria-label="문장 캡처와 저장 화면 확대">
+              <img src="/assets/screenshot-1.webp" alt="책 페이지의 문장에 밑줄을 긋고 저장한 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+            <li><a class="screenshot-link" href="/assets/screenshot-2-full.webp" data-title="글조각 모아보기" aria-label="글조각 모아보기 화면 확대">
+              <img src="/assets/screenshot-2.webp" alt="책장과 책별로 모은 최근 글조각 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+            <li><a class="screenshot-link" href="/assets/screenshot-3-full.webp" data-title="독서 기록 작성" aria-label="독서 기록 작성 화면 확대">
+              <img src="/assets/screenshot-3.webp" alt="책의 독서 날짜와 별점, 감상문을 기록한 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+            <li><a class="screenshot-link" href="/assets/screenshot-4-full.webp" data-title="생각 정리하기" aria-label="생각 정리하기 화면 확대">
+              <img src="/assets/screenshot-4.webp" alt="글조각으로 AI에 질문하고 인사이트를 모은 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+            <li><a class="screenshot-link" href="/assets/screenshot-5-full.webp" data-title="종이책 AI 낭독" aria-label="종이책 AI 낭독 화면 확대">
+              <img src="/assets/screenshot-5.webp" alt="촬영한 책 페이지를 음성으로 듣는 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+            <li><a class="screenshot-link" href="/assets/screenshot-6-full.webp" data-title="책 정보와 블로그 찾기" aria-label="책 정보와 블로그 찾기 화면 확대">
+              <img src="/assets/screenshot-6.webp" alt="인기 도서와 관련 글, 주변 책 공간을 찾는 커뮤니티 화면" width="1284" height="2778" loading="lazy" decoding="async">
+            </a></li>
+          </ol>
+        </div>
+      </section>
+
       <section class="section privacy-band" aria-labelledby="privacy-title">
         <div class="section-inner privacy-callout">
           <div>
@@ -248,6 +285,27 @@
         </div>
       </section>
     </main>
+
+    <dialog class="screenshot-dialog" aria-labelledby="viewer-title">
+      <div class="screenshot-viewer">
+        <div class="viewer-toolbar">
+          <p id="viewer-title" aria-live="polite"></p>
+          <div class="viewer-controls">
+            <button class="gallery-icon-button" type="button" data-viewer-step="-1" aria-label="이전 스크린샷" title="이전 스크린샷">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+            </button>
+            <button class="gallery-icon-button" type="button" data-viewer-step="1" aria-label="다음 스크린샷" title="다음 스크린샷">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+            </button>
+            <button class="gallery-icon-button viewer-close" type="button" aria-label="확대 화면 닫기" title="닫기" autofocus>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+          </div>
+        </div>
+        <div class="viewer-stage"><img class="viewer-image" alt="" width="1284" height="2778"></div>
+        <p class="viewer-status" role="status"></p>
+      </div>
+    </dialog>
 
     <footer class="site-footer">
       <div class="footer-inner">
