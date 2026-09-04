@@ -312,9 +312,15 @@ final class LLMSettingsStore {
         "overline.llm.credentialRejected.\(provider.rawValue).\(mode.rawValue)"
     }
 
-    private static func purgeLegacySubscriptionCredentials(defaults: UserDefaults) {
+    static func purgeLegacySubscriptionCredentials(
+        defaults: UserDefaults,
+        deleteCredential: @MainActor (KeychainStringStore, String) -> Void = { store, account in
+            store.delete(account: account)
+        }
+    ) {
         for provider in LLMProvider.allCases {
-            subscriptionKeychain.delete(account: provider.rawValue)
+            deleteCredential(legacySubscriptionKeychain, provider.rawValue)
+            deleteCredential(subscriptionKeychain, provider.rawValue)
             defaults.removeObject(forKey: "overline.llm.authMode.\(provider.rawValue)")
             defaults.removeObject(
                 forKey: "overline.llm.credentialRejected.\(provider.rawValue).subscription"
@@ -349,6 +355,8 @@ final class LLMSettingsStore {
     }
 
     private static let keychain = KeychainStringStore(service: "vote.aib.bzogak.llm")
+    // Tokens saved before the BZOGAK rename still use this service name.
+    private static let legacySubscriptionKeychain = KeychainStringStore(service: "aib.Overline.llm.subscription")
     private static let subscriptionKeychain = KeychainStringStore(service: "vote.aib.bzogak.llm.subscription")
 }
 
