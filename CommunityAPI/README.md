@@ -37,6 +37,10 @@ DATA4LIBRARY_AUTH_KEY
 
 주변 장소, 관련 글과 책 검색은 위치와 검색어가 URL 또는 CDN 캐시에 남지 않도록 `POST` 요청과 `no-store` 응답만 허용한다. 인기 도서처럼 개인 정보가 없는 공개 목록만 캐시한다.
 
+JSON 요청은 Vercel이 제공하는 `request.body`를 우선 검증한다. 이미 소비한 요청 스트림을 다시 읽지 않으며, 해당 속성이 없는 일반 Node.js 환경에서만 스트림을 읽는다. JSON 객체만 허용하고 8,192바이트 제한을 유지한다. 원본 `Content-Length`가 있으면 먼저 검사하고, 파싱된 객체도 UTF-8 직렬화 크기를 검사한다. 원본 길이가 없는 파싱된 요청은 직렬화 크기만 확인할 수 있다.
+
+관련 회귀 테스트는 `tests/http.test.mjs`에 있으며, 소비된 스트림·파싱된 본문, 잘못된 JSON, 멀티바이트 크기 경계와 메서드 제한을 검사한다. 실제 배포 환경이나 제공자 API를 호출하는 테스트는 아니다. 구현 근거: [Vercel Node.js 요청 본문 안내](https://vercel.com/kb/guide/handling-node-request-body).
+
 ## Search discovery
 
 - `robots.txt`: 공개 페이지와 검색용 AI 크롤러의 접근을 허용하고 `/api/`는 제외한다. ChatGPT 검색용 `OAI-SearchBot`은 허용하고 학습용 `GPTBot`은 차단한다.

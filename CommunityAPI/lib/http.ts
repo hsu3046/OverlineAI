@@ -285,6 +285,32 @@ async function readJSONBody(
   request: IncomingMessage,
   maximumBodyBytes: number,
 ): Promise<JSONBody> {
+  const declaredLength = request.headers["content-length"];
+  if (typeof declaredLength === "string" && Number(declaredLength) > maximumBodyBytes) {
+    throw new HTTPError(413, "요청 내용이 너무 깁니다.");
+  }
+
+  // Vercel /api handlers expose parsed JSON after consuming the request stream.
+  let parsedBody: unknown;
+  try {
+    parsedBody = "body" in request ? request.body : undefined;
+  } catch {
+    throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
+  }
+  if (parsedBody !== undefined) {
+    const value = validatedJSONBody(parsedBody);
+    let encoded: string;
+    try {
+      encoded = JSON.stringify(value);
+    } catch {
+      throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
+    }
+    if (Buffer.byteLength(encoded, "utf8") > maximumBodyBytes) {
+      throw new HTTPError(413, "요청 내용이 너무 깁니다.");
+    }
+    return value;
+  }
+
   const chunks: Buffer[] = [];
   let byteCount = 0;
 
@@ -303,14 +329,18 @@ async function readJSONBody(
 
   try {
     const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
-    }
-    return value as JSONBody;
+    return validatedJSONBody(value);
   } catch (error) {
     if (error instanceof HTTPError) throw error;
     throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
   }
+}
+
+function validatedJSONBody(value: unknown): JSONBody {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Buffer.isBuffer(value)) {
+    throw new HTTPError(400, "요청 내용이 올바르지 않습니다.");
+  }
+  return value as JSONBody;
 }
 
 function decodeHTMLEntities(value: string): string {
