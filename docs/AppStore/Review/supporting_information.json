@@ -1,0 +1,138 @@
+{
+  "title": "BZOGAK - App Review Information",
+  "subtitle": "글조각 서랍 | Version 1.0 | Apple ID 6808131632",
+  "company": "에이아이비 주식회사",
+  "pages": [
+    {
+      "title": "Purpose and main workflows",
+      "sections": [
+        {
+          "heading": "A private companion for physical books",
+          "paragraphs": [
+            "BZOGAK helps readers save selected passages without marking a book, record reading progress and personal reflections, and listen to captured text. It is a free, Korean-language iPhone app for the general public, not an internal business service.",
+            "There is no app account, registration, login, account deletion, advertising, purchase or subscription. External AI is optional and requires a separate provider API key. Provider usage charges may apply; the app does not sell API access."
+          ]
+        },
+        {
+          "heading": "Reviewer walkthrough",
+          "rows": [
+            ["Bookshelf / 책장", "Tap +, enter a title, then the checkmark. A search is optional; the title is the only required field. Open a book and use + in its reading records to save dates, status, rating and a reflection."],
+            ["Underline / 밑줄긋기", "In Capture, select a book, allow camera access and capture a printed page. Swipe the lines to save a passage, add a memo, then open Bookshelf to view it. The continuation action appends a second capture to the same passage."],
+            ["Read Aloud / 읽어주기", "Capture one or more pages, tap the checkmark and then Play. Audio does not start automatically. User-started playback can continue in the background and while the screen is locked. Saved passages can also be read from Bookshelf."],
+            ["Insights / 인사이트", "Select saved passages, enter a question, generate a response and save it. Example: 'Summarize the common theme in two sentences.' Provider access and consent are required as described below."],
+            ["Community / 커뮤니티", "Browse popular books, search book-related blog articles, or allow Location for nearby bookstores and libraries. Original articles open outside the app."],
+            ["Backup / 보관함", "In Settings, choose 백업 파일 내보내기 to export a local library backup, or 백업 파일 가져오기 to import one. API keys and app settings are excluded."]
+          ]
+        },
+        {
+          "heading": "External AI setup",
+          "paragraphs": [
+            "Open Insights > Settings (gear) > 외부 AI 설정. Choose a provider and a model that the API key can access, enter the key, then enable 외부 AI 사용 and confirm consent. Use the connection test before generating an insight. The final model option, 직접 입력, allows a custom model ID.",
+            "Local capture, the library and on-device speech work without an external AI key. External AI functions cannot be tested without valid provider access. No API keys or provider login credentials are included in this document."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Services and information flow",
+      "sections": [
+        {
+          "paragraphs": [
+            "The following inventory describes the app's service integrations and information flow. Online results and model access depend on the relevant provider."
+          ],
+          "rows": [
+            ["Apple Vision", "Processes captured page images on the device for OCR. Recognition requests include Korean, English and Japanese."],
+            ["Apple Speech / AVFoundation", "Transcribes optional voice memos using on-device recognition and reads text using installed iPhone voices. Audio playback is started by the user."],
+            ["Apple Foundation Models", "Conservatively corrects OCR on the device when the model, OS and language are available. Otherwise this optional correction is skipped; it does not fall back to a cloud model."],
+            ["ONNX Runtime / Supertonic 3", "Runs the optional Korean high-quality speech model on the device. The approximately 401 MB voice pack requires an explicit download confirmation and can be removed in Settings."],
+            ["Hugging Face", "Hosts the fixed-revision Supertonic model, voice files and license download. Narration text is not uploaded to Hugging Face for synthesis."],
+            ["Vercel", "Hosts the company's book and Community API. It forwards relevant search terms, book information or coordinates to data providers. Data-provider API keys are server-side."],
+            ["Kakao Developers", "Book Search, Local Search and Daum Blog Search supply book metadata, nearby places and related articles through the company API."],
+            ["NAVER Developers", "Blog Search supplies article titles, short descriptions and original links through the company API."],
+            ["Aladin Open API", "Supplies book search metadata and bestseller rankings through the company API."],
+            ["Library Information Naru", "The data4library loan-ranking integration supplies Korean library loan rankings through the company API. It requires the service's authorization key."],
+            ["OpenAI / Anthropic / Google Gemini / OpenRouter", "Optional requests go from the device to the selected provider using the user's API key. Inputs can include passages, memos, book information and questions. Functions include insights, review drafts, tags and requested OCR correction."],
+            ["Image hosts / system browser", "API-returned URLs supply covers and thumbnails. Original articles and place details open externally when selected by the user."]
+          ]
+        },
+        {
+          "heading": "Local records and deliberate external use",
+          "paragraphs": [
+            "Books, passages, memos and reading records are stored locally, not synchronized to a company library account. Captured images and voice-memo audio are not retained as a photo or recording library. External AI is disabled by default; API keys use iOS Keychain. Revoking consent stops those external AI features. Location is requested for Nearby, not for general reading.",
+            "Privacy policy: <link href=\"https://bzogak.aib.vote/privacy\" color=\"#21686D\">bzogak.aib.vote/privacy</link>"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Regions, content and licenses",
+      "sections": [
+        {
+          "heading": "Regional behavior",
+          "paragraphs": [
+            "The app has no region-specific feature switch and uses a Korean interface. Kakao's nearby-place coverage primarily serves South Korea. Blog results and book rankings focus on Korean providers and may have limited or empty results overseas. Apple model/voice availability varies by device, OS, language and region; external AI availability follows each provider. Identical content worldwide is not claimed."
+          ]
+        },
+        {
+          "heading": "Private records and external user-generated content",
+          "paragraphs": [
+            "Users cannot publish posts, comment, follow accounts or message one another inside BZOGAK. Personal notes are not a public feed. Sharing is a user-initiated system action, not publication to a BZOGAK community.",
+            "Community displays read-only third-party blog titles, snippets and available thumbnails. These are user-generated content from external services. The app does not currently include in-app article reporting or author-blocking controls. Contact information is published at <link href=\"https://bzogak.aib.vote/support\" color=\"#21686D\">bzogak.aib.vote/support</link>."
+          ]
+        },
+        {
+          "heading": "Third-party material and scope",
+          "paragraphs": [
+            "BZOGAK is not a regulated professional service and does not distribute book texts or operate a public repository of scanned book pages. Users supply the pages they capture and must respect applicable rights when capturing or sharing text. API metadata, book covers and blog excerpts remain the material of their respective rights holders.",
+            "The references below identify the sources and licenses used. They do not transfer publishers' rights or certify an individual API account's authorization. Account-specific registration or permission records, if supplied, are separate evidence and exclude secret keys."
+          ]
+        },
+        {
+          "heading": "Software and model license references",
+          "rows": [
+            ["ONNX Runtime 1.24.2", "MIT License. The app includes a license notice.<br/><link href=\"https://github.com/microsoft/onnxruntime/blob/v1.24.2/LICENSE\" color=\"#21686D\">Upstream license</link>"],
+            ["Supertonic inference helper", "MIT License. Adapted Swift helper with an in-app notice.<br/><link href=\"https://github.com/supertone-inc/supertonic/tree/7e2804f96016a7028cb1ed627353c61c1e9dd281\" color=\"#21686D\">Pinned source</link>"],
+            ["Supertonic 3 voice model", "BigScience Open RAIL-M. The original license is downloaded with the model. Its use restrictions apply.<br/><link href=\"https://huggingface.co/Supertone/supertonic-3/blob/3cadd1ee6394adea1bd021217a0e650ede09a323/LICENSE\" color=\"#21686D\">Pinned model license</link>"],
+            ["Pretendard", "SIL Open Font License 1.1; notice available in the app.<br/><link href=\"https://github.com/orioncactus/pretendard/blob/main/LICENSE\" color=\"#21686D\">Upstream license</link>"]
+          ]
+        },
+        {
+          "heading": "API source references",
+          "paragraphs": [
+            "<link href=\"https://developers.kakao.com/docs/ko/daum-search/dev-guide\" color=\"#21686D\">Kakao / Daum Search documentation</link> | <link href=\"https://developers.naver.com/docs/serviceapi/search/blog/blog.md\" color=\"#21686D\">NAVER Blog Search</link><br/><link href=\"https://www.aladin.co.kr/ttb/wguide.aspx\" color=\"#21686D\">Aladin Open API</link> | <link href=\"https://www.data4library.kr/apiUtilization\" color=\"#21686D\">Library Information Naru API</link>"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Printable OCR sample",
+      "sections": [
+        {
+          "paragraphs": [
+            "This short sample was prepared for app review, not copied from a published book. Print this page, add a book titled 심사용 독서 노트, and capture the text below in Underline or Read Aloud. No file import is needed."
+          ]
+        },
+        {
+          "heading": "심사용 독서 노트",
+          "sample": [
+            "책을 펼치면 하루의 속도가 조금 느려집니다.\n서둘러 지나쳤던 생각들이 문장 사이에서 모습을 드러냅니다.\n나는 오늘 마음에 남은 한 문장을 작은 기록으로 남겼습니다.",
+            "기록은 모든 내용을 기억하기 위한 일이 아닙니다.\n다시 만나고 싶은 생각에 조용히 표시를 남기는 일입니다.\n한 줄의 메모가 다음 독서의 출발점이 되기도 합니다.",
+            "책을 덮은 뒤에도 질문은 남아 있습니다.\n어제의 나와 오늘의 내가 같은 문장을 다르게 읽는 이유는 무엇일까요.\n쌓여 가는 글조각을 보며 나의 생각이 바뀌는 과정을 살펴봅니다."
+          ]
+        },
+        {
+          "heading": "Example interactions",
+          "paragraphs": [
+            "Save the first paragraph as a passage. Add the memo 이 문장을 다시 읽고 싶어요. Capture the page again in Read Aloud and press Play. With external AI configured, select the saved passage in Insights and ask: 선택한 문장의 공통 주제를 두 문장으로 정리해 주세요."
+          ]
+        },
+        {
+          "heading": "Contact",
+          "paragraphs": [
+            "에이아이비 주식회사<br/>Support: <link href=\"mailto:support@aib.vote\" color=\"#21686D\">support@aib.vote</link><br/>Website: <link href=\"https://bzogak.aib.vote/\" color=\"#21686D\">bzogak.aib.vote</link>"
+          ]
+        }
+      ]
+    }
+  ]
+}

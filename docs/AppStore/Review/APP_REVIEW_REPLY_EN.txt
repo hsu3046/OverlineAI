@@ -1,0 +1,30 @@
+Hello App Review Team,
+
+Thank you for reviewing 글조각 서랍 (BZOGAK), version 1.0, Apple ID 6808131632. Our responses follow; please also see the video and BZOGAK-App-Review-Information.pdf.
+
+1. Physical-device demonstration
+Please see the accompanying physical-iPhone screen recording. The PDF explains the workflows and includes a printable OCR sample. There are no app registration, login, account deletion or paid-feature flows.
+
+2. Purpose and target audience
+BZOGAK is a free personal reading app for physical books. Readers can save passages without marking a book, keep records and reflections, and listen to captured text. Optional AI helps explore their notes. The app is for the general public, not a restricted organization.
+
+3. Setup and access
+No app account, login or special file is required; your own printed text is sufficient.
+- Bookshelf (책장): tap +, enter a book title and tap the checkmark. Search is optional. Open the book to add a reading record.
+- Capture (캡처) > Underline (밑줄긋기): allow Camera, choose a book, capture a page and swipe the desired lines to save a passage. Add a memo and view the result in Bookshelf.
+- Read Aloud (읽어주기): capture a page, tap the checkmark, then Play. No autoplay. Playback supports background use and screen locking. The default iPhone voice needs no third-party pack. Optional Korean Supertonic 3 requires a confirmed 401 MB download, then runs locally.
+- Insights (인사이트): select passages, ask a question, generate and save. External AI also supports tags, OCR correction and review drafts. In Settings (gear) > 외부 AI 설정, select a provider/model, enter its API key and consent via 외부 AI 사용. Keys use Keychain. External AI is off by default and requires provider access; local capture, notes and speech need no AI key. Provider charges may apply.
+- Community (커뮤니티): rankings, related blog search and Nearby (Location permission). Blog titles, snippets and thumbnails are read-only; originals open externally. No in-app publishing, comments, following or user-to-user messaging. Personal records are private. External blogs are third-party UGC; the app has no in-app article reporting or author-blocking controls.
+
+4. External services and tools
+Apple Vision: local OCR; Speech/AVFoundation: on-device voice memos and speech; Foundation Models: local OCR correction when available. ONNX Runtime runs Supertonic 3 locally; Hugging Face hosts the download. Our Vercel API uses Kakao Book/Local/Daum Blog, NAVER Blog Search, Aladin Book/Bestseller and Library Information Naru (data4library) loan-ranking APIs. Optional external AI uses OpenAI, Anthropic, Google Gemini or OpenRouter. No app authentication, advertising or payment service. Details are in the PDF.
+
+5. Regional differences
+There is no app-level regional feature switch. The interface is Korean. Nearby coverage is primarily South Korea, and rankings/blogs focus on Korean sources; results abroad may be empty. Apple model and voice availability depend on device, OS, language and region. External services depend on their own availability. Content is not identical worldwide.
+
+6. Third-party material
+This is not a regulated professional service. We supply no book texts or public book-page repository. Captured pages are processed locally. Users must respect rights when capturing/sharing. API metadata, covers and blog excerpts remain third-party material. The PDF identifies API sources and software/model licenses; original publishers retain their rights.
+
+Privacy: https://bzogak.aib.vote/privacy
+Support: https://bzogak.aib.vote/support
+Contact: support@aib.vote
