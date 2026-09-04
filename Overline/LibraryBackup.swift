@@ -55,7 +55,7 @@ nonisolated enum LibraryBackupError: LocalizedError, Sendable {
         case .emptyLibrary:
             "내보내거나 가져올 독서 기록이 없습니다."
         case .fileTooLarge:
-            "백업 파일이 너무 큽니다. 50MB 이하의 파일을 선택해 주세요."
+            "백업 파일이 너무 큽니다. 내보내기와 가져오기는 50MB 이하만 지원합니다."
         case .invalidFile:
             "글조각 서랍에서 만든 올바른 백업 파일이 아닙니다."
         case let .unsupportedVersion(version):
@@ -66,6 +66,11 @@ nonisolated enum LibraryBackupError: LocalizedError, Sendable {
 
 nonisolated enum LibraryBackupCodec {
     static let maximumFileSize = 50 * 1_024 * 1_024
+
+    private struct Header: Decodable {
+        let format: String
+        let formatVersion: Int
+    }
 
     static func encode(
         snapshot: LibraryStateSnapshot,
@@ -86,7 +91,11 @@ nonisolated enum LibraryBackupCodec {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(archive)
+        let data = try encoder.encode(archive)
+        guard data.count <= maximumFileSize else {
+            throw LibraryBackupError.fileTooLarge
+        }
+        return data
     }
 
     static func decode(contentsOf url: URL) throws -> DecodedLibraryBackup {
@@ -110,19 +119,27 @@ nonisolated enum LibraryBackupCodec {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
+        // Newer payload schemas may not decode with the current app's models.
+        let header: Header
+        do {
+            header = try decoder.decode(Header.self, from: data)
+        } catch {
+            throw LibraryBackupError.invalidFile
+        }
+
+        guard header.format == LibraryBackupArchive.formatIdentifier else {
+            throw LibraryBackupError.invalidFile
+        }
+        guard header.formatVersion > 0,
+              header.formatVersion <= LibraryBackupArchive.currentFormatVersion else {
+            throw LibraryBackupError.unsupportedVersion(header.formatVersion)
+        }
+
         let archive: LibraryBackupArchive
         do {
             archive = try decoder.decode(LibraryBackupArchive.self, from: data)
         } catch {
             throw LibraryBackupError.invalidFile
-        }
-
-        guard archive.format == LibraryBackupArchive.formatIdentifier else {
-            throw LibraryBackupError.invalidFile
-        }
-        guard archive.formatVersion > 0,
-              archive.formatVersion <= LibraryBackupArchive.currentFormatVersion else {
-            throw LibraryBackupError.unsupportedVersion(archive.formatVersion)
         }
 
         let snapshot = try validated(archive.library)
