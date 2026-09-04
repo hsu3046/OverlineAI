@@ -126,6 +126,14 @@ struct InsightsView: View {
             clearPendingUndo(animated: false)
             _ = applyInsightSeed(request)
         }
+        .onChange(of: library.contentRevision) { _, _ in
+            clearPendingUndo(animated: false)
+            selectedBookIDs.removeAll()
+            selectedHighlightIDs.removeAll()
+            presentedDetailInsight = nil
+            presentedSourceInsight = nil
+            showsInsightSavedAlert = false
+        }
         .onDisappear {
             clearPendingUndo(animated: false)
         }
@@ -331,7 +339,9 @@ struct InsightsView: View {
         guard !payload.sources.isEmpty else { return }
 
         let prompt = question.trimmed
-        let savedPrompt = prompt.isEmpty ? selectedPrompt.title : prompt
+        let promptPreset = selectedPrompt
+        let savedPrompt = prompt.isEmpty ? promptPreset.title : prompt
+        let contentRevision = library.contentRevision
 
         guard llmSettings.isReady(for: llmSettings.provider) else {
             insightErrorMessage = missingCredentialMessage(for: llmSettings.provider)
@@ -347,10 +357,11 @@ struct InsightsView: View {
         let provider = configuration.provider
         let modelID = configuration.modelID
         let sourceCount = payload.sources.count
-        let category = selectedPrompt.rawValue
+        let category = promptPreset.rawValue
         let startedAt = Date()
 
         isGeneratingInsight = true
+        defer { isGeneratingInsight = false }
         insightErrorMessage = nil
         logInsightGenerationRequested(
             provider: provider,
@@ -366,21 +377,28 @@ struct InsightsView: View {
                     provider: provider,
                     modelID: modelID,
                     credential: configuration.credential,
-                    category: selectedPrompt.title,
-                    instruction: selectedPrompt.llmInstruction,
+                    category: promptPreset.title,
+                    instruction: promptPreset.llmInstruction,
                     userPrompt: prompt,
                     sources: payload.sources
                 )
             )
 
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            let savedInsight = withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                 library.addInsight(
-                    categoryRaw: selectedPrompt.rawValue,
+                    expectedContentRevision: contentRevision,
+                    categoryRaw: category,
                     prompt: savedPrompt,
                     body: generatedBody,
                     sourceCount: sourceCount,
                     sourceHighlightIDs: payload.ids
                 )
+            }
+            guard savedInsight != nil else {
+                insightErrorMessage = "보관함이 변경되어 이전 글조각으로 만든 결과는 저장하지 않았습니다. 글조각을 다시 선택해 주세요."
+                return
+            }
+            if question.trimmed == prompt, selectedPrompt == promptPreset {
                 question = ""
             }
             let durationMilliseconds = milliseconds(since: startedAt)
@@ -397,6 +415,10 @@ struct InsightsView: View {
             )
             showsInsightSavedAlert = true
         } catch {
+            guard library.contentRevision == contentRevision else {
+                insightErrorMessage = "보관함이 변경되었습니다. 글조각을 다시 선택해 주세요."
+                return
+            }
             llmSettings.handleRequestError(error, configuration: configuration)
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
@@ -408,8 +430,6 @@ struct InsightsView: View {
             )
             LLMUsageMetricsStore.recordFailed()
         }
-
-        isGeneratingInsight = false
     }
 
     private func milliseconds(since date: Date) -> Int {

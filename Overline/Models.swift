@@ -1657,6 +1657,7 @@ final class ReadingLibrary {
     private(set) var highlightCount = 0
     private(set) var storageStatus: LibraryStorageStatus
     private(set) var resetBackupAvailable: Bool
+    private(set) var contentRevision = UUID()
 
     private let persistence: LibraryPersistence?
     @ObservationIgnored private let snapshotWriter: LibrarySnapshotWriteCoordinator
@@ -2093,12 +2094,15 @@ final class ReadingLibrary {
 
     @discardableResult
     func addInsight(
+        expectedContentRevision: UUID,
         categoryRaw: String,
         prompt: String,
         body: String,
         sourceCount: Int,
         sourceHighlightIDs: [Highlight.ID] = []
-    ) -> LibraryInsight {
+    ) -> LibraryInsight? {
+        guard expectedContentRevision == contentRevision else { return nil }
+
         let insight = LibraryInsight(
             categoryRaw: categoryRaw,
             prompt: prompt,
@@ -2140,6 +2144,7 @@ final class ReadingLibrary {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
         }
 
+        contentRevision = UUID()
         books = []
         savedInsights = []
         selectedBookID = nil
@@ -2165,6 +2170,7 @@ final class ReadingLibrary {
             .flatMap { $0.highlights.map(\.id) }
             .filter { !restoredHighlightIDs.contains($0) }
 
+        contentRevision = UUID()
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
@@ -2415,6 +2421,7 @@ final class ReadingLibrary {
             resetBackupAvailable = Self.saveSnapshotBackup(previousSnapshot, key: Self.resetBackupKey)
         }
 
+        contentRevision = UUID()
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })

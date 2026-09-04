@@ -125,10 +125,11 @@ The project and source directory retain the internal name `Overline`. The public
 
 ### Verification
 
-Run the focused library-backup and legacy credential cleanup tests from the repository root:
+Run the focused library-backup, in-flight insight, and legacy credential cleanup tests from the repository root:
 
 ```sh
 bash Tests/LibraryBackupCodec/run.sh
+bash Tests/LibraryContentRevision/run.sh
 bash Tests/LegacyCredentialCleanup/run.sh
 ```
 

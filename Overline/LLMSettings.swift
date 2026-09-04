@@ -318,6 +318,7 @@ final class LLMSettingsStore {
             store.delete(account: account)
         }
     ) {
+        // Cleanup is limited to this app's accessible Keychain groups, not other app identities.
         for provider in LLMProvider.allCases {
             deleteCredential(legacySubscriptionKeychain, provider.rawValue)
             deleteCredential(subscriptionKeychain, provider.rawValue)
@@ -355,7 +356,7 @@ final class LLMSettingsStore {
     }
 
     private static let keychain = KeychainStringStore(service: "vote.aib.bzogak.llm")
-    // Tokens saved before the BZOGAK rename still use this service name.
+    // Earlier service namespace; a different app/team's private Keychain remains inaccessible.
     private static let legacySubscriptionKeychain = KeychainStringStore(service: "aib.Overline.llm.subscription")
     private static let subscriptionKeychain = KeychainStringStore(service: "vote.aib.bzogak.llm.subscription")
 }

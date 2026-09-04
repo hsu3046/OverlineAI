@@ -20,6 +20,13 @@ Keychain access remains limited to the running app's entitlements. This migratio
 does not access another app's private Keychain group or transfer credentials
 between different bundle IDs.
 
+In particular, the former development target and the current App Store target use
+different signing identities. Tokens left in the former app's private group are
+not cleared by installing this release. Cleanup there would require a separately
+authorized build signed for that original identity, or revocation through the
+credential provider. No access-group entitlement, old app installation, or user's
+existing data is changed as part of this fix.
+
 ## Verification
 
 Run `bash Tests/LegacyCredentialCleanup/run.sh` from the repository root.
