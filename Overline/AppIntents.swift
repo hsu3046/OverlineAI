@@ -79,8 +79,8 @@ enum OverlineIntentDestination: String, AppEnum {
 }
 
 struct OpenOverlineIntent: AppIntent {
-    static let title: LocalizedStringResource = "Overline 열기"
-    static let description = IntentDescription("Overline의 캡처, 책장, 인사이트, 커뮤니티 화면을 바로 엽니다.")
+    static let title: LocalizedStringResource = "글조각 서랍 열기"
+    static let description = IntentDescription("글조각 서랍의 캡처, 책장, 인사이트, 커뮤니티 화면을 바로 엽니다.")
     static let openAppWhenRun = true
 
     @Parameter(title: "화면")
@@ -104,7 +104,7 @@ struct OpenOverlineIntent: AppIntent {
 
 struct AddReadingThoughtIntent: AppIntent {
     static let title: LocalizedStringResource = "읽다가 든 생각 저장"
-    static let description = IntentDescription("책을 읽다가 떠오른 짧은 생각을 Overline에 저장합니다.")
+    static let description = IntentDescription("책을 읽다가 떠오른 짧은 생각을 글조각 서랍에 저장합니다.")
     static let openAppWhenRun = false
 
     @Parameter(
@@ -141,7 +141,7 @@ struct AddReadingThoughtIntent: AppIntent {
             return .result(dialog: "\(book.title)에 저장했어요.")
         }
 
-        return .result(dialog: "Overline에 저장했어요.")
+        return .result(dialog: "글조각 서랍에 저장했어요.")
     }
 }
 
@@ -161,7 +161,7 @@ extension InsightPrompt: AppEnum {
 
 struct OpenInsightWorkspaceIntent: AppIntent {
     static let title: LocalizedStringResource = "생각 정리하기"
-    static let description = IntentDescription("최근 글조각을 선택한 상태로 Overline 인사이트 작업 공간을 엽니다.")
+    static let description = IntentDescription("최근 글조각을 선택한 상태로 글조각 서랍의 인사이트 작업 공간을 엽니다.")
     static let openAppWhenRun = true
 
     @Parameter(title: "방식")

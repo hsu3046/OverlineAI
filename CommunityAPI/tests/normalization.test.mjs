@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
+import { Readable } from "node:stream";
 import test from "node:test";
 
 import { resolveBookMetadataResults } from "../.build/lib/books.js";
 import { buildBookQuery, mergeArticles } from "../.build/lib/community.js";
-import { cleanText, integerQuery, integerValue, numberQuery, safeHTTPURL } from "../.build/lib/http.js";
+import {
+  cleanText,
+  createPOSTHandler,
+  enumBody,
+  integerBody,
+  integerQuery,
+  integerValue,
+  numberBody,
+  numberQuery,
+  requiredBodyString,
+  safeHTTPURL,
+} from "../.build/lib/http.js";
 import {
   data4LibraryKDC,
   data4LibraryLoanDateRange,
@@ -36,6 +48,47 @@ test("integer query rejects fractional pagination values", () => {
   const valid = new URL("https://example.com/articles?page=2");
   assert.throws(() => integerQuery(fractional, "page", { minimum: 1, maximum: 5 }));
   assert.equal(integerQuery(valid, "page", { minimum: 1, maximum: 5 }), 2);
+});
+
+test("private search request bodies are validated without URL query values", () => {
+  const body = {
+    latitude: 37.5665,
+    longitude: 126.978,
+    radius: 5000,
+    kind: "library",
+    title: "바람의 노래를 들어라",
+  };
+
+  assert.equal(numberBody(body, "latitude", { minimum: -90, maximum: 90 }), 37.5665);
+  assert.equal(integerBody(body, "radius", { minimum: 500, maximum: 20_000 }), 5000);
+  assert.equal(enumBody(body, "kind", ["all", "bookstore", "library"], "all"), "library");
+  assert.equal(requiredBodyString(body, "title", 120), "바람의 노래를 들어라");
+  assert.throws(() => integerBody({ radius: 500.5 }, "radius", { minimum: 500, maximum: 20_000 }));
+});
+
+test("private search handler accepts JSON POST and always disables caching", async () => {
+  const handler = createPOSTHandler(async (body) => ({ body: { title: body.title } }));
+  const request = Readable.from([Buffer.from('{"title":"테스트"}')]);
+  request.method = "POST";
+  request.headers = { host: "example.com" };
+
+  const headers = new Map();
+  let responseBody = "";
+  const response = {
+    statusCode: 0,
+    setHeader(name, value) {
+      headers.set(name, value);
+    },
+    end(value = "") {
+      responseBody = String(value);
+    },
+  };
+
+  await handler(request, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(JSON.parse(responseBody), { title: "테스트" });
 });
 
 test("Kakao places require a usable address and distance", () => {

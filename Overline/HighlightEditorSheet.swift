@@ -501,16 +501,15 @@ struct HighlightEditorSheet: View {
 
     private var selectedAISetupMessage: String {
         let provider = llmSettings.provider
+        if !llmSettings.allowsExternalAIDataSharing {
+            return "AI 설정에서 ‘AI로 글 보내기’를 켜 주세요."
+        }
+
         if llmSettings.isCredentialRejected(for: provider) {
             return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
         }
 
-        switch llmSettings.authMode(for: provider) {
-        case .apiKey:
-            return "AI 설정에서 선택한 \(provider.title) API 키를 입력해 주세요."
-        case .subscription:
-            return "AI 설정에서 선택한 \(provider.title) 구독 토큰을 연결해 주세요."
-        }
+        return "AI 설정에서 선택한 \(provider.title) API 키를 입력해 주세요."
     }
 
     private func showAIAlert(title: String, message: String) {

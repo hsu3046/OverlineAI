@@ -3,7 +3,7 @@ import NaturalLanguage
 import Observation
 import OSLog
 
-private let quoteSpeechLogger = Logger(subsystem: "aib.Overline", category: "SpeechVoice")
+private let quoteSpeechLogger = Logger(subsystem: "vote.aib.bzogak", category: "SpeechVoice")
 
 private enum QuoteSpeechVoiceIdentifier {
     static let systemAutomatic = "overline.system-automatic"

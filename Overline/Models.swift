@@ -1657,6 +1657,7 @@ final class ReadingLibrary {
     private(set) var highlightCount = 0
     private(set) var storageStatus: LibraryStorageStatus
     private(set) var resetBackupAvailable: Bool
+    private(set) var contentRevision = UUID()
 
     private let persistence: LibraryPersistence?
     @ObservationIgnored private let snapshotWriter: LibrarySnapshotWriteCoordinator
@@ -2093,12 +2094,15 @@ final class ReadingLibrary {
 
     @discardableResult
     func addInsight(
+        expectedContentRevision: UUID,
         categoryRaw: String,
         prompt: String,
         body: String,
         sourceCount: Int,
         sourceHighlightIDs: [Highlight.ID] = []
-    ) -> LibraryInsight {
+    ) -> LibraryInsight? {
+        guard expectedContentRevision == contentRevision else { return nil }
+
         let insight = LibraryInsight(
             categoryRaw: categoryRaw,
             prompt: prompt,
@@ -2140,6 +2144,7 @@ final class ReadingLibrary {
             resetBackupAvailable = Self.saveSnapshotBackup(snapshot, key: Self.resetBackupKey)
         }
 
+        contentRevision = UUID()
         books = []
         savedInsights = []
         selectedBookID = nil
@@ -2165,6 +2170,7 @@ final class ReadingLibrary {
             .flatMap { $0.highlights.map(\.id) }
             .filter { !restoredHighlightIDs.contains($0) }
 
+        contentRevision = UUID()
         books = snapshot.books
         savedInsights = snapshot.insights
         selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
@@ -2276,7 +2282,7 @@ final class ReadingLibrary {
         if books.isEmpty {
             let inbox = ReadingBook(
                 title: "Inbox",
-                author: "Overline",
+                author: "BZOGAK",
                 summary: "캡처한 글조각이 임시로 모이는 개인 보관함.",
                 coverTheme: .cobalt,
                 highlights: [highlight]
@@ -2397,6 +2403,35 @@ final class ReadingLibrary {
         await persistenceTask?.value
     }
 
+    func makeBackupData(exportedAt: Date = .now) throws -> Data {
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        return try LibraryBackupCodec.encode(
+            snapshot: currentSnapshot,
+            exportedAt: exportedAt,
+            appVersion: appVersion
+        )
+    }
+
+    func replaceLibrary(with snapshot: LibraryStateSnapshot) {
+        let previousSnapshot = currentSnapshot
+        let previousHighlightIDs = previousSnapshot.books.flatMap { $0.highlights.map(\.id) }
+
+        pendingResetBackupCleanupData = nil
+        if !previousSnapshot.isEmpty {
+            resetBackupAvailable = Self.saveSnapshotBackup(previousSnapshot, key: Self.resetBackupKey)
+        }
+
+        contentRevision = UUID()
+        books = snapshot.books
+        savedInsights = snapshot.insights
+        selectedBookID = snapshot.books.contains(where: { $0.id == snapshot.selectedBookID })
+            ? snapshot.selectedBookID
+            : snapshot.books.first?.id
+        persist()
+        postRemovedHighlights(previousHighlightIDs)
+        cleanupSnapshotFilesIfNeeded()
+    }
+
     private func cleanupSnapshotFilesIfNeeded() {
         HighlightSnapshotStore.cleanup()
         HighlightSnapshotStore.clearResetBackup()
@@ -2505,7 +2540,7 @@ final class ReadingLibrary {
 
 enum SampleData {
     nonisolated static let pageLines: [SamplePageLine] = [
-        SamplePageLine(id: 0, text: "Overline AI", weight: .semibold),
+        SamplePageLine(id: 0, text: "BZOGAK AI", weight: .semibold),
         SamplePageLine(id: 1, text: "도서관 책에는 아무 표시도 남길 수 없었다.", weight: .regular),
         SamplePageLine(id: 2, text: "그래서 그는 손가락으로만 문장을 건넜다.", weight: .regular),
         SamplePageLine(id: 3, text: "The line did not belong to the page alone.", weight: .regular),

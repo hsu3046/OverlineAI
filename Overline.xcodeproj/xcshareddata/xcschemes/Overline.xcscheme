@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "EC56B16D2FEBE5AF00188824"
-               BuildableName = "Overline.app"
+               BuildableName = "BZOGAK.app"
                BlueprintName = "Overline"
                ReferencedContainer = "container:Overline.xcodeproj">
             </BuildableReference>
@@ -46,7 +46,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "EC56B16D2FEBE5AF00188824"
-            BuildableName = "Overline.app"
+            BuildableName = "BZOGAK.app"
             BlueprintName = "Overline"
             ReferencedContainer = "container:Overline.xcodeproj">
          </BuildableReference>
@@ -63,7 +63,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "EC56B16D2FEBE5AF00188824"
-            BuildableName = "Overline.app"
+            BuildableName = "BZOGAK.app"
             BlueprintName = "Overline"
             ReferencedContainer = "container:Overline.xcodeproj">
          </BuildableReference>

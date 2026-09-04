@@ -60,7 +60,6 @@ private struct LLMGenerationProfile {
 
 enum LLMInsightError: LocalizedError {
     case missingCredential(provider: String, mode: LLMAuthMode)
-    case unsupportedSubscription(String)
     case invalidURL
     case invalidResponse
     case timedOut
@@ -72,14 +71,7 @@ enum LLMInsightError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingCredential(let provider, let mode):
-            switch mode {
-            case .apiKey:
-                "\(provider) API 키를 먼저 입력해 주세요."
-            case .subscription:
-                "\(provider) 구독 토큰을 먼저 연결해 주세요."
-            }
-        case .unsupportedSubscription(let provider):
-            "\(provider)은 아직 구독 연동을 지원하지 않습니다."
+            "\(provider) \(mode.title)를 먼저 설정해 주세요."
         case .invalidURL:
             "요청 주소를 만들 수 없습니다."
         case .invalidResponse:
@@ -118,18 +110,13 @@ struct LLMInsightClient {
                 request,
                 endpoint: URL(string: "https://openrouter.ai/api/v1/chat/completions"),
                 extraHeaders: [
-                    "HTTP-Referer": "https://overline.local",
-                    "X-OpenRouter-Title": "Overline AI"
+                    "HTTP-Referer": "https://www.aib.vote",
+                    "X-OpenRouter-Title": "BZOGAK AI"
                 ],
                 usesMaxCompletionTokens: false
             )
         case .openai:
-            switch request.credential {
-            case .apiKey:
-                return try await generateOpenAIResponsesInsight(request)
-            case .subscription:
-                return try await generateOpenAICodexSubscriptionInsight(request)
-            }
+            return try await generateOpenAIResponsesInsight(request)
         case .anthropic:
             return try await generateAnthropicInsight(request)
         case .gemini:
@@ -210,7 +197,8 @@ struct LLMInsightClient {
             ],
             "text": [
                 "verbosity": profile.openAITextVerbosity
-            ]
+            ],
+            "store": false
         ]
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -266,73 +254,23 @@ struct LLMInsightClient {
         return content
     }
 
-    private func generateOpenAICodexSubscriptionInsight(_ request: LLMInsightRequest) async throws -> String {
-        let token = try subscriptionToken(from: request)
-        guard let endpoint = URL(string: "https://chatgpt.com/backend-api/codex/responses") else {
-            throw LLMInsightError.invalidURL
-        }
-
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = timeoutInterval
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        urlRequest.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        urlRequest.setValue("Bearer \(token.accessToken.trimmed)", forHTTPHeaderField: "Authorization")
-        urlRequest.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
-        urlRequest.setValue("responses=experimental", forHTTPHeaderField: "openai-beta")
-        urlRequest.setValue(UUID().uuidString, forHTTPHeaderField: "session_id")
-
-        if !token.accountID.trimmed.isEmpty {
-            urlRequest.setValue(token.accountID.trimmed, forHTTPHeaderField: "chatgpt-account-id")
-        }
-
-        let payload: [String: Any] = [
-            "model": request.modelID,
-            "instructions": systemPrompt(for: request),
-            "input": [
-                [
-                    "role": "user",
-                    "content": userPrompt(for: request)
-                ]
-            ],
-            "stream": true,
-            "store": false
-        ]
-
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: payload)
-
-        let data = try await responseData(for: urlRequest)
-        let content = try openAICodexStreamText(from: data)
-        guard !content.trimmed.isEmpty else { throw LLMInsightError.emptyResponse }
-        return content.trimmed
-    }
-
     private func generateAnthropicInsight(_ request: LLMInsightRequest) async throws -> String {
         guard let url = URL(string: "https://api.anthropic.com/v1/messages") else {
             throw LLMInsightError.invalidURL
         }
         let profile = generationProfile(for: request)
-        let isSubscription = request.credential.mode == .subscription
-
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
-        if isSubscription {
-            let token = try subscriptionToken(from: request)
-            urlRequest.setValue("Bearer \(token.accessToken.trimmed)", forHTTPHeaderField: "Authorization")
-            urlRequest.setValue("claude-code-20250219,oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        } else {
-            urlRequest.setValue(try apiKey(from: request), forHTTPHeaderField: "x-api-key")
-        }
+        urlRequest.setValue(try apiKey(from: request), forHTTPHeaderField: "x-api-key")
 
         let payload: [String: Any] = [
             "model": request.modelID,
             "max_tokens": profile.maxOutputTokens,
-            "system": anthropicSystemPayload(for: request, isSubscription: isSubscription),
+            "system": systemPrompt(for: request),
             "messages": [
                 [
                     "role": "user",
@@ -358,7 +296,7 @@ struct LLMInsightClient {
         let apiKey = try apiKey(from: request)
         guard
             let escapedModel = request.modelID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escapedModel):generateContent?key=\(apiKey)")
+            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escapedModel):generateContent")
         else {
             throw LLMInsightError.invalidURL
         }
@@ -368,6 +306,7 @@ struct LLMInsightClient {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = timeoutInterval
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
 
         let payload: [String: Any] = [
             "systemInstruction": [
@@ -445,8 +384,10 @@ struct LLMInsightClient {
     }
 
     private func apiKey(from request: LLMInsightRequest) throws -> String {
-        guard case .apiKey(let apiKey) = request.credential else {
-            throw LLMInsightError.unsupportedSubscription(request.provider.title)
+        let apiKey: String
+        switch request.credential {
+        case .apiKey(let value):
+            apiKey = value
         }
 
         let trimmedAPIKey = apiKey.trimmed
@@ -455,101 +396,6 @@ struct LLMInsightClient {
         }
 
         return trimmedAPIKey
-    }
-
-    private func subscriptionToken(from request: LLMInsightRequest) throws -> LLMSubscriptionToken {
-        guard request.provider.supportsSubscriptionAuth else {
-            throw LLMInsightError.unsupportedSubscription(request.provider.title)
-        }
-
-        guard case .subscription(let token) = request.credential else {
-            throw LLMInsightError.missingCredential(provider: request.provider.title, mode: .subscription)
-        }
-
-        guard token.hasAccessToken else {
-            throw LLMInsightError.missingCredential(provider: request.provider.title, mode: .subscription)
-        }
-
-        return token
-    }
-
-    private func anthropicSystemPayload(for request: LLMInsightRequest, isSubscription: Bool) -> Any {
-        let prompt = systemPrompt(for: request)
-        guard isSubscription else { return prompt }
-
-        return [
-            [
-                "type": "text",
-                "text": "You are Claude Code, Anthropic's official CLI for Claude."
-            ],
-            [
-                "type": "text",
-                "text": prompt
-            ]
-        ]
-    }
-
-    private func openAICodexStreamText(from data: Data) throws -> String {
-        guard let rawText = String(data: data, encoding: .utf8) else {
-            throw LLMInsightError.invalidResponse
-        }
-
-        var output = ""
-        var completed = false
-
-        for rawLine in rawText.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("data:") else { continue }
-
-            let jsonText = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard jsonText != "[DONE]", let data = jsonText.data(using: .utf8) else {
-                continue
-            }
-
-            guard
-                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let type = object["type"] as? String
-            else {
-                continue
-            }
-
-            switch type {
-            case "response.output_text.delta":
-                output += object["delta"] as? String ?? ""
-            case "response.completed":
-                completed = true
-                if output.trimmed.isEmpty, let response = object["response"] as? [String: Any] {
-                    output = openAIResponsesText(from: response)
-                }
-            default:
-                continue
-            }
-        }
-
-        guard completed || !output.trimmed.isEmpty else {
-            throw LLMInsightError.invalidResponse
-        }
-
-        return output
-    }
-
-    private func openAIResponsesText(from response: [String: Any]) -> String {
-        if let outputText = response["output_text"] as? String, !outputText.trimmed.isEmpty {
-            return outputText
-        }
-
-        guard let outputItems = response["output"] as? [[String: Any]] else {
-            return ""
-        }
-
-        return outputItems
-            .compactMap { item -> String? in
-                guard let contentItems = item["content"] as? [[String: Any]] else { return nil }
-                return contentItems
-                    .compactMap { $0["text"] as? String }
-                    .joined(separator: "\n")
-            }
-            .joined(separator: "\n")
     }
 
     private func responseData(for request: URLRequest) async throws -> Data {
@@ -587,7 +433,7 @@ struct LLMInsightClient {
     private func systemPrompt(for request: LLMInsightRequest) -> String {
         if request.category == "OCR교정" {
             return """
-            당신은 Overline의 OCR 교정 엔진입니다.
+            당신은 BZOGAK의 OCR 교정 엔진입니다.
             목적은 책에서 캡처한 원문 글조각의 OCR 실패만 보수적으로 고치는 것입니다.
 
             절대 규칙:
@@ -605,7 +451,7 @@ struct LLMInsightClient {
         }
 
         return """
-        당신은 Overline의 한국어 독서 인사이트 엔진입니다.
+        당신은 BZOGAK의 한국어 독서 인사이트 엔진입니다.
         입력은 사용자가 책을 읽다가 직접 선택한 글조각과 그 글조각이 속한 책의 배경 정보입니다.
 
         공통 원칙:

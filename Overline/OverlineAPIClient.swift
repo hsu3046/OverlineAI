@@ -19,11 +19,16 @@ nonisolated enum OverlineAPIConfiguration {
         }
         return url
     }
+
+    static var privacyPolicyURL: URL? {
+        URL(string: "https://bzogak.aib.vote/privacy")
+    }
 }
 
 nonisolated struct OverlineAPIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
+    private let encoder: JSONEncoder
     private let baseURL: URL?
     private let timeoutInterval: TimeInterval = 12
 
@@ -34,6 +39,7 @@ nonisolated struct OverlineAPIClient {
         self.session = session
         self.baseURL = baseURL
         self.decoder = JSONDecoder()
+        self.encoder = JSONEncoder()
     }
 
     func nearbyPlaces(
@@ -42,14 +48,14 @@ nonisolated struct OverlineAPIClient {
         radius: Int,
         kind: CommunityPlaceKind
     ) async throws -> CommunityListResponse<CommunityPlace> {
-        try await get(
+        try await post(
             path: "api/v1/places",
-            queryItems: [
-                URLQueryItem(name: "lat", value: String(latitude)),
-                URLQueryItem(name: "lng", value: String(longitude)),
-                URLQueryItem(name: "radius", value: String(radius)),
-                URLQueryItem(name: "kind", value: kind.rawValue)
-            ]
+            body: NearbyPlacesRequest(
+                latitude: latitude,
+                longitude: longitude,
+                radius: radius,
+                kind: kind.rawValue
+            )
         )
     }
 
@@ -59,14 +65,14 @@ nonisolated struct OverlineAPIClient {
         source: CommunityArticleSource,
         sort: CommunityArticleSort
     ) async throws -> CommunityListResponse<CommunityArticle> {
-        try await get(
+        try await post(
             path: "api/v1/articles",
-            queryItems: [
-                URLQueryItem(name: "title", value: title),
-                URLQueryItem(name: "author", value: author),
-                URLQueryItem(name: "source", value: source.rawValue),
-                URLQueryItem(name: "sort", value: sort.rawValue)
-            ]
+            body: ArticleSearchRequest(
+                title: title,
+                author: author,
+                source: source.rawValue,
+                sort: sort.rawValue
+            )
         )
     }
 
@@ -103,6 +109,32 @@ nonisolated struct OverlineAPIClient {
         request.cachePolicy = .useProtocolCachePolicy
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
+        return try await decodedResponse(for: request)
+    }
+
+    func post<Response: Decodable, Body: Encodable>(
+        path: String,
+        body: Body
+    ) async throws -> Response {
+        guard let baseURL else { throw OverlineAPIError.missingServerURL }
+
+        let url = path.split(separator: "/").reduce(baseURL) { url, component in
+            url.appendingPathComponent(String(component))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeoutInterval
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+
+        return try await decodedResponse(for: request)
+    }
+
+    private func decodedResponse<Response: Decodable>(for request: URLRequest) async throws -> Response {
+
         let data: Data
         let response: URLResponse
         do {
@@ -135,6 +167,20 @@ nonisolated struct OverlineAPIClient {
     }
 }
 
+nonisolated private struct NearbyPlacesRequest: Encodable {
+    let latitude: Double
+    let longitude: Double
+    let radius: Int
+    let kind: String
+}
+
+nonisolated private struct ArticleSearchRequest: Encodable {
+    let title: String
+    let author: String
+    let source: String
+    let sort: String
+}
+
 nonisolated enum OverlineAPIError: LocalizedError {
     case missingServerURL
     case invalidURL
@@ -146,7 +192,7 @@ nonisolated enum OverlineAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingServerURL:
-            "Overline 서버 연결이 아직 설정되지 않았습니다."
+            "커뮤니티 서버 연결이 아직 설정되지 않았습니다."
         case .invalidURL:
             "서버 요청 주소를 만들 수 없습니다."
         case .invalidResponse:

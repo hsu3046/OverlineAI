@@ -43,15 +43,19 @@ nonisolated struct BookMetadataSearchClient {
             return BookMetadataSearchResult(candidates: [], infoMessage: nil)
         }
 
-        let response: BookMetadataServerResponse = try await apiClient.get(
+        let response: BookMetadataServerResponse = try await apiClient.post(
             path: "api/v1/books/search",
-            queryItems: [URLQueryItem(name: "q", value: trimmedQuery)]
+            body: BookMetadataServerRequest(query: trimmedQuery)
         )
         return BookMetadataSearchResult(
             candidates: response.items,
             infoMessage: response.message
         )
     }
+}
+
+nonisolated private struct BookMetadataServerRequest: Encodable {
+    let query: String
 }
 
 nonisolated private struct BookMetadataServerResponse: Decodable {

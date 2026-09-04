@@ -1,8 +1,9 @@
 import Foundation
 import OSLog
 import SwiftUI
+import UniformTypeIdentifiers
 
-private let insightMetricsLogger = Logger(subsystem: "aib.Overline", category: "InsightMetrics")
+private let insightMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "InsightMetrics")
 
 struct InsightsView: View {
     @Environment(ReadingLibrary.self) private var library
@@ -124,6 +125,14 @@ struct InsightsView: View {
         .onChange(of: intentRouter.request) { _, request in
             clearPendingUndo(animated: false)
             _ = applyInsightSeed(request)
+        }
+        .onChange(of: library.contentRevision) { _, _ in
+            clearPendingUndo(animated: false)
+            selectedBookIDs.removeAll()
+            selectedHighlightIDs.removeAll()
+            presentedDetailInsight = nil
+            presentedSourceInsight = nil
+            showsInsightSavedAlert = false
         }
         .onDisappear {
             clearPendingUndo(animated: false)
@@ -330,7 +339,9 @@ struct InsightsView: View {
         guard !payload.sources.isEmpty else { return }
 
         let prompt = question.trimmed
-        let savedPrompt = prompt.isEmpty ? selectedPrompt.title : prompt
+        let promptPreset = selectedPrompt
+        let savedPrompt = prompt.isEmpty ? promptPreset.title : prompt
+        let contentRevision = library.contentRevision
 
         guard llmSettings.isReady(for: llmSettings.provider) else {
             insightErrorMessage = missingCredentialMessage(for: llmSettings.provider)
@@ -346,10 +357,11 @@ struct InsightsView: View {
         let provider = configuration.provider
         let modelID = configuration.modelID
         let sourceCount = payload.sources.count
-        let category = selectedPrompt.rawValue
+        let category = promptPreset.rawValue
         let startedAt = Date()
 
         isGeneratingInsight = true
+        defer { isGeneratingInsight = false }
         insightErrorMessage = nil
         logInsightGenerationRequested(
             provider: provider,
@@ -365,21 +377,28 @@ struct InsightsView: View {
                     provider: provider,
                     modelID: modelID,
                     credential: configuration.credential,
-                    category: selectedPrompt.title,
-                    instruction: selectedPrompt.llmInstruction,
+                    category: promptPreset.title,
+                    instruction: promptPreset.llmInstruction,
                     userPrompt: prompt,
                     sources: payload.sources
                 )
             )
 
-            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            let savedInsight = withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                 library.addInsight(
-                    categoryRaw: selectedPrompt.rawValue,
+                    expectedContentRevision: contentRevision,
+                    categoryRaw: category,
                     prompt: savedPrompt,
                     body: generatedBody,
                     sourceCount: sourceCount,
                     sourceHighlightIDs: payload.ids
                 )
+            }
+            guard savedInsight != nil else {
+                insightErrorMessage = "보관함이 변경되어 이전 글조각으로 만든 결과는 저장하지 않았습니다. 글조각을 다시 선택해 주세요."
+                return
+            }
+            if question.trimmed == prompt, selectedPrompt == promptPreset {
                 question = ""
             }
             let durationMilliseconds = milliseconds(since: startedAt)
@@ -396,6 +415,10 @@ struct InsightsView: View {
             )
             showsInsightSavedAlert = true
         } catch {
+            guard library.contentRevision == contentRevision else {
+                insightErrorMessage = "보관함이 변경되었습니다. 글조각을 다시 선택해 주세요."
+                return
+            }
             llmSettings.handleRequestError(error, configuration: configuration)
             insightErrorMessage = error.localizedDescription
             logInsightGenerationFailed(
@@ -407,8 +430,6 @@ struct InsightsView: View {
             )
             LLMUsageMetricsStore.recordFailed()
         }
-
-        isGeneratingInsight = false
     }
 
     private func milliseconds(since date: Date) -> Int {
@@ -422,16 +443,15 @@ struct InsightsView: View {
     }
 
     private func missingCredentialMessage(for provider: LLMProvider) -> String {
+        if !llmSettings.allowsExternalAIDataSharing {
+            return "AI 설정에서 ‘외부 AI 사용’을 켜 주세요."
+        }
+
         if llmSettings.isCredentialRejected(for: provider) {
             return "\(provider.title) 인증 또는 현재 모델 접근이 거부되었습니다. AI 설정에서 다시 연결하거나 모델을 확인해 주세요."
         }
 
-        switch llmSettings.authMode(for: provider) {
-        case .apiKey:
-            return "\(provider.title) API 키를 먼저 입력해 주세요."
-        case .subscription:
-            return "\(provider.title) 구독 토큰을 먼저 연결해 주세요."
-        }
+        return "\(provider.title) API 키를 먼저 입력해 주세요."
     }
 
     private func logInsightGenerationRequested(
@@ -479,6 +499,7 @@ private extension View {
 
     func settingsRowSeparator() -> some View {
         self
+            .frame(maxWidth: .infinity, alignment: .leading)
             .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
             .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
     }
@@ -540,6 +561,11 @@ enum OverlineSettingsDestination: Hashable {
     case textSpeech
 }
 
+private enum LLMModelPickerSelection: Hashable {
+    case preset(String)
+    case custom
+}
+
 struct OverlineSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
@@ -551,6 +577,15 @@ struct OverlineSettingsSheet: View {
     @State private var connectionTestResult: LLMConnectionTestResult?
     @State private var showsResetConfirmation = false
     @State private var showsRestoreResetConfirmation = false
+    @State private var backupDocument: LibraryBackupDocument?
+    @State private var backupFilename = ""
+    @State private var isBackupExporterPresented = false
+    @State private var isBackupImporterPresented = false
+    @State private var pendingBackupImport: DecodedLibraryBackup?
+    @State private var showsBackupImportConfirmation = false
+    @State private var backupNotice: LibraryBackupNotice?
+    @State private var customModelProviders: Set<LLMProvider> = []
+    @State private var customModelDrafts: [LLMProvider: String] = [:]
 
     init(
         settings: LLMSettingsStore,
@@ -567,6 +602,70 @@ struct OverlineSettingsSheet: View {
                 Section {
                     LLMActiveModelSummary(settings: settings)
                         .settingsRowSeparator()
+                } header: {
+                    Text("현재 사용 중인 AI")
+                }
+
+                Section {
+                    Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
+                        .tint(Color.overlineAccent)
+                        .settingsRowSeparator()
+
+                    Picker("제공자", selection: providerBinding) {
+                        ForEach(LLMProvider.settingsOrder) { provider in
+                            HStack(spacing: 10) {
+                                LLMProviderIcon(provider: provider)
+                                Text(provider.title)
+                            }
+                                .tag(provider)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
+
+                    Picker("모델 선택", selection: modelPickerBinding) {
+                        ForEach(settings.provider.modelOptions) { model in
+                            Text(model.title)
+                                .tag(LLMModelPickerSelection.preset(model.id))
+                        }
+
+                        Text("직접 입력")
+                            .tag(LLMModelPickerSelection.custom)
+                    }
+                    .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
+
+                    if isEnteringCustomModelID {
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent("모델 ID") {
+                                TextField(settings.provider.defaultModelID, text: customModelIDBinding)
+                                    .multilineTextAlignment(.trailing)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .font(.overline(.body))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text("입력한 모델 ID를 목록에서 선택한 모델 대신 사용합니다.")
+                                .font(.overline(.caption))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .settingsRowSeparator()
+                    }
+
+                    LLMAPIKeyRow(
+                        provider: settings.provider,
+                        apiKey: Binding(
+                            get: { settings.apiKey(for: settings.provider) },
+                            set: {
+                                settings.setAPIKey($0, for: settings.provider)
+                                connectionTestResult = nil
+                            }
+                        )
+                    )
+                    .id(settings.provider)
+                    .settingsRowSeparator()
 
                     Button {
                         Task {
@@ -583,7 +682,12 @@ struct OverlineSettingsSheet: View {
                             }
                         }
                     }
-                    .disabled(isTestingConnection || !settings.hasCredential(for: settings.provider))
+                    .disabled(
+                        isTestingConnection
+                            || !settings.allowsExternalAIDataSharing
+                            || !settings.hasCredential(for: settings.provider)
+                            || !hasUsableModelID
+                    )
                     .listRowSeparator(.hidden, edges: .bottom)
                     .settingsRowSeparator()
 
@@ -594,110 +698,7 @@ struct OverlineSettingsSheet: View {
                             .settingsRowSeparator()
                     }
                 } header: {
-                    Text("현재 사용 중인 AI")
-                }
-
-                Section {
-                    Picker("제공자", selection: providerBinding) {
-                        ForEach(LLMProvider.settingsOrder) { provider in
-                            HStack(spacing: 10) {
-                                LLMProviderIcon(provider: provider)
-                                Text(provider.title)
-                            }
-                                .tag(provider)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .settingsRowSeparator()
-
-                    Picker("모델 선택", selection: modelBinding) {
-                        ForEach(settings.provider.modelOptions) { model in
-                            Text(model.title)
-                            .tag(model.id)
-                        }
-
-                        if !selectedModelIsPreset {
-                            Text(settings.selectedModelID)
-                                .tag(settings.selectedModelID)
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
-                    .settingsRowSeparator()
-
-                    LabeledContent("모델 ID 직접 입력") {
-                        TextField(settings.provider.defaultModelID, text: modelBinding)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.overline(.caption))
-                            .foregroundStyle(.secondary)
-                    }
-                    .listRowSeparator(.hidden, edges: .bottom)
-                    .settingsRowSeparator()
-
-                    Text("모델 ID를 직접 입력하면 목록에서 선택한 모델 대신 해당 모델을 사용합니다.")
-                        .font(.overline(.caption))
-                        .foregroundStyle(.secondary)
-                        .settingsRowSeparator()
-
-                    if settings.provider.supportsSubscriptionAuth {
-                        Picker("인증", selection: authModeBinding) {
-                            ForEach(LLMAuthMode.allCases) { mode in
-                                Label(mode.title, systemImage: mode.systemImage)
-                                    .tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .settingsRowSeparator()
-                    } else {
-                        LabeledContent("인증") {
-                            Text("API 키")
-                                .foregroundStyle(.secondary)
-                        }
-                        .settingsRowSeparator()
-                    }
-                } header: {
-                    Text("AI 설정")
-                }
-
-                Section {
-                    ForEach(LLMProvider.settingsOrder) { provider in
-                        LLMAPIKeyRow(
-                            provider: provider,
-                            apiKey: Binding(
-                                get: { settings.apiKey(for: provider) },
-                                set: {
-                                    settings.setAPIKey($0, for: provider)
-                                    if provider == settings.provider {
-                                        connectionTestResult = nil
-                                    }
-                                }
-                            )
-                        )
-                        .settingsRowSeparator()
-                    }
-                } header: {
-                    Text("API 키")
-                }
-
-                Section {
-                    ForEach(LLMProvider.settingsOrder.filter(\.supportsSubscriptionAuth)) { provider in
-                        LLMSubscriptionTokenRow(
-                            provider: provider,
-                            token: Binding(
-                                get: { settings.subscriptionToken(for: provider) },
-                                set: {
-                                    settings.setSubscriptionToken($0, for: provider)
-                                    if provider == settings.provider {
-                                        connectionTestResult = nil
-                                    }
-                                }
-                            )
-                        )
-                        .settingsRowSeparator()
-                    }
-                } header: {
-                    Text("구독 플랜 토큰")
+                    Text("외부 AI 설정")
                 }
 
                 Section("텍스트 낭독") {
@@ -718,6 +719,21 @@ struct OverlineSettingsSheet: View {
                 }
 
                 Section {
+                    Button {
+                        prepareBackupExport()
+                    } label: {
+                        Label("백업 파일 내보내기", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(library.books.isEmpty && library.savedInsights.isEmpty)
+                    .settingsRowSeparator()
+
+                    Button {
+                        isBackupImporterPresented = true
+                    } label: {
+                        Label("백업 파일 가져오기", systemImage: "square.and.arrow.down")
+                    }
+                    .settingsRowSeparator()
+
                     Button {
                         showsRestoreResetConfirmation = true
                     } label: {
@@ -742,14 +758,16 @@ struct OverlineSettingsSheet: View {
                 } header: {
                     Text("보관함")
                 } footer: {
-                    Text("초기화하면 모든 책, 글조각, 인사이트가 삭제됩니다.")
+                    Text("API 키와 앱 설정은 포함하지 않습니다.")
+                        .font(.overline(.caption2))
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("개인 정보와 이용 조건") {
                     NavigationLink {
-                        PrivacyTransmissionPolicyView()
+                        PrivacyTransmissionPolicyView(settings: settings)
                     } label: {
-                        Label("AI 데이터 처리", systemImage: "lock.shield")
+                        Label("개인정보 처리방침", systemImage: "lock.shield")
                     }
                     .settingsRowSeparator()
 
@@ -757,6 +775,13 @@ struct OverlineSettingsSheet: View {
                         OverlineTermsView()
                     } label: {
                         Label("이용 조건", systemImage: "doc.text")
+                    }
+                    .settingsRowSeparator()
+
+                    NavigationLink {
+                        OpenSourceLicensesView()
+                    } label: {
+                        Label("오픈소스 라이선스", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
                     .settingsRowSeparator()
                 }
@@ -799,8 +824,128 @@ struct OverlineSettingsSheet: View {
             } message: {
                 Text("초기화 직전의 책, 글조각, 인사이트를 이 기기 안의 복구 백업에서 되돌립니다.")
             }
+            .confirmationDialog(
+                "이 백업으로 보관함을 바꿀까요?",
+                isPresented: $showsBackupImportConfirmation,
+                titleVisibility: .visible,
+                presenting: pendingBackupImport
+            ) { backup in
+                Button("백업 가져오기") {
+                    importBackup(backup)
+                }
+                Button("취소", role: .cancel) {
+                    pendingBackupImport = nil
+                }
+            } message: { backup in
+                Text(backupImportMessage(for: backup))
+            }
+            .fileExporter(
+                isPresented: $isBackupExporterPresented,
+                document: backupDocument,
+                contentType: .bzogakBackup,
+                defaultFilename: backupFilename
+            ) { result in
+                backupDocument = nil
+                switch result {
+                case .success:
+                    backupNotice = LibraryBackupNotice(
+                        title: "백업 파일을 내보냈습니다",
+                        message: "선택한 위치에 독서 기록을 저장했습니다."
+                    )
+                case let .failure(error):
+                    presentBackupError(error, title: "백업 파일을 내보내지 못했습니다")
+                }
+            }
+            .fileImporter(
+                isPresented: $isBackupImporterPresented,
+                allowedContentTypes: [.bzogakBackup],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case let .success(urls):
+                    guard let url = urls.first else { return }
+                    loadBackup(from: url)
+                case let .failure(error):
+                    presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+                }
+            }
+            .alert(item: $backupNotice) { notice in
+                Alert(
+                    title: Text(notice.title),
+                    message: Text(notice.message),
+                    dismissButton: .default(Text("확인"))
+                )
+            }
             .overlineKeyboardDismissToolbar()
         }
+    }
+
+    private func prepareBackupExport() {
+        let exportedAt = Date()
+        do {
+            backupDocument = LibraryBackupDocument(data: try library.makeBackupData(exportedAt: exportedAt))
+            backupFilename = backupFilename(for: exportedAt)
+            isBackupExporterPresented = true
+        } catch {
+            presentBackupError(error, title: "백업 파일을 만들지 못했습니다")
+        }
+    }
+
+    private func loadBackup(from url: URL) {
+        Task {
+            do {
+                let backup = try await Task.detached(priority: .userInitiated) {
+                    try LibraryBackupCodec.decode(contentsOf: url)
+                }.value
+                pendingBackupImport = backup
+                showsBackupImportConfirmation = true
+            } catch is CancellationError {
+                return
+            } catch {
+                presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+            }
+        }
+    }
+
+    private func importBackup(_ backup: DecodedLibraryBackup) {
+        let hadExistingLibrary = !library.books.isEmpty || !library.savedInsights.isEmpty
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+            library.replaceLibrary(with: backup.snapshot)
+        }
+        pendingBackupImport = nil
+
+        let recoveryMessage = hadExistingLibrary
+            ? " 가져오기 전 상태는 ‘최근 초기화 복구’에서 되돌릴 수 있습니다."
+            : ""
+        backupNotice = LibraryBackupNotice(
+            title: "보관함을 가져왔습니다",
+            message: "\(backup.summary.description)\(recoveryMessage)"
+        )
+    }
+
+    private func backupImportMessage(for backup: DecodedLibraryBackup) -> String {
+        let recoveryMessage = library.books.isEmpty && library.savedInsights.isEmpty
+            ? ""
+            : "\n현재 보관함은 최근 초기화 복구에 보관됩니다."
+        return "\(backup.summary.description)\(recoveryMessage)"
+    }
+
+    private func backupFilename(for date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let year = components.year ?? 0
+        let month = components.month ?? 0
+        let day = components.day ?? 0
+        return String(format: "글조각서랍-%04d-%02d-%02d", year, month, day)
+    }
+
+    private func presentBackupError(_ error: Error, title: String) {
+        let nsError = error as NSError
+        guard !(nsError.domain == NSCocoaErrorDomain && nsError.code == NSUserCancelledError) else { return }
+
+        backupNotice = LibraryBackupNotice(
+            title: title,
+            message: error.localizedDescription
+        )
     }
 
     private var providerBinding: Binding<LLMProvider> {
@@ -813,21 +958,58 @@ struct OverlineSettingsSheet: View {
         )
     }
 
-    private var modelBinding: Binding<String> {
+    private var modelPickerBinding: Binding<LLMModelPickerSelection> {
         Binding(
-            get: { settings.selectedModelID },
-            set: {
-                settings.setSelectedModelID($0)
+            get: {
+                if isEnteringCustomModelID {
+                    return .custom
+                }
+                return .preset(settings.selectedModelID)
+            },
+            set: { selection in
+                switch selection {
+                case let .preset(modelID):
+                    customModelProviders.remove(settings.provider)
+                    settings.setSelectedModelID(modelID)
+                case .custom:
+                    let provider = settings.provider
+                    customModelProviders.insert(provider)
+                    if customModelDrafts[provider] == nil {
+                        customModelDrafts[provider] = selectedModelIsPreset
+                            ? ""
+                            : settings.selectedModelID
+                    }
+                }
                 connectionTestResult = nil
             }
         )
     }
 
-    private var authModeBinding: Binding<LLMAuthMode> {
+    private var customModelIDBinding: Binding<String> {
         Binding(
-            get: { settings.authMode(for: settings.provider) },
+            get: {
+                let provider = settings.provider
+                if let draft = customModelDrafts[provider] {
+                    return draft
+                }
+                return selectedModelIsPreset ? "" : settings.selectedModelID
+            },
+            set: { modelID in
+                let provider = settings.provider
+                customModelDrafts[provider] = modelID
+                if !modelID.trimmed.isEmpty {
+                    settings.setSelectedModelID(modelID)
+                }
+                connectionTestResult = nil
+            }
+        )
+    }
+
+    private var aiDataSharingBinding: Binding<Bool> {
+        Binding(
+            get: { settings.allowsExternalAIDataSharing },
             set: {
-                settings.setAuthMode($0, for: settings.provider)
+                settings.setAllowsExternalAIDataSharing($0)
                 connectionTestResult = nil
             }
         )
@@ -835,6 +1017,14 @@ struct OverlineSettingsSheet: View {
 
     private var selectedModelIsPreset: Bool {
         settings.provider.modelOptions.contains { $0.id == settings.selectedModelID }
+    }
+
+    private var isEnteringCustomModelID: Bool {
+        customModelProviders.contains(settings.provider) || !selectedModelIsPreset
+    }
+
+    private var hasUsableModelID: Bool {
+        !isEnteringCustomModelID || !customModelIDBinding.wrappedValue.trimmed.isEmpty
     }
 
     private var connectionTestTitle: String {
@@ -854,7 +1044,9 @@ struct OverlineSettingsSheet: View {
     @MainActor
     private func testConnection() async {
         guard !isTestingConnection else { return }
+        guard settings.allowsExternalAIDataSharing else { return }
         guard settings.hasCredential(for: settings.provider) else { return }
+        guard hasUsableModelID else { return }
 
         let provider = settings.provider
         let modelID = settings.selectedModelID
@@ -879,11 +1071,11 @@ struct OverlineSettingsSheet: View {
                     credential: configuration.credential,
                     category: "연결 테스트",
                     instruction: "연결이 정상인지 확인하기 위해 한 문장으로만 답하세요.",
-                    userPrompt: "Overline AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
+                    userPrompt: "BZOGAK AI 연결 테스트입니다. 정상이라면 짧게 확인했다고 답하세요.",
                     sources: [
                         LLMInsightSource(
-                            bookTitle: "Overline Test",
-                            bookAuthor: "Overline",
+                            bookTitle: "BZOGAK Test",
+                            bookAuthor: "BZOGAK",
                             bookSummary: "독자가 책 속 글조각을 저장하고, 선택한 문장을 바탕으로 생각을 정리하는 테스트용 책입니다.",
                             text: "독서 메모를 안전하게 정리한다.",
                             memo: "연결 확인용 테스트 문장"
@@ -933,6 +1125,12 @@ struct OverlineSettingsSheet: View {
             && settings.selectedModelID == configuration.modelID
             && settings.credential(for: configuration.provider) == configuration.credential
     }
+}
+
+private struct LibraryBackupNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 private struct QuoteSpeechSettingsView: View {
@@ -1320,8 +1518,6 @@ private extension Error {
         switch llmError {
         case .missingCredential(_, let mode):
             return "missing_\(mode.rawValue)"
-        case .unsupportedSubscription:
-            return "unsupported_subscription"
         case .invalidURL:
             return "invalid_url"
         case .invalidResponse:
@@ -1341,6 +1537,8 @@ private extension Error {
 }
 
 private struct PrivacyTransmissionPolicyView: View {
+    let settings: LLMSettingsStore
+
     private let policies: [PrivacyTransmissionPolicy] = [
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
@@ -1350,7 +1548,7 @@ private struct PrivacyTransmissionPolicyView: View {
         PrivacyTransmissionPolicy(
             systemImage: "key",
             title: "인증 정보 보호",
-            body: "API 키와 구독 토큰은 이 기기의 iOS Keychain에 저장됩니다."
+            body: "API 키는 이 기기의 iOS Keychain에 저장됩니다."
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
@@ -1359,13 +1557,25 @@ private struct PrivacyTransmissionPolicyView: View {
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
-            title: "Overline의 처리",
-            body: "Overline은 전송 내용을 자체 서버에 저장하거나 학습에 사용하지 않습니다. 외부 AI에서 처리되는 방식은 연결한 서비스의 정책을 따릅니다."
+            title: "글조각 서랍의 처리",
+            body: "AI 요청은 선택한 제공자에게 직접 전송됩니다. 글조각 서랍은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다."
+        ),
+        PrivacyTransmissionPolicy(
+            systemImage: "location",
+            title: "주변 장소와 검색",
+            body: "주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 커뮤니티 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 커뮤니티 서버에는 내용을 저장하지 않습니다."
         )
     ]
 
     var body: some View {
         List {
+            Section {
+                Toggle("외부 AI 사용", isOn: aiDataSharingBinding)
+                    .tint(Color.overlineAccent)
+            } footer: {
+                Text("켜면 AI 기능에 필요한 글조각, 메모와 책 정보가 \(settings.provider.title)에 전송됩니다. 끄면 AI 요청이 전송되지 않습니다.")
+            }
+
             Section {
                 ForEach(policies) { policy in
                     HStack(alignment: .top, spacing: 12) {
@@ -1389,9 +1599,24 @@ private struct PrivacyTransmissionPolicyView: View {
                     .settingsRowSeparator()
                 }
             }
+
+            if let privacyPolicyURL = OverlineAPIConfiguration.privacyPolicyURL {
+                Section {
+                    Link(destination: privacyPolicyURL) {
+                        Label("웹에서 개인정보 처리방침 보기", systemImage: "arrow.up.right.square")
+                    }
+                }
+            }
         }
-        .navigationTitle("AI 데이터 처리")
+        .navigationTitle("개인정보 처리방침")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var aiDataSharingBinding: Binding<Bool> {
+        Binding(
+            get: { settings.allowsExternalAIDataSharing },
+            set: { settings.setAllowsExternalAIDataSharing($0) }
+        )
     }
 }
 
@@ -1459,6 +1684,101 @@ private struct OverlineTerm: Identifiable {
     let body: String
 }
 
+private struct OpenSourceLicensesView: View {
+    private let notices: [OpenSourceLicenseNotice] = [
+        OpenSourceLicenseNotice(
+            name: "Pretendard Variable",
+            detail: "SIL Open Font License 1.1",
+            resourceName: "Pretendard-OFL"
+        ),
+        OpenSourceLicenseNotice(
+            name: "Supertonic",
+            detail: "MIT License",
+            resourceName: "Supertonic-MIT"
+        ),
+        OpenSourceLicenseNotice(
+            name: "ONNX Runtime",
+            detail: "MIT License",
+            resourceName: "ONNXRuntime-MIT"
+        )
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(notices) { notice in
+                    NavigationLink {
+                        OpenSourceLicenseTextView(notice: notice)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(notice.name)
+                                .font(.overline(.subheadline, weight: .semibold))
+                            Text(notice.detail)
+                                .font(.overline(.caption))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .settingsRowSeparator()
+                }
+            }
+
+            Section {
+                if let modelURL = URL(string: "https://huggingface.co/Supertone/supertonic-3") {
+                    Link(destination: modelURL) {
+                        Label("Supertonic 3 · OpenRAIL-M", systemImage: "arrow.up.right.square")
+                    }
+                }
+            } header: {
+                Text("다운로드 음성 모델")
+            } footer: {
+                Text("고품질 음성 모델과 라이선스는 사용자가 음성 팩을 받을 때 함께 저장됩니다.")
+            }
+        }
+        .navigationTitle("오픈소스 라이선스")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct OpenSourceLicenseTextView: View {
+    let notice: OpenSourceLicenseNotice
+
+    var body: some View {
+        ScrollView {
+            Text(notice.licenseText)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+        .navigationTitle(notice.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct OpenSourceLicenseNotice: Identifiable {
+    let name: String
+    let detail: String
+    let resourceName: String
+
+    var id: String { resourceName }
+
+    var licenseText: String {
+        let candidateURLs = [
+            Bundle.main.url(forResource: resourceName, withExtension: "txt"),
+            Bundle.main.url(forResource: resourceName, withExtension: "txt", subdirectory: "Resources/Licenses"),
+            Bundle.main.url(forResource: resourceName, withExtension: "txt", subdirectory: "Resources/Fonts")
+        ]
+
+        for url in candidateURLs.compactMap({ $0 }) {
+            if let text = try? String(contentsOf: url, encoding: .utf8) {
+                return text
+            }
+        }
+
+        return "라이선스 내용을 불러올 수 없습니다."
+    }
+}
+
 private struct LLMAPIKeyRow: View {
     let provider: LLMProvider
     @Binding var apiKey: String
@@ -1468,7 +1788,7 @@ private struct LLMAPIKeyRow: View {
             LLMProviderIcon(provider: provider)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(provider.title)
+                Text("\(provider.title) API 키")
                     .font(.overline(.caption, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk)
 
@@ -1482,67 +1802,6 @@ private struct LLMAPIKeyRow: View {
     }
 }
 
-private struct LLMSubscriptionTokenRow: View {
-    let provider: LLMProvider
-    @Binding var token: LLMSubscriptionToken
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                LLMProviderIcon(provider: provider)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(provider.title)
-                        .font(.overline(.caption, weight: .semibold))
-                        .foregroundStyle(Color.overlineMutedInk)
-                    Text(token.hasAccessToken ? "구독 토큰 연결됨" : "구독 토큰 없음")
-                        .font(.overline(.caption2, weight: .semibold))
-                        .foregroundStyle(token.hasAccessToken ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.72))
-                }
-
-                Spacer()
-
-                if token.hasAccessToken || !token.accountID.trimmed.isEmpty {
-                    Button {
-                        token = .empty
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                            .font(.overline(.body, weight: .semibold))
-                            .foregroundStyle(Color.overlineMutedInk.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(provider.title) 구독 토큰 삭제")
-                }
-            }
-
-            SecureField("Access token", text: $token.accessToken)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.overline(.caption))
-                .privacySensitive()
-
-            switch provider {
-            case .openai:
-                DisclosureGroup("고급 설정") {
-                    TextField("ChatGPT account ID", text: $token.accountID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.overline(.caption))
-                        .foregroundStyle(.secondary)
-
-                    Text("여러 ChatGPT 워크스페이스를 사용하는 경우에만 필요합니다.")
-                        .font(.overline(.caption2))
-                        .foregroundStyle(.secondary)
-                }
-                .font(.overline(.caption))
-            case .anthropic, .openrouter, .gemini:
-                EmptyView()
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 private struct LLMActiveModelSummary: View {
     let settings: LLMSettingsStore
 
@@ -1551,13 +1810,18 @@ private struct LLMActiveModelSummary: View {
             LLMProviderIcon(provider: settings.provider)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(settings.provider.title)
-                    .font(.overline(.subheadline, weight: .semibold))
-                    .foregroundStyle(Color.overlineInk)
-                Text(settings.selectedModelTitle)
-                    .font(.overline(.caption))
-                    .foregroundStyle(Color.overlineMutedInk)
-                Text(settings.authMode(for: settings.provider).title)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(settings.provider.title)
+                        .font(.overline(.subheadline, weight: .semibold))
+                        .foregroundStyle(Color.overlineInk)
+
+                    Text(settings.selectedModelTitle)
+                        .font(.overline(.caption))
+                        .foregroundStyle(Color.overlineMutedInk)
+                        .lineLimit(1)
+                }
+
+                Text(settings.allowsExternalAIDataSharing ? "API 키 사용" : "AI 기능 꺼짐")
                     .font(.overline(.caption2, weight: .semibold))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
             }

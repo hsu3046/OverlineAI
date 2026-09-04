@@ -1,8 +1,8 @@
-import { createGETHandler, requiredEnvironment, requiredQuery } from "../../../lib/http.js";
+import { createPOSTHandler, requiredBodyString, requiredEnvironment } from "../../../lib/http.js";
 import { searchBookMetadata } from "../../../lib/books.js";
 
-export default createGETHandler(async (url) => {
-  const query = requiredQuery(url, "q", 160);
+export default createPOSTHandler(async (requestBody) => {
+  const query = requiredBodyString(requestBody, "query", 160);
   const result = await searchBookMetadata(
     query,
     requiredEnvironment("ALADIN_TTB_KEY"),
@@ -15,8 +15,6 @@ export default createGETHandler(async (url) => {
       message: result.message,
       fetchedAt: new Date().toISOString(),
     },
-    cacheControl: result.isComplete
-      ? "public, s-maxage=86400, stale-while-revalidate=604800"
-      : "no-store",
+    cacheControl: "no-store",
   };
 });

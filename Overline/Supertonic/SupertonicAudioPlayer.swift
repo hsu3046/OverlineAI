@@ -2,7 +2,7 @@ import AVFoundation
 import OSLog
 
 private let supertonicAudioLogger = Logger(
-    subsystem: "aib.Overline",
+    subsystem: "vote.aib.bzogak",
     category: "SupertonicAudio"
 )
 

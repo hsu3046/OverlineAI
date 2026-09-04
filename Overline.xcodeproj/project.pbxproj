@@ -11,7 +11,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		EC56B16E2FEBE5AF00188824 /* Overline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Overline.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC56B16E2FEBE5AF00188824 /* BZOGAK.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BZOGAK.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC56B1802FECC00000188824 /* Overline.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Overline.xcconfig; sourceTree = "<group>"; };
 		EC56B1812FECC00000188824 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.example.xcconfig; sourceTree = "<group>"; };
 		EC56B1842FECC00200188824 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -49,7 +49,7 @@
 		EC56B16F2FEBE5AF00188824 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				EC56B16E2FEBE5AF00188824 /* Overline.app */,
+				EC56B16E2FEBE5AF00188824 /* BZOGAK.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -74,6 +74,7 @@
 				EC56B16A2FEBE5AF00188824 /* Sources */,
 				EC56B16B2FEBE5AF00188824 /* Frameworks */,
 				EC56B16C2FEBE5AF00188824 /* Resources */,
+				EC56B1942FF0000200188824 /* Fix and Sign ONNX Runtime */,
 			);
 			buildRules = (
 			);
@@ -86,8 +87,8 @@
 			packageProductDependencies = (
 				EC56B1922FF0000100188824 /* onnxruntime */,
 			);
-			productName = Overline;
-			productReference = EC56B16E2FEBE5AF00188824 /* Overline.app */;
+			productName = BZOGAK;
+			productReference = EC56B16E2FEBE5AF00188824 /* BZOGAK.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -136,6 +137,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		EC56B1942FF0000200188824 /* Fix and Sign ONNX Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Fix and Sign ONNX Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\n\nFRAMEWORK_PATH=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/onnxruntime.framework\"\nFRAMEWORK_INFO_PLIST=\"${FRAMEWORK_PATH}/Info.plist\"\n\nif [ ! -f \"${FRAMEWORK_INFO_PLIST}\" ]; then\n    echo \"note: ONNX Runtime framework is not embedded; no deployment metadata to update\"\n    exit 0\nfi\n\n/usr/libexec/PlistBuddy -c \"Set :MinimumOSVersion ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\" 2>/dev/null || \\\n/usr/libexec/PlistBuddy -c \"Add :MinimumOSVersion string ${IPHONEOS_DEPLOYMENT_TARGET}\" \"${FRAMEWORK_INFO_PLIST}\"\n\nACTUAL_MINIMUM_OS=$(/usr/libexec/PlistBuddy -c \"Print :MinimumOSVersion\" \"${FRAMEWORK_INFO_PLIST}\")\nif [ \"${ACTUAL_MINIMUM_OS}\" != \"${IPHONEOS_DEPLOYMENT_TARGET}\" ]; then\n    echo \"error: ONNX Runtime MinimumOSVersion is ${ACTUAL_MINIMUM_OS}; expected ${IPHONEOS_DEPLOYMENT_TARGET}\"\n    exit 1\nfi\n\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ]; then\n    SIGNING_IDENTITY=\"${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}\"\n    if [ -z \"${SIGNING_IDENTITY}\" ]; then\n        echo \"error: No code signing identity is available for ONNX Runtime\"\n        exit 1\n    fi\n\n    /usr/bin/codesign --force --sign \"${SIGNING_IDENTITY}\" --timestamp=none --preserve-metadata=identifier,entitlements,flags --generate-entitlement-der \"${FRAMEWORK_PATH}\"\n    /usr/bin/codesign --verify --strict --verbose=2 \"${FRAMEWORK_PATH}\"\n    echo \"note: ONNX Runtime re-signed after deployment metadata update\"\nfi\n\necho \"note: ONNX Runtime MinimumOSVersion set to ${ACTUAL_MINIMUM_OS}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		EC56B16A2FEBE5AF00188824 /* Sources */ = {
@@ -271,12 +295,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = EC56B1802FECC00000188824 /* Overline.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = BZOGAK;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 2QPC5T633N;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -284,15 +309,15 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = aib.overlineai;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
+				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -300,12 +325,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = EC56B1802FECC00000188824 /* Overline.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = BZOGAK;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 2QPC5T633N;
+				CURRENT_PROJECT_VERSION = 5;
+				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -313,15 +339,15 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = aib.overlineai;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
+				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};

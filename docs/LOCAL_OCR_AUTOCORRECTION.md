@@ -1,6 +1,6 @@
 # Local OCR Autocorrection
 
-Overline은 카메라나 사진에서 글조각을 저장한 뒤 Apple Foundation Models를 이용해 OCR 결과를 기기 안에서 자동 교정한다. 저장과 화면 전환은 먼저 끝내고 교정은 비동기로 실행하므로 캡처 동작을 기다리게 하지 않는다.
+BZOGAK은 카메라나 사진에서 글조각을 저장한 뒤 Apple Foundation Models를 이용해 OCR 결과를 기기 안에서 자동 교정한다. 저장과 화면 전환은 먼저 끝내고 교정은 비동기로 실행하므로 캡처 동작을 기다리게 하지 않는다.
 
 ## 동작 범위
 

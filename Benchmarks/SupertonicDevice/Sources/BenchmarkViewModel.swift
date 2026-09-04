@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import OSLog
 
-private let benchmarkLogger = Logger(subsystem: "aib.Overline.SupertonicBenchmark", category: "Performance")
+private let benchmarkLogger = Logger(subsystem: "vote.aib.bzogak.SupertonicBenchmark", category: "Performance")
 
 enum SupertonicVoice: String, CaseIterable, Identifiable {
     case female1 = "F1"

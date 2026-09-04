@@ -2,7 +2,7 @@
 
 ## Scope
 
-Overline은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독한다. 메모와 책 정보는 읽지 않으며, 낭독할 텍스트를 서버로 전송하지 않는다.
+BZOGAK은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독한다. 메모와 책 정보는 읽지 않으며, 낭독할 텍스트를 서버로 전송하지 않는다.
 
 한국어는 다음 두 방식을 선택할 수 있다.
 
@@ -34,23 +34,25 @@ Overline은 저장된 인용 본문과 페이지 읽어주기 본문만 낭독�
 
 의존성은 ONNX Runtime Swift Package `1.24.2`에 고정한다. 모델은 Supertonic 3 리비전 `3cadd1ee6394adea1bd021217a0e650ede09a323`, Swift 추론 도우미는 Supertonic 저장소 커밋 `7e2804f96016a7028cb1ed627353c61c1e9dd281`을 기준으로 한다.
 
+ONNX Runtime `1.24.2`의 iOS 바이너리는 실행 코드의 최소 버전을 iOS 17로 빌드하지만, 앱에 포함되는 프레임워크의 `Info.plist`에는 iOS 15.1이 남을 수 있다. 이 불일치로 App Store의 `ITMS-90208` 검사가 실패하지 않도록 마지막 빌드 단계에서 해당 프레임워크의 `MinimumOSVersion`을 앱의 `IPHONEOS_DEPLOYMENT_TARGET`과 동일하게 맞춘다. `Info.plist` 수정은 기존 코드 서명을 무효화하므로 같은 단계에서 현재 빌드 인증서로 프레임워크를 다시 서명하고 즉시 검증한다. 이 단계는 빌드 산출물의 배포 메타데이터만 수정하며 ONNX 모델이나 추론 동작은 변경하지 않는다.
+
 ## iPhone 음성 선택
 
 - Settings exposes separate voice choices for Korean, English, and Japanese.
-- `Best Quality Auto Select` is the initial choice. Overline ranks the voices exposed for the quote language and selects Premium, then Enhanced, then Default quality.
+- `Best Quality Auto Select` is the initial choice. BZOGAK ranks the voices exposed for the quote language and selects Premium, then Enhanced, then Default quality.
 - When Premium or Enhanced voices are available, the picker hides Default-quality voices to keep the list focused. If no high-quality pack is available, Default voices remain visible as a fallback.
-- The remaining choices are the voices that `AVSpeechSynthesisVoice.speechVoices()` exposes to Overline. Downloading a high-quality voice pack in iPhone Settings makes that supported app voice available for selection.
+- The remaining choices are the voices that `AVSpeechSynthesisVoice.speechVoices()` exposes to BZOGAK. Downloading a high-quality voice pack in iPhone Settings makes that supported app voice available for selection.
 - The selected `AVSpeechSynthesisVoice.identifier` is stored in `UserDefaults` and assigned directly to every utterance.
 - Exact voice choices are ordered Premium, Enhanced, then Default quality. Within the same quality, the exact locale is preferred.
-- If an iOS update or voice removal makes a saved identifier unavailable, Overline returns to `Best Quality Auto Select`.
+- If an iOS update or voice removal makes a saved identifier unavailable, BZOGAK returns to `Best Quality Auto Select`.
 
 This exact-identifier path is intentional. Selecting a voice only by language can produce a different voice from the one chosen in Accessibility settings, particularly across iOS versions.
 
 ### Siri voice limitation
 
-The Siri voice selected in iOS Settings and the voices exposed to third-party apps through `AVSpeechSynthesisVoice` aren't guaranteed to be the same catalog. The public API has no accessor for the current Siri voice and no Siri-specific voice trait. If a Siri asset isn't returned by `speechVoices()`, Overline can't select it by a supported identifier.
+The Siri voice selected in iOS Settings and the voices exposed to third-party apps through `AVSpeechSynthesisVoice` aren't guaranteed to be the same catalog. The public API has no accessor for the current Siri voice and no Siri-specific voice trait. If a Siri asset isn't returned by `speechVoices()`, BZOGAK can't select it by a supported identifier.
 
-Device testing confirmed that the installed Siri voice was not exposed to Overline. Installing a separate high-quality voice pack from the iOS spoken-content settings made the corresponding Premium or Enhanced voice available and resolved the low-quality, choppy playback.
+Device testing confirmed that the installed Siri voice was not exposed to BZOGAK. Installing a separate high-quality voice pack from the iOS spoken-content settings made the corresponding Premium or Enhanced voice available and resolved the low-quality, choppy playback.
 
 ### Device diagnostics
 
@@ -78,8 +80,8 @@ Opening Settings > Read Aloud records the device catalog in the `SpeechVoice` lo
 ## 실제 기기 검증
 
 1. On iPhone, install a high-quality or premium voice from Settings > Accessibility > Read & Speak > Voices. Siri voices are not selectable by third-party apps.
-2. In Overline, open Insights > Settings > Read Aloud. Confirm that `SpeechVoice` logs contain the catalog returned by the device.
-3. Start with Best Quality Auto Select, then preview the explicit Enhanced or Premium choices returned to Overline.
+2. In BZOGAK, open Insights > Settings > Read Aloud. Confirm that `SpeechVoice` logs contain the catalog returned by the device.
+3. Start with Best Quality Auto Select, then preview the explicit Enhanced or Premium choices returned to BZOGAK.
 4. Open a saved quote and confirm that playback uses the chosen voice.
 5. Relaunch the app and confirm that the selection is retained.
 6. 한국어에서 `고품질 온디바이스`를 선택하고 약 401MB 다운로드 안내와 진행률이 표시되는지 확인한다.

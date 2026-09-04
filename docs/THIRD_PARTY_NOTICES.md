@@ -26,7 +26,7 @@
 
 ## Community data providers
 
-Overline links to search results and metadata supplied by the following services through the Overline server. Content ownership remains with each provider and original publisher.
+BZOGAK links to search results and metadata supplied by the following services through the BZOGAK server. Content ownership remains with each provider and original publisher.
 
 - Kakao Developers: Local Search, Book Search, Daum Blog Search
 - NAVER Developers: Blog Search
