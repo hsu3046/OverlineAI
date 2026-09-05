@@ -8,6 +8,7 @@
     <meta name="theme-color" content="#fbfcfa">
     <meta name="application-name" content="글조각 서랍">
     <meta name="apple-mobile-web-app-title" content="글조각 서랍">
+    <meta name="apple-itunes-app" content="app-id=6808131632">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="글조각 서랍">
     <meta property="og:locale" content="ko_KR">
@@ -18,15 +19,16 @@
     <meta property="og:image:type" content="image/jpeg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="책에 표시한 형광펜 밑줄과 여러 색의 글조각">
+    <meta property="og:image:alt" content="종이책과 형광펜을 배경으로 글조각 서랍의 주요 문구를 소개하는 화면">
     <meta property="og:url" content="https://bzogak.aib.vote/">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="글조각 서랍 | 종이책 문장 수집과 독서 기록 앱">
     <meta name="twitter:description" content="종이책에서 만난 문장을 글조각과 독서 기록으로 모으고, 필요한 페이지는 자연스러운 음성으로 들어보세요.">
     <meta name="twitter:image" content="https://bzogak.aib.vote/assets/bzogak-social.jpg">
-    <meta name="twitter:image:alt" content="책에 표시한 형광펜 밑줄과 여러 색의 글조각">
+    <meta name="twitter:image:alt" content="종이책과 형광펜을 배경으로 글조각 서랍의 주요 문구를 소개하는 화면">
     <link rel="canonical" href="https://bzogak.aib.vote/">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="/assets/favicon-96.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
     <link rel="preload" as="image" type="image/webp" href="/assets/hero-reading.webp" fetchpriority="high">
     <link rel="stylesheet" href="/site.css">
@@ -60,15 +62,23 @@
             }
           },
           {
-            "@type": "SoftwareApplication",
+            "@type": "MobileApplication",
             "@id": "https://bzogak.aib.vote/#app",
             "name": "글조각 서랍",
             "alternateName": "BZOGAK",
+            "identifier": {
+              "@type": "PropertyValue",
+              "propertyID": "Apple App Store",
+              "value": "6808131632"
+            },
             "url": "https://bzogak.aib.vote/",
+            "downloadUrl": "https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko",
+            "sameAs": "https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko",
             "image": "https://bzogak.aib.vote/assets/bzogak-icon.png",
             "description": "종이책에서 만난 문장을 글조각과 독서 기록으로 모으고, 필요한 페이지는 기기 내 음성으로 듣는 iPhone 독서 앱입니다.",
             "applicationCategory": "ReferenceApplication",
-            "operatingSystem": "iOS",
+            "operatingSystem": "iOS 17.0 이상",
+            "inLanguage": "ko-KR",
             "isAccessibleForFree": true,
             "offers": {
               "@type": "Offer",
@@ -93,7 +103,7 @@
     <header class="site-header">
       <div class="header-inner">
         <a class="brand" href="/" aria-label="글조각 서랍 홈">
-          <img src="/assets/bzogak-header-logo.webp" alt="" width="28" height="28">
+          <img src="/assets/bzogak-header-logo.webp" alt="" width="24" height="24">
           <span class="brand-name" aria-label="글조각 서랍">
             <span class="brand-pink" aria-hidden="true">글</span><span class="brand-yellow" aria-hidden="true">조</span><span class="brand-green" aria-hidden="true">각</span><span class="brand-blue brand-drawer" aria-hidden="true">서랍</span>
           </span>
@@ -102,6 +112,7 @@
           <a href="/" aria-current="page">서비스 소개</a>
           <a href="/privacy">개인정보처리방침</a>
           <a href="/support">문의하기</a>
+          <a class="app-store-link" href="https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko" aria-label="App Store에서 글조각 서랍 다운로드">App Store <span aria-hidden="true">↗</span></a>
         </nav>
       </div>
     </header>
@@ -110,10 +121,14 @@
       <section class="intro">
         <div class="section-inner intro-content">
           <img class="app-icon" src="/assets/bzogak-icon.webp" alt="글조각 서랍 앱 아이콘" width="512" height="512">
-          <p class="eyebrow">글조각 서랍 · 무료 iOS 아이폰 독서 앱</p>
-          <h1>종이책에서 만난 문장을<br>나만의 글조각으로</h1>
-          <p class="intro-copy">마음에 남은 문장에 밑줄을 긋고 나만의 글조각으로 간직하세요.<br>한 조각씩 쌓인 문장들이 나만의 생각으로 성장합니다.</p>
+          <p class="eyebrow">글조각 서랍 · 무료 iPhone 독서 앱</p>
+          <h1>종이책에서 만난 문장을 나만의 글조각으로</h1>
+          <p class="intro-copy">마음에 남은 문장에 밑줄을 긋고 나만의 글조각으로 간직하세요. 한 조각씩 쌓인 문장들이 나만의 생각으로 성장합니다.</p>
           <div class="marker-rule" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <a class="app-store-badge" href="https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko" aria-label="App Store에서 글조각 서랍 다운로드">
+            <!-- Official Apple Marketing Tools badge; do not modify or animate. -->
+            <img src="/assets/download-on-the-app-store-ko.svg" alt="" width="175" height="54">
+          </a>
         </div>
       </section>
 
@@ -122,6 +137,7 @@
           <div class="section-heading">
             <p class="eyebrow">종이책을 읽는 새로운 방법</p>
             <h2 id="features-title">책을 읽고 글을 모아<br>나만의 생각을 찾아가기</h2>
+            <p class="section-summary">글조각 서랍은 종이책에서 마음에 남은 문장을 카메라로 저장하고 책별로 독서 기록을 관리하는 무료 iPhone 앱입니다. 촬영한 페이지를 기기 내 음성으로 듣거나, 사용자가 선택한 AI로 독서 메모와 인사이트를 만들 수 있습니다.</p>
           </div>
           <div class="feature-list">
             <article class="feature">
@@ -310,11 +326,15 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <div>© 2026 글조각 서랍</div>
+        <div class="footer-meta">
+          <div>© 2026 글조각 서랍</div>
+          <small>Apple, Apple 로고 및 App Store는 미국 및 기타 국가에서 Apple Inc.의 상표입니다.</small>
+        </div>
         <div class="footer-links">
           <a href="/privacy">개인정보처리방침</a>
           <a href="/support">문의하기</a>
-          <a class="external-link" href="https://www.aib.vote"><span aria-hidden="true">↗</span>에이아이비 주식회사</a>
+          <a class="app-store-link" href="https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko">App Store <span aria-hidden="true">↗</span></a>
+          <a class="external-link app-store-link" href="https://www.aib.vote">에이아이비 주식회사 <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </footer>
