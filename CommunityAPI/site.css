@@ -97,8 +97,8 @@ img {
 }
 
 .brand img {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   object-fit: contain;
 }
@@ -128,6 +128,17 @@ img {
   font-size: 15px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.app-store-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.app-store-link span {
+  font-size: 0.82em;
+  line-height: 1;
 }
 
 .site-nav a,
@@ -215,9 +226,9 @@ img {
 
 .eyebrow {
   margin: 0 0 14px;
-  color: var(--teal-dark);
+  color: var(--ink);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 400;
 }
 
 h1,
@@ -244,12 +255,28 @@ h1 {
   font-size: 20px;
 }
 
+.app-store-badge {
+  display: inline-flex;
+  min-height: 54px;
+  margin-top: 30px;
+}
+
+.app-store-badge:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 6px;
+}
+
+.app-store-badge img {
+  width: 175px;
+  height: 54px;
+}
+
 .marker-rule {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   width: min(350px, 72vw);
   height: 8px;
-  margin: 42px auto 0;
+  margin: 32px auto 0;
   overflow: hidden;
 }
 
@@ -303,6 +330,11 @@ h1 {
 .legal-header p,
 .support-intro p {
   color: var(--muted);
+}
+
+.section-heading .section-summary {
+  max-width: 620px;
+  margin-bottom: 0;
 }
 
 .feature-list {
@@ -661,23 +693,37 @@ html.screenshot-open {
 
 .footer-inner {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 28px;
 }
 
+.footer-meta small {
+  display: block;
+  margin-top: 7px;
+  color: color-mix(in srgb, var(--muted) 82%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: nowrap;
+}
+
 .footer-links {
   display: flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  justify-content: flex-end;
   gap: 20px;
 }
 
 .footer-links a {
+  white-space: nowrap;
   text-decoration: none;
 }
 
 .footer-links .external-link {
   display: inline-flex;
-  gap: 5px;
-  align-items: center;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .legal-page,
@@ -1029,6 +1075,10 @@ details p {
   .footer-inner {
     flex-direction: column;
   }
+
+  .footer-meta small {
+    white-space: normal;
+  }
 }
 
 @media (max-width: 520px) {
@@ -1070,6 +1120,11 @@ details p {
     gap: 14px;
   }
 
+  .site-nav a:nth-child(2),
+  .site-nav a:nth-child(3) {
+    display: none;
+  }
+
   .app-icon {
     width: 96px;
     height: 96px;
@@ -1096,6 +1151,8 @@ details p {
   }
 
   .footer-links {
+    flex-shrink: 1;
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 }

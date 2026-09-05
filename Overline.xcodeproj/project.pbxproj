@@ -107,10 +107,10 @@
 				};
 			};
 			buildConfigurationList = EC56B1692FEBE5AF00188824 /* Build configuration list for PBXProject "Overline" */;
-			developmentRegion = en;
+			developmentRegion = ko;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
+				ko,
 				Base,
 			);
 			mainGroup = EC56B1652FEBE5AF00188824;
@@ -308,7 +308,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
 				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -338,7 +338,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
 				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

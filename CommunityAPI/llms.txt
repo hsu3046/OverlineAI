@@ -5,6 +5,7 @@
 ## 공식 페이지
 
 - [서비스 소개](https://bzogak.aib.vote/): 앱의 주요 기능과 개인정보 보호 원칙
+- [App Store](https://apps.apple.com/us/app/%EA%B8%80%EC%A1%B0%EA%B0%81-%EC%84%9C%EB%9E%8D/id6808131632?l=ko): 무료 iPhone 앱 다운로드
 - [개인정보처리방침](https://bzogak.aib.vote/privacy): 기기 내 정보 처리, 외부 서비스 전송 및 이용자 권리
 - [문의 및 자주 묻는 질문](https://bzogak.aib.vote/support): 앱 이용 안내와 문의 방법
 
