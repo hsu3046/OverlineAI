@@ -163,21 +163,19 @@ img {
   display: none;
 }
 
-.menu-open .mobile-menu-toggle svg {
-  visibility: hidden;
-}
-
 .mobile-menu {
   position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  inset: var(--menu-top, 58px) var(--menu-right, 14px) auto auto;
+  width: min(240px, calc(100% - 28px));
+  max-height: calc(100dvh - var(--menu-top, 58px) - 16px);
   max-width: none;
-  max-height: none;
   margin: 0;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 9%);
+  overflow-y: auto;
   color: var(--ink);
 }
 
@@ -186,22 +184,7 @@ img {
 }
 
 .mobile-menu-panel {
-  width: min(240px, calc(100% - 28px));
-  max-height: calc(100dvh - var(--menu-top, 80px) - 16px);
-  overflow-y: auto;
-  margin: var(--menu-top, 80px) var(--menu-right, 14px) 0 auto;
   padding: 12px 20px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 9%);
-}
-
-.mobile-menu-close {
-  position: fixed;
-  top: var(--menu-toggle-top, 10px);
-  right: var(--menu-right, 14px);
-  background: var(--paper);
 }
 
 .mobile-menu .site-nav {
@@ -591,6 +574,18 @@ h1 {
   outline-offset: 2px;
 }
 
+html[data-input="pointer"] .gallery-icon-button:focus-visible,
+html[data-input="pointer"] .screenshot-link:focus-visible,
+html[data-input="pointer"] .site-nav a:focus-visible {
+  outline: none;
+}
+
+.gallery-icon-button,
+.screenshot-link,
+.site-nav a {
+  -webkit-tap-highlight-color: transparent;
+}
+
 .screenshot-track {
   display: grid;
   grid-auto-flow: column;
@@ -691,8 +686,7 @@ h1 {
   color: var(--muted);
 }
 
-html.screenshot-open,
-html.menu-open {
+html.screenshot-open {
   overflow: hidden;
   scrollbar-gutter: stable;
 }
