@@ -1,19 +1,19 @@
 const desktopNav = document.querySelector(".header-inner > .site-nav");
-if (desktopNav && typeof HTMLDialogElement.prototype.showModal === "function") {
+if (desktopNav && "showPopover" in HTMLElement.prototype) {
   const toggle = document.createElement("button");
   toggle.className = "mobile-menu-toggle gallery-icon-button";
   toggle.type = "button";
   toggle.setAttribute("aria-label", "메뉴 열기");
-  toggle.setAttribute("aria-haspopup", "dialog");
+  toggle.setAttribute("popovertarget", "mobile-menu");
   toggle.setAttribute("aria-controls", "mobile-menu");
   toggle.setAttribute("aria-expanded", "false");
   // Lucide Menu and X, matching the gallery controls.
   toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>';
-  const menu = document.createElement("dialog");
+  const menu = document.createElement("div");
   menu.id = "mobile-menu";
   menu.className = "mobile-menu";
-  menu.setAttribute("aria-label", "주요 메뉴");
-  menu.innerHTML = '<div class="mobile-menu-panel"><button class="gallery-icon-button mobile-menu-close" type="button" aria-label="메뉴 닫기" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></div>';
+  menu.setAttribute("popover", "auto");
+  menu.innerHTML = '<div class="mobile-menu-panel"></div>';
   menu.querySelector(".mobile-menu-panel").append(desktopNav.cloneNode(true));
   document.body.append(menu);
   desktopNav.after(toggle);
@@ -23,31 +23,55 @@ if (desktopNav && typeof HTMLDialogElement.prototype.showModal === "function") {
     const bounds = toggle.getBoundingClientRect();
     menu.style.setProperty("--menu-top", `${bounds.bottom + 4}px`);
     menu.style.setProperty("--menu-right", `${document.documentElement.clientWidth - bounds.right}px`);
-    menu.style.setProperty("--menu-toggle-top", `${bounds.top}px`);
   };
-  toggle.addEventListener("click", () => {
-    positionMenu();
-    menu.showModal();
-    toggle.setAttribute("aria-expanded", "true");
-    document.documentElement.classList.add("menu-open");
+  let pointerScroll = false;
+  let openedAtY = 0;
+  const isOpen = () => menu.matches(":popover-open");
+  const closeMenu = () => { if (isOpen()) menu.hidePopover(); };
+  menu.addEventListener("beforetoggle", (event) => {
+    const open = event.newState === "open";
+    if (open) {
+      positionMenu();
+      openedAtY = window.scrollY;
+      pointerScroll = false;
+    }
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "메뉴 닫기" : "메뉴 열기");
+    toggle.querySelector("path").setAttribute("d", open ? "M18 6 6 18M6 6l12 12" : "M4 6h16M4 12h16M4 18h16");
   });
-  menu.querySelector(".mobile-menu-close").addEventListener("click", () => menu.close());
   menu.addEventListener("click", (event) => {
-    if (event.target === menu || event.target.closest("a")) menu.close();
+    if (event.target.closest("a")) closeMenu();
   });
-  menu.addEventListener("close", () => {
-    if (menu.open) return;
-    toggle.setAttribute("aria-expanded", "false");
-    document.documentElement.classList.remove("menu-open");
-    if (mobileWidth.matches) toggle.focus({ preventScroll: true });
+  // Only user-driven page scrolling dismisses the menu, not keyboard focus scrolling.
+  const markPointerScroll = (event) => {
+    if (isOpen() && !menu.contains(event.target)) pointerScroll = true;
+  };
+  document.addEventListener("touchmove", markPointerScroll, { passive: true });
+  document.addEventListener("wheel", markPointerScroll, { passive: true });
+  document.addEventListener("keydown", () => { pointerScroll = false; });
+  window.addEventListener("scroll", () => {
+    if (isOpen() && pointerScroll && Math.abs(window.scrollY - openedAtY) > 8) closeMenu();
+  }, { passive: true });
+  menu.addEventListener("focusout", (event) => {
+    if (event.relatedTarget && !menu.contains(event.relatedTarget) && event.relatedTarget !== toggle) closeMenu();
   });
   mobileWidth.addEventListener("change", () => {
-    if (!mobileWidth.matches && menu.open) menu.close();
+    if (!mobileWidth.matches) closeMenu();
   });
   window.addEventListener("resize", () => {
-    if (menu.open) positionMenu();
+    if (isOpen()) positionMenu();
   });
 }
+
+// Safari can retain :focus-visible after pointer-triggered dialog focus changes.
+document.addEventListener("pointerdown", () => {
+  document.documentElement.dataset.input = "pointer";
+}, { capture: true, passive: true });
+document.addEventListener("keydown", (event) => {
+  if (!["Shift", "Control", "Alt", "Meta"].includes(event.key)) {
+    document.documentElement.dataset.input = "keyboard";
+  }
+}, true);
 
 const markerColors = [
   "var(--brand-pink)",
