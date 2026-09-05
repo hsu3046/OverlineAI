@@ -1,3 +1,54 @@
+const desktopNav = document.querySelector(".header-inner > .site-nav");
+if (desktopNav && typeof HTMLDialogElement.prototype.showModal === "function") {
+  const toggle = document.createElement("button");
+  toggle.className = "mobile-menu-toggle gallery-icon-button";
+  toggle.type = "button";
+  toggle.setAttribute("aria-label", "메뉴 열기");
+  toggle.setAttribute("aria-haspopup", "dialog");
+  toggle.setAttribute("aria-controls", "mobile-menu");
+  toggle.setAttribute("aria-expanded", "false");
+  // Lucide Menu and X, matching the gallery controls.
+  toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>';
+  const menu = document.createElement("dialog");
+  menu.id = "mobile-menu";
+  menu.className = "mobile-menu";
+  menu.setAttribute("aria-label", "주요 메뉴");
+  menu.innerHTML = '<div class="mobile-menu-panel"><button class="gallery-icon-button mobile-menu-close" type="button" aria-label="메뉴 닫기" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg></button></div>';
+  menu.querySelector(".mobile-menu-panel").append(desktopNav.cloneNode(true));
+  document.body.append(menu);
+  desktopNav.after(toggle);
+  document.documentElement.classList.add("mobile-navigation-ready");
+  const mobileWidth = window.matchMedia("(max-width: 820px)");
+  const positionMenu = () => {
+    const bounds = toggle.getBoundingClientRect();
+    menu.style.setProperty("--menu-top", `${bounds.bottom + 4}px`);
+    menu.style.setProperty("--menu-right", `${document.documentElement.clientWidth - bounds.right}px`);
+    menu.style.setProperty("--menu-toggle-top", `${bounds.top}px`);
+  };
+  toggle.addEventListener("click", () => {
+    positionMenu();
+    menu.showModal();
+    toggle.setAttribute("aria-expanded", "true");
+    document.documentElement.classList.add("menu-open");
+  });
+  menu.querySelector(".mobile-menu-close").addEventListener("click", () => menu.close());
+  menu.addEventListener("click", (event) => {
+    if (event.target === menu || event.target.closest("a")) menu.close();
+  });
+  menu.addEventListener("close", () => {
+    if (menu.open) return;
+    toggle.setAttribute("aria-expanded", "false");
+    document.documentElement.classList.remove("menu-open");
+    if (mobileWidth.matches) toggle.focus({ preventScroll: true });
+  });
+  mobileWidth.addEventListener("change", () => {
+    if (!mobileWidth.matches && menu.open) menu.close();
+  });
+  window.addEventListener("resize", () => {
+    if (menu.open) positionMenu();
+  });
+}
+
 const markerColors = [
   "var(--brand-pink)",
   "var(--brand-yellow)",
@@ -29,6 +80,38 @@ document.querySelectorAll(".site-nav a, .footer-links a").forEach((link) => {
 });
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+const brand = document.querySelector(".site-header .brand");
+if (brand) {
+  const highlightBrand = () => {
+    if (reducedMotion.matches || document.hidden || brand.classList.contains("is-highlighting")) return false;
+    brand.classList.add("is-highlighting");
+    return true;
+  };
+  brand.addEventListener("animationend", (event) => {
+    if (event.animationName === "brand-highlight" && event.target === brand.querySelector(".brand-drawer")) {
+      brand.classList.remove("is-highlighting");
+    }
+  });
+  brand.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "mouse") highlightBrand();
+  });
+  brand.addEventListener("focus", () => {
+    if (brand.matches(":focus-visible")) highlightBrand();
+  });
+  reducedMotion.addEventListener("change", () => {
+    if (reducedMotion.matches) brand.classList.remove("is-highlighting");
+  });
+  // Play once per tab visit, including navigation between the three static pages.
+  let hasSeenHighlight = false;
+  try { hasSeenHighlight = sessionStorage.getItem("brand-highlight-seen") === "1"; } catch { /* Storage can be disabled. */ }
+  if (!hasSeenHighlight) {
+    window.setTimeout(() => {
+      if (!highlightBrand()) return;
+      try { sessionStorage.setItem("brand-highlight-seen", "1"); } catch { /* Keep the effect available without storage. */ }
+    }, 450);
+  }
+}
 
 const faqHover = window.matchMedia("(hover: hover) and (pointer: fine)");
 document.querySelectorAll(".faq details").forEach((item) => {
@@ -148,6 +231,33 @@ if (screenshotTrack) {
     };
     viewerPrevious.addEventListener("click", () => stepViewer(-1));
     viewerNext.addEventListener("click", () => stepViewer(1));
+    const stage = viewer.querySelector(".viewer-stage");
+    let swipe;
+    const resetSwipe = () => { swipe = undefined; };
+    stage.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 1 || (window.visualViewport?.scale ?? 1) > 1) {
+        resetSwipe();
+        return;
+      }
+      const touch = event.touches[0];
+      swipe = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+    }, { passive: true });
+    stage.addEventListener("touchmove", (event) => {
+      if (!swipe) return;
+      const touch = Array.from(event.touches).find((item) => item.identifier === swipe.id);
+      if (event.touches.length !== 1 || !touch || Math.abs(touch.clientY - swipe.y) > 40) resetSwipe();
+    }, { passive: true });
+    stage.addEventListener("touchend", (event) => {
+      if (!swipe) return;
+      const touch = Array.from(event.changedTouches).find((item) => item.identifier === swipe.id);
+      if (touch && event.touches.length === 0) {
+        const dx = touch.clientX - swipe.x;
+        const dy = touch.clientY - swipe.y;
+        if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy) * 1.5) stepViewer(dx < 0 ? 1 : -1);
+      }
+      resetSwipe();
+    }, { passive: true });
+    stage.addEventListener("touchcancel", resetSwipe, { passive: true });
     viewer.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
@@ -156,6 +266,7 @@ if (screenshotTrack) {
     viewer.addEventListener("close", () => {
       if (viewer.open) return;
       requestID++;
+      resetSwipe();
       document.documentElement.classList.remove("screenshot-open");
       opener?.focus({ preventScroll: true });
     });

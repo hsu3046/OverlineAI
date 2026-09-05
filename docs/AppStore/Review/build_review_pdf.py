@@ -21,7 +21,7 @@ from reportlab.platypus import (
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = Path(__file__).with_name("supporting_information.json")
-OUTPUT = ROOT / "output/pdf/BZOGAK-App-Review-Information.pdf"
+OUTPUT = Path(__file__).with_name("Attachments") / "BZOGAK-App-Review-Information.pdf"
 DATA = json.loads(SOURCE.read_text(encoding="utf-8"))
 FONT = ROOT / "Overline/Resources/Fonts/PretendardVariable.ttf"
 pdfmetrics.registerFont(TTFont("Pretendard", str(FONT)))

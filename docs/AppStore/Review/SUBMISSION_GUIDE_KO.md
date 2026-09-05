@@ -3,7 +3,7 @@
 ## 준비된 파일
 
 1. `APP_REVIEW_REPLY_EN.txt`: Apple의 여섯 질문에 대한 영문 답변. 심사 메시지 답변과 App Review Information > Notes에 같은 내용을 입력한다.
-2. `output/pdf/BZOGAK-App-Review-Information.pdf`: 기능 사용 순서, 외부 서비스와 정보 흐름, 지역별 차이, 제3자 콘텐츠·라이선스, 심사용 OCR 예문을 담은 영문 첨부 자료.
+2. `docs/AppStore/Review/Attachments/BZOGAK-App-Review-Information.pdf`: 기능 사용 순서, 외부 서비스와 정보 흐름, 지역별 차이, 제3자 콘텐츠·라이선스, 심사용 OCR 예문을 담은 영문 첨부 자료.
 3. 사용자가 촬영한 실제 iPhone 영상: 위 두 자료와 함께 첨부한다. 영상 촬영 완료는 사용자가 확인했으며, 영상 파일 자체는 아직 이 작업에 전달되지 않았다.
 
 영문 답변에 기기 모델·iOS·빌드 번호를 추측해 넣지 않았다. 이 정보가 확보되면 1번 항목에 한 줄로 추가할 수 있다. 영상의 내용·최신 OS 여부·음성을 확인했다고 대신 진술하지도 않았다.

@@ -6,7 +6,7 @@
 ## 제출용
 
 - [영문 답변 TXT](AppStore/Review/APP_REVIEW_REPLY_EN.txt): 심사 메시지 답변과 App Review Information > Notes에 같은 내용을 입력.
-- [첨부용 영문 PDF](../output/pdf/BZOGAK-App-Review-Information.pdf): 주요 기능, 외부 서비스, 지역 차이, 콘텐츠·라이선스, 출력 가능한 OCR 예문.
+- [첨부용 영문 PDF](AppStore/Review/Attachments/BZOGAK-App-Review-Information.pdf): 주요 기능, 외부 서비스, 지역 차이, 콘텐츠·라이선스, 출력 가능한 OCR 예문.
 - 사용자가 촬영한 실제 iPhone 영상: 답변과 함께 첨부.
 
 ## 내부 안내
