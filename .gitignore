@@ -6,3 +6,6 @@ Config/Secrets.xcconfig
 Benchmarks/SupertonicDevice/Generated/
 Benchmarks/SupertonicDevice/Info.plist
 Benchmarks/SupertonicDevice/SupertonicDeviceBenchmark.xcodeproj/
+
+# Local-only prototypes and archived files
+/LocalArchive/

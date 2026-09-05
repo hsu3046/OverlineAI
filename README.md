@@ -152,6 +152,7 @@ CommunityAPI/           # Book-service API and public website
 Config/                 # App metadata and build configuration
 Tests/                  # Focused library-backup regression tests
 Benchmarks/             # Physical-device speech benchmarks
+design-assets/          # Non-deployed source artwork and App Store screenshots
 docs/                   # Architecture, privacy, and release documentation
 ```
 
