@@ -2,23 +2,20 @@
 
 ## Tagline-en
 
-**From paper books to passages of your own**
-
-Underline the words that stay with you.<br>
+From paper books to passages of your own
+Underline the words that stay with you.
 Let each passage grow into a thought of your own.
 
 ## Tagline-ko
 
-**종이책에서 만난 문장을 나만의 글조각으로**
-
-마음에 남은 문장에 밑줄을 긋고 나만의 글조각으로 간직하세요.<br>
+종이책에서 만난 문장을 나만의 글조각으로
+마음에 남은 문장에 밑줄을 긋고 나만의 글조각으로 간직하세요.
 한 조각씩 쌓인 문장들이 나만의 생각으로 성장합니다.
 
 ## Tagline-ja
 
-**紙の本で出会った一文を、自分だけの言葉のかけらに**
-
-心に残った一文に線を引いて、大切にしまっておきましょう。<br>
+紙の本で出会った一文を、自分だけの言葉のかけらに
+心に残った一文に線を引いて、大切にしまっておきましょう。
 集めた言葉が、少しずつ自分の考えに育っていきます。
 
 ## Summary-en
