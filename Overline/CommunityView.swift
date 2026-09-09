@@ -211,14 +211,7 @@ struct CommunityView: View {
                     .accessibilityLabel("책장에서 선택")
                 }
             }
-            .padding(.leading, 14)
-            .padding(.trailing, 8)
-            .frame(minHeight: 52)
-            .background(Color.white.opacity(0.52), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.overlineInk.opacity(0.07), lineWidth: 1)
-            }
+            .overlineSearchSurface()
 
             HStack(spacing: 8) {
                 ForEach(CommunityArticleSource.allCases) { source in
@@ -364,7 +357,7 @@ struct CommunityView: View {
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
-        } else if model.isLoadingRankings && model.rankings.isEmpty {
+        } else if model.isLoadingRankings {
             CommunityLoadingRow(message: "인기 도서를 불러오고 있습니다")
                 .communityListRow(top: 12, bottom: 16)
         } else if model.rankings.isEmpty {
@@ -575,12 +568,8 @@ private struct CommunityFilterMenuLabel: View {
         .font(.overline(.caption, weight: .semibold))
         .foregroundStyle(Color.overlineAccent)
         .padding(.horizontal, 10)
-        .frame(minHeight: 34)
-        .background(Color.white.opacity(0.46), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.06), lineWidth: 1)
-        }
+        .frame(minHeight: OverlineDesign.touchTarget)
+        .overlineControlSurface()
     }
 }
 
@@ -839,11 +828,7 @@ private extension View {
         self
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.overlineInk.opacity(0.07), lineWidth: 1)
-            }
+            .overlineContentSurface()
     }
 
     func communityListRow(top: CGFloat, bottom: CGFloat) -> some View {

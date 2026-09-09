@@ -50,6 +50,57 @@ struct LibraryContentRevisionTests {
             coverTheme: .forest, highlights: []
         )
         let library = ReadingLibrary(books: [originalBook], includePersistedHighlights: false)
+        if scenario == "bookmark" {
+            let record = library.addReadingRecord(
+                to: originalBook.id, startedAt: .now, endedAt: nil,
+                status: .paused, rating: nil, review: "", bookmarkPage: 128
+            )!
+            let encoded = try JSONEncoder().encode(record)
+            let decoded = try JSONDecoder().decode(ReadingRecord.self, from: encoded)
+            try require(decoded.bookmarkPage == 128, "Bookmark must survive serialization")
+            var legacy = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+            legacy.removeValue(forKey: "bookmarkPage")
+            let legacyRecord = try JSONDecoder().decode(ReadingRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
+            try require(legacyRecord.bookmarkPage == nil, "Old records must decode without bookmark")
+            library.updateReadingRecord(
+                record.id, in: originalBook.id, startedAt: record.startedAt, endedAt: .now,
+                status: .completed, rating: nil, review: "", bookmarkPage: 128
+            )
+            try require(library.books[0].readingRecords[0].bookmarkPage == 128, "Completed records must retain bookmark")
+            library.updateReadingRecord(
+                record.id, in: originalBook.id, startedAt: record.startedAt, endedAt: nil,
+                status: .reading, rating: nil, review: "", bookmarkPage: nil
+            )
+            try require(library.books[0].readingRecords[0].bookmarkPage == nil, "Clearing bookmark must persist")
+            try require(ReadingRecord(startedAt: .now, status: .reading, bookmarkPage: -1).bookmarkPage == nil, "Negative page must be rejected")
+            print("PASS: bookmark")
+            return
+        }
+        if scenario == "ocr-metadata" {
+            let original = library.addCapturedHighlight(
+                text: "Original OCR text", memo: "", language: .english,
+                bookID: originalBook.id
+            )
+            library.updateHighlight(
+                original.id, text: original.text, memo: "User memo",
+                pageReference: "p.99", tagsText: "#manual",
+                stickyTone: .mint
+            )
+            let latest = library.highlight(with: original.id)!
+            let corrected = library.applyAutomaticOCRCorrection(
+                "Corrected OCR text", to: original.id, expectedHighlight: original
+            )
+            try require(corrected?.text == "Corrected OCR text", "Metadata must not block correction")
+            try require(corrected?.memo == latest.memo && corrected?.tags == latest.tags
+                && corrected?.pageReference == latest.pageReference
+                && corrected?.stickyTone == latest.stickyTone, "Preserve user metadata")
+            let stale = library.applyAutomaticOCRCorrection(
+                "Stale correction", to: original.id, expectedHighlight: original
+            )
+            try require(stale == nil, "Changed text must reject stale correction")
+            print("PASS: ocr-metadata")
+            return
+        }
         let originalRevision = library.contentRevision
         let response = DelayedResponse()
         let task = Task { @MainActor in

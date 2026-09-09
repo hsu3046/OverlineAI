@@ -8,6 +8,10 @@ import UIKit
 
 nonisolated private let cameraLifecycleLogger = Logger(subsystem: "vote.aib.bzogak", category: "CameraLifecycle")
 
+nonisolated enum CameraCaptureLayout {
+    static let stageAspectRatio: CGFloat = 0.76
+}
+
 struct CameraRecognizedTextLine: Identifiable, Hashable {
     let id: String
     let text: String
@@ -1144,6 +1148,7 @@ final class CameraTextScanner {
     var isAnalyzingText = false
     var recognitionUpdateCount = 0
     var frozenFrameImage: UIImage?
+    private(set) var isImportedPhoto = false
 
     var session: AVCaptureSession {
         core.session
@@ -1170,6 +1175,7 @@ final class CameraTextScanner {
         }
         core.onFrozenFrame = { [weak self] image in
             Task { @MainActor in
+                guard self?.isImportedPhoto != true else { return }
                 self?.frozenFrameImage = image
             }
         }
@@ -1216,6 +1222,7 @@ final class CameraTextScanner {
     }
 
     func start(owner: String = "unspecified") {
+        guard !isImportedPhoto else { return }
         lifecycleRequestSequence += 1
         let requestID = lifecycleRequestSequence
         cameraLifecycleLogger.info(
@@ -1388,9 +1395,32 @@ final class CameraTextScanner {
     }
 
     func clearFrozenFrame() {
+        isImportedPhoto = false
         core.cancelFreezeFrameRequest()
         core.clearSnapshot()
         frozenFrameImage = nil
+    }
+
+    func prepareImportedPhoto(_ image: UIImage) {
+        stop(clearRecognitionResults: true, owner: "highlight.photo_import")
+        stopSwipeRecognition()
+        core.cancelFreezeFrameRequest()
+        isImportedPhoto = true
+        // Match the camera's 9:16 coordinate space and fit the photo in the visible stage.
+        let size = CGSize(width: 1440, height: 2560)
+        let visibleHeight = size.width / CameraCaptureLayout.stageAspectRatio
+        let scale = min(size.width / max(image.size.width, 1), visibleHeight / max(image.size.height, 1))
+        let drawnSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        frozenFrameImage = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(x: (size.width - drawnSize.width) / 2, y: (size.height - drawnSize.height) / 2, width: drawnSize.width, height: drawnSize.height))
+        }
+        detectedPage = nil
+        recognitionUpdateCount = 0
     }
 
     func cacheSelectedLines(for selectedIDs: Set<CameraRecognizedTextLine.ID>) {

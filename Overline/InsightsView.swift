@@ -567,6 +567,8 @@ private enum LLMModelPickerSelection: Hashable {
 }
 
 struct OverlineSettingsSheet: View {
+    @Environment(\.captureTutorial) private var tutorial
+    @State private var replayTutorialOnDismiss = false
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
@@ -701,6 +703,15 @@ struct OverlineSettingsSheet: View {
                     Text("외부 AI 설정")
                 }
 
+                Section("사용 안내") {
+                    Button {
+                        replayTutorialOnDismiss = true
+                        dismiss()
+                    } label: {
+                        Label("튜토리얼 다시 보기", systemImage: "hand.draw")
+                    }
+                }
+
                 Section("텍스트 낭독") {
                     NavigationLink(value: OverlineSettingsDestination.textSpeech) {
                         Label {
@@ -802,6 +813,11 @@ struct OverlineSettingsSheet: View {
                     OverlineDoneToolbarButton {
                         dismiss()
                     }
+                }
+            }
+            .onDisappear {
+                if replayTutorialOnDismiss {
+                    tutorial?.replayRequested = true
                 }
             }
             .confirmationDialog("보관함을 초기화할까요?", isPresented: $showsResetConfirmation, titleVisibility: .visible) {
@@ -1408,7 +1424,6 @@ private struct SpeechEnginePicker: View {
                             if selection == engine {
                                 Capsule(style: .continuous)
                                     .fill(Color(uiColor: .systemBackground))
-                                    .shadow(color: Color.black.opacity(0.06), radius: 2, y: 1)
                             }
                         }
                 }
@@ -1931,24 +1946,9 @@ private struct InsightComposer: View {
                 }
             }
             .padding(12)
-            .insightGlassSurface(
-                cornerRadius: 20,
-                tint: Color.white.opacity(0.12),
-                fillOpacity: 0.06,
-                strokeOpacity: 0.28,
-                shadowOpacity: 0.04,
-                shadowRadius: 12
-            )
+            .overlineContentSurface(emphasized: true)
         }
-        .padding(14)
-        .insightGlassSurface(
-            cornerRadius: 24,
-            tint: Color.overlineAccent.opacity(0.08),
-            fillOpacity: 0.04,
-            strokeOpacity: 0.34,
-            shadowOpacity: 0.08,
-            shadowRadius: 18
-        )
+
     }
 
     @ViewBuilder
@@ -2172,57 +2172,8 @@ private struct HighlightPickerModeControl: View {
             }
         }
         .padding(3)
-        .frame(height: OverlinePillSearchField.height)
-        .background(.thinMaterial, in: Capsule(style: .continuous))
-        .overlay {
-            Capsule(style: .continuous)
-                .stroke(Color.white.opacity(0.34), lineWidth: 1)
-        }
-    }
-}
-
-struct OverlinePillSearchField: View {
-    static let height: CGFloat = 42
-
-    @Binding var text: String
-    let prompt: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.overline(.subheadline, weight: .semibold))
-                .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
-
-            TextField(prompt, text: $text)
-                .font(.overline(.subheadline))
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.overline(.subheadline, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(Color.overlineMutedInk.opacity(0.62))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("검색어 지우기")
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: Self.height)
-        .background(.thinMaterial, in: Capsule(style: .continuous))
-        .overlay {
-            Capsule(style: .continuous)
-                .stroke(Color.white.opacity(0.54), lineWidth: 1)
-        }
-        .overlay {
-            Capsule(style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.11), lineWidth: 1)
-        }
+        .frame(minHeight: OverlinePillSearchField.height)
+        .overlineControlSurface()
     }
 }
 
@@ -2320,15 +2271,7 @@ private struct PromptChip: View {
         }
         .foregroundStyle(isSelected ? Color.overlineInk : Color.overlineMutedInk)
         .frame(maxWidth: .infinity, minHeight: 38)
-        .insightGlassSurface(
-            cornerRadius: 19,
-            tint: isSelected ? Color.overlineHighlight.opacity(0.16) : Color.white.opacity(0.10),
-            interactive: true,
-            fillOpacity: isSelected ? 0.09 : 0.035,
-            strokeOpacity: isSelected ? 0.42 : 0.22,
-            shadowOpacity: isSelected ? 0.06 : 0.03,
-            shadowRadius: 10
-        )
+        .overlineControlSurface(selected: isSelected)
         .contentShape(Capsule(style: .continuous))
     }
 }
@@ -2554,14 +2497,7 @@ private struct InsightDetailSheet: View {
                         )
                     }
                     .padding(16)
-                    .insightGlassSurface(
-                        cornerRadius: 20,
-                        tint: Color.white.opacity(0.12),
-                        fillOpacity: 0.06,
-                        strokeOpacity: 0.28,
-                        shadowOpacity: 0.05,
-                        shadowRadius: 14
-                    )
+                    .overlineContentSurface()
 
                     if !sources.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
@@ -2583,14 +2519,7 @@ private struct InsightDetailSheet: View {
                                 }
                             }
                             .padding(.horizontal, 14)
-                            .insightGlassSurface(
-                                cornerRadius: 18,
-                                tint: Color.white.opacity(0.10),
-                                fillOpacity: 0.045,
-                                strokeOpacity: 0.24,
-                                shadowOpacity: 0.04,
-                                shadowRadius: 12
-                            )
+                            .overlineContentSurface()
                         }
                     }
                 }
@@ -2673,14 +2602,7 @@ private struct SavedInsightCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture(perform: openDetail)
         .accessibilityAddTraits(.isButton)
-        .insightGlassSurface(
-            cornerRadius: 16,
-            tint: Color.white.opacity(0.11),
-            fillOpacity: 0.055,
-            strokeOpacity: 0.26,
-            shadowOpacity: 0.05,
-            shadowRadius: 14
-        )
+        .overlineContentSurface(emphasized: true)
     }
 }
 
@@ -2745,87 +2667,6 @@ enum InsightPrompt: String, CaseIterable, Identifiable, Sendable {
         case .digest:
             "선택한 글조각을 최근 일주일 독서 흐름처럼 보고, 반복되는 키워드와 연결고리를 한 문단으로 압축하세요."
         }
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func insightGlassSurface(
-        cornerRadius: CGFloat,
-        tint: Color = Color.white.opacity(0.12),
-        interactive: Bool = false,
-        fillOpacity: Double = 0.06,
-        strokeOpacity: Double = 0.30,
-        shadowOpacity: Double = 0.06,
-        shadowRadius: CGFloat = 14
-    ) -> some View {
-        if #available(iOS 26.0, *) {
-            if interactive {
-                self
-                    .background {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(Color.white.opacity(fillOpacity))
-                    }
-                    .glassEffect(
-                        .regular.tint(tint).interactive(),
-                        in: .rect(cornerRadius: cornerRadius)
-                    )
-                    .insightGlassChrome(
-                        cornerRadius: cornerRadius,
-                        strokeOpacity: strokeOpacity,
-                        shadowOpacity: shadowOpacity,
-                        shadowRadius: shadowRadius
-                    )
-            } else {
-                self
-                    .background {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(Color.white.opacity(fillOpacity))
-                    }
-                    .glassEffect(
-                        .regular.tint(tint),
-                        in: .rect(cornerRadius: cornerRadius)
-                    )
-                    .insightGlassChrome(
-                        cornerRadius: cornerRadius,
-                        strokeOpacity: strokeOpacity,
-                        shadowOpacity: shadowOpacity,
-                        shadowRadius: shadowRadius
-                    )
-            }
-        } else {
-            self
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .insightGlassChrome(
-                    cornerRadius: cornerRadius,
-                    strokeOpacity: strokeOpacity,
-                    shadowOpacity: shadowOpacity,
-                    shadowRadius: shadowRadius
-                )
-        }
-    }
-
-    func insightGlassChrome(
-        cornerRadius: CGFloat,
-        strokeOpacity: Double,
-        shadowOpacity: Double,
-        shadowRadius: CGFloat
-    ) -> some View {
-        self
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(strokeOpacity), lineWidth: 1)
-            }
-            .overlay(alignment: .top) {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(strokeOpacity * 0.65), lineWidth: 0.6)
-                    .blur(radius: 0.2)
-                    .mask(alignment: .top) {
-                        Rectangle()
-                            .frame(height: 24)
-                    }
-            }
-            .shadow(color: Color.black.opacity(shadowOpacity), radius: shadowRadius, y: shadowRadius * 0.42)
     }
 }
 

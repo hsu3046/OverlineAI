@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
+    @Environment(\.captureTutorial) private var tutorial
     @Environment(ReadingLibrary.self) private var library
     @Environment(LLMSettingsStore.self) private var llmSettings
     @Environment(QuoteSpeechPlayer.self) private var quoteSpeechPlayer
@@ -42,6 +43,12 @@ struct LibraryView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("책 추가")
+                    .overlay {
+                        if tutorial?.step == .addBook {
+                            Circle().stroke(Color.tutorialAccent, lineWidth: 2)
+                                .allowsHitTesting(false)
+                        }
+                    }
 
                     OverlineSettingsButton(settings: llmSettings) {
                         presentedSheet = .settings
@@ -168,7 +175,18 @@ struct LibraryView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
+        .overlay(alignment: .top) {
+            CaptureTutorialTip(step: .addBook)
+                .padding(.horizontal, 16)
+                .padding(.top, 60)
+        }
         .overlineBottomMenuCompaction()
+        .onAppear {
+            if tutorial?.step == .bookForm { presentedSheet = .addBook }
+        }
+        .onChange(of: tutorial?.step) { _, step in
+            if step == .bookForm { presentedSheet = .addBook }
+        }
         .navigationDestination(isPresented: isBookNavigationPresented) {
             if let activeBookID {
                 ScrapbookView(bookID: activeBookID)
@@ -328,11 +346,7 @@ private struct LibraryEmptyStateCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(Color.white.opacity(0.46), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.08), lineWidth: 1)
-        }
+        .overlineContentSurface()
     }
 }
 
@@ -1009,11 +1023,7 @@ private struct HighlightRow: View {
         .buttonStyle(.plain)
         .accessibilityLabel("글조각 상세")
         .padding(14)
-        .background(Color.white.opacity(0.66), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.08), lineWidth: 1)
-        }
+        .overlineContentSurface()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

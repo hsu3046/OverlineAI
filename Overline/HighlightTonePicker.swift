@@ -3,7 +3,7 @@ import SwiftUI
 struct HighlightTonePicker: View {
     @Binding var selectedTone: StickyTone
 
-    private let tones: [StickyTone] = [.yellow, .rose, .blue, .mint]
+    private let tones: [StickyTone] = [.yellow, .rose, .blue, .mint, .purple]
 
     var body: some View {
         HStack(spacing: 5) {

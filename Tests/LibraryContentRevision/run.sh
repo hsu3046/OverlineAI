@@ -13,6 +13,6 @@ xcrun swiftc -swift-version 5 -default-isolation MainActor -parse-as-library \
     "$ROOT/Tests/LibraryContentRevision/Runner.swift" \
     -o "$BUILD_DIR/library-revision-tests"
 
-for scenario in unchanged replace same-ids reset restore failed-restore repeated-replacement; do
+for scenario in unchanged replace same-ids reset restore failed-restore repeated-replacement ocr-metadata bookmark; do
     "$BUILD_DIR/library-revision-tests" "$scenario"
 done

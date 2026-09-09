@@ -18,6 +18,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
     case blue
     case rose
     case mint
+    case purple
 
     var paper: Color {
         switch self {
@@ -25,6 +26,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
         case .blue: Color(red: 0.56, green: 0.79, blue: 0.92)
         case .rose: Color(red: 0.95, green: 0.58, blue: 0.67)
         case .mint: Color(red: 0.58, green: 0.82, blue: 0.68)
+        case .purple: Color(red: 0.74, green: 0.64, blue: 0.91)
         }
     }
 
@@ -34,6 +36,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
         case .blue: Color(red: 0.08, green: 0.22, blue: 0.33)
         case .rose: Color(red: 0.34, green: 0.10, blue: 0.16)
         case .mint: Color(red: 0.08, green: 0.24, blue: 0.15)
+        case .purple: Color(red: 0.25, green: 0.14, blue: 0.38)
         }
     }
 
@@ -43,6 +46,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
         case .rose: "핑크"
         case .blue: "파랑"
         case .mint: "녹색"
+        case .purple: "보라"
         }
     }
 }
@@ -244,6 +248,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
     var status: ReadingStatus
     var rating: Double?
     var review: String
+    var bookmarkPage: Int?
     var createdAt: Date
     var updatedAt: Date
 
@@ -254,6 +259,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
         status: ReadingStatus,
         rating: Double? = nil,
         review: String = "",
+        bookmarkPage: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -263,6 +269,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
         self.status = status
         self.rating = rating
         self.review = review
+        self.bookmarkPage = bookmarkPage.flatMap { $0 > 0 ? $0 : nil }
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -1903,7 +1910,8 @@ final class ReadingLibrary {
         endedAt: Date?,
         status: ReadingStatus,
         rating: Double?,
-        review: String
+        review: String,
+        bookmarkPage: Int? = nil
     ) -> ReadingRecord? {
         guard let bookIndex = books.firstIndex(where: { $0.id == bookID }) else { return nil }
 
@@ -1912,7 +1920,8 @@ final class ReadingLibrary {
             endedAt: Self.normalizedReadingEndDate(endedAt, startedAt: startedAt),
             status: status,
             rating: Self.normalizedReadingRating(rating),
-            review: String(review.normalizedQuotesForStorage.trimmed.prefix(3_000))
+            review: String(review.normalizedQuotesForStorage.trimmed.prefix(3_000)),
+            bookmarkPage: bookmarkPage
         )
         books[bookIndex].readingRecords.insert(record, at: 0)
         persist()
@@ -1926,7 +1935,8 @@ final class ReadingLibrary {
         endedAt: Date?,
         status: ReadingStatus,
         rating: Double?,
-        review: String
+        review: String,
+        bookmarkPage: Int? = nil
     ) {
         guard
             let bookIndex = books.firstIndex(where: { $0.id == bookID }),
@@ -1942,6 +1952,7 @@ final class ReadingLibrary {
         )
         books[bookIndex].readingRecords[recordIndex].status = status
         books[bookIndex].readingRecords[recordIndex].rating = Self.normalizedReadingRating(rating)
+        books[bookIndex].readingRecords[recordIndex].bookmarkPage = bookmarkPage.flatMap { $0 > 0 ? $0 : nil }
         books[bookIndex].readingRecords[recordIndex].review = String(
             review.normalizedQuotesForStorage.trimmed.prefix(3_000)
         )
@@ -2045,7 +2056,8 @@ final class ReadingLibrary {
         }
 
         let currentHighlight = books[location.bookIndex].highlights[location.highlightIndex]
-        guard currentHighlight == expectedHighlight else { return nil }
+        guard currentHighlight.id == expectedHighlight.id,
+              currentHighlight.text == expectedHighlight.text else { return nil }
 
         let currentText = currentHighlight.text.normalizedQuotesForStorage.trimmed
         let correctedText = correctedText.normalizedQuotesForStorage.trimmed

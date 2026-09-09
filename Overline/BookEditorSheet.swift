@@ -17,6 +17,7 @@ struct BookEditorSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ReadingLibrary.self) private var library
+    @Environment(\.captureTutorial) private var tutorial
 
     let mode: Mode
 
@@ -90,6 +91,12 @@ struct BookEditorSheet: View {
                 .scrollIndicators(.hidden)
             }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .overlay(alignment: .bottom) {
+                if isAddingBook {
+                    CaptureTutorialTip(step: .bookForm)
+                        .padding(16)
+                }
+            }
             .confirmationDialog("책을 삭제할까요?", isPresented: $showsDeleteConfirmation, titleVisibility: .visible) {
                 Button("삭제", role: .destructive) {
                     delete()
@@ -98,6 +105,15 @@ struct BookEditorSheet: View {
             }
             .onAppear {
                 loadBook()
+                if isAddingBook {
+                    tutorial?.advance(from: .addBook, to: .bookForm)
+                }
+            }
+            .onDisappear {
+                tutorial?.advance(from: .bookForm, to: .addBook)
+            }
+            .onChange(of: tutorial?.step) { _, step in
+                if isAddingBook, step != .bookForm { dismiss() }
             }
             .fullScreenCover(isPresented: $isISBNScannerPresented) {
                 ISBNScannerSheet { isbn, didScanBarcode in
@@ -125,11 +141,11 @@ struct BookEditorSheet: View {
     }
 
     private var formControlHeight: CGFloat {
-        64
+        OverlineDesign.controlHeight
     }
 
     private var formControlCornerRadius: CGFloat {
-        22
+        OverlineDesign.controlRadius
     }
 
     private var searchSection: some View {
@@ -141,7 +157,7 @@ struct BookEditorSheet: View {
                     isISBNScannerPresented = true
                 } label: {
                     Label("ISBN 스캔", systemImage: "barcode.viewfinder")
-                        .font(.overline(.title3, weight: .medium))
+                        .font(OverlineDesign.body)
                         .foregroundStyle(Color.overlineAccent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -154,7 +170,7 @@ struct BookEditorSheet: View {
 
                 HStack(spacing: 10) {
                     TextField("제목, 저자, ISBN", text: $searchQuery)
-                        .font(.overline(.title3, weight: .medium))
+                        .font(OverlineDesign.body)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .submitLabel(.search)
@@ -174,14 +190,17 @@ struct BookEditorSheet: View {
                                 .controlSize(.small)
                         } else {
                             Image(systemName: "magnifyingglass")
-                                .font(.overline(.title3, weight: .semibold))
+                                .font(OverlineDesign.sectionTitle)
                         }
                     }
                     .buttonStyle(.plain)
                     .disabled(searchQuery.trimmed.isEmpty || isSearching)
                     .foregroundStyle(searchQuery.trimmed.isEmpty ? Color.overlineMutedInk.opacity(0.38) : Color.overlineAccent)
                     .accessibilityLabel("도서 검색")
+                    .tutorialHighlight(tutorial?.step == .bookForm)
+                    .frame(width: OverlineDesign.touchTarget, height: OverlineDesign.touchTarget)
                 }
+                .overlineSearchSurface()
 
                 if let searchErrorMessage {
                     Text(searchErrorMessage)
@@ -201,7 +220,7 @@ struct BookEditorSheet: View {
                 }
             }
             .padding(18)
-            .overlineGlassControl(cornerRadius: 24)
+            .overlineContentSurface()
         }
     }
 
@@ -233,7 +252,7 @@ struct BookEditorSheet: View {
         autocorrectionDisabled: Bool = false
     ) -> some View {
         TextField(prompt, text: text, axis: axis)
-            .font(.overline(.title3, weight: .medium))
+            .font(OverlineDesign.body)
             .lineLimit(lineLimit)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled(autocorrectionDisabled)
@@ -243,7 +262,7 @@ struct BookEditorSheet: View {
                 minHeight: axis == .vertical ? verticalControlHeight(for: lineLimit) : formControlHeight,
                 alignment: axis == .vertical ? .topLeading : .leading
             )
-            .overlineGlassControl(cornerRadius: formControlCornerRadius)
+            .overlineContentSurface()
     }
 
     private func verticalControlHeight(for lineLimit: ClosedRange<Int>) -> CGFloat {
@@ -310,6 +329,9 @@ struct BookEditorSheet: View {
             )
         }
 
+        if isAddingBook {
+            tutorial?.advance(from: .bookForm, to: .chooseBook)
+        }
         dismiss()
     }
 
@@ -394,7 +416,7 @@ private struct BookSearchResultRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: sourceSystemImage)
-                .font(.overline(.title3, weight: .semibold))
+                .font(OverlineDesign.sectionTitle)
                 .foregroundStyle(Color.overlineAccent)
                 .frame(width: 28)
 

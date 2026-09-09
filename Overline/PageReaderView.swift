@@ -16,7 +16,7 @@ enum CaptureExperienceMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .highlight: "밑줄긋기"
-        case .reader: "읽어주기"
+        case .reader: "글 낭독"
         }
     }
 
@@ -1238,8 +1238,6 @@ struct PageReaderView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 16) {
-                header
-
                 stageContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .layoutPriority(1)
@@ -1270,7 +1268,14 @@ struct PageReaderView: View {
                 selectedTab: .capture,
                 isCompact: false,
                 selectTab: { tab in
-                    requestClose(to: tab)
+                    if tab != .capture { requestClose(to: tab) }
+                },
+                selectCaptureMode: { mode in
+                    if mode == .highlight {
+                        requestClose()
+                    } else {
+                        requestNewReading()
+                    }
                 }
             )
         }
@@ -1448,21 +1453,6 @@ struct PageReaderView: View {
             scheduleCameraPreparation()
             errorMessage = "메모리 보호를 위해 읽기 세션을 종료했습니다."
         }
-    }
-
-    private var header: some View {
-        CaptureExperiencePicker(
-            selection: Binding(
-                get: { .reader },
-                set: { mode in
-                    if mode == .highlight {
-                        requestClose()
-                    } else {
-                        requestNewReading()
-                    }
-                }
-            )
-        )
     }
 
     @ViewBuilder
@@ -2463,7 +2453,7 @@ private struct PageReadingDraftRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .overlineGlassControl(cornerRadius: 16, interactive: true)
+        .overlineContentSurface()
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(previewText), \(draft.pages.count)쪽, \(remainingDays)일 남음")

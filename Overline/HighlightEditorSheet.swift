@@ -130,7 +130,7 @@ struct HighlightEditorSheet: View {
         VStack(spacing: 16) {
             HStack(alignment: .top, spacing: 10) {
                 TextField("글조각", text: $text, axis: .vertical)
-                    .font(.overline(.title3, weight: .medium))
+                    .font(OverlineDesign.body)
                     .lineSpacing(3)
                     .lineLimit(4...18)
                     .padding(.vertical, 2)
@@ -147,7 +147,7 @@ struct HighlightEditorSheet: View {
                 .padding(.vertical, 2)
         }
         .padding(18)
-        .overlineGlassControl(cornerRadius: 24)
+        .overlineContentSurface()
     }
 
     private var correctionButton: some View {
@@ -166,7 +166,7 @@ struct HighlightEditorSheet: View {
                         .foregroundStyle(Color.overlineAccent)
                 }
             }
-            .frame(width: 36, height: 36)
+            .frame(width: OverlineDesign.touchTarget, height: OverlineDesign.touchTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -202,12 +202,12 @@ struct HighlightEditorSheet: View {
             }
 
             TextField("태그", text: $tagsText)
-                .font(.overline(.title3, weight: .medium))
+                .font(OverlineDesign.body)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding(.horizontal, 18)
                 .frame(minHeight: formControlHeight, alignment: .leading)
-                .overlineGlassControl(cornerRadius: formControlCornerRadius)
+                .overlineContentSurface()
         }
     }
 
@@ -227,7 +227,7 @@ struct HighlightEditorSheet: View {
                         .foregroundStyle(Color.overlineAccent)
                 }
             }
-            .frame(width: 36, height: 36)
+            .frame(width: OverlineDesign.touchTarget, height: OverlineDesign.touchTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -246,7 +246,7 @@ struct HighlightEditorSheet: View {
             }
             .padding(.horizontal, 18)
             .frame(minHeight: formControlHeight, alignment: .leading)
-            .overlineGlassControl(cornerRadius: formControlCornerRadius)
+            .overlineContentSurface()
         }
     }
 
@@ -256,22 +256,22 @@ struct HighlightEditorSheet: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "text.book.closed")
-                    .font(.overline(.title3, weight: .semibold))
+                    .font(OverlineDesign.sectionTitle)
                     .foregroundStyle(Color.overlineAccent)
                     .frame(width: 24)
 
                 Text("p.")
-                    .font(.overline(.title3, weight: .medium))
+                    .font(OverlineDesign.body)
                     .foregroundStyle(Color.overlineInk.opacity(0.62))
 
                 TextField("42", text: pageNumberBinding)
-                    .font(.overline(.title3, weight: .medium))
+                    .font(OverlineDesign.body)
                     .keyboardType(.numberPad)
                     .tint(Color.overlineAccent)
             }
             .padding(.horizontal, 18)
             .frame(minHeight: formControlHeight, alignment: .leading)
-            .overlineGlassControl(cornerRadius: formControlCornerRadius)
+            .overlineContentSurface()
         }
     }
 
@@ -296,11 +296,11 @@ struct HighlightEditorSheet: View {
     }
 
     private var formControlHeight: CGFloat {
-        64
+        OverlineDesign.controlHeight
     }
 
     private var formControlCornerRadius: CGFloat {
-        22
+        OverlineDesign.controlRadius
     }
 
     private var bookSelectionSheetHeight: CGFloat {
@@ -640,7 +640,7 @@ private struct OCRCorrectionPreviewSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
         }
     }
 
@@ -660,7 +660,7 @@ private struct OCRCorrectionPreviewSheet: View {
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
-                .overlineGlassControl(cornerRadius: 22)
+                .overlineContentSurface()
         }
     }
 }
@@ -715,7 +715,7 @@ private struct TagRegenerationPreviewSheet: View {
                 .foregroundStyle(isPrimary ? Color.overlineInk : Color.overlineMutedInk.opacity(0.78))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
-                .overlineGlassControl(cornerRadius: 22)
+                .overlineContentSurface()
         }
     }
 }

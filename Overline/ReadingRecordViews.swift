@@ -80,11 +80,7 @@ struct ReadingRecordSection: View {
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.08), lineWidth: 1)
-        }
+        .overlineContentSurface()
     }
 }
 
@@ -222,7 +218,7 @@ private struct ReadingRecordHistoryRow: View {
             }
         }
         .padding(18)
-        .overlineGlassControl(cornerRadius: 20)
+        .overlineContentSurface()
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
@@ -241,6 +237,7 @@ struct ReadingRecordEditorSheet: View {
     @State private var hasEndDate = false
     @State private var status: ReadingStatus = .reading
     @State private var rating = 0.0
+    @State private var bookmarkPageText = ""
     @State private var review = ""
     @State private var showsReviewEditor = false
     @State private var showsDeleteConfirmation = false
@@ -267,6 +264,9 @@ struct ReadingRecordEditorSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         statusEditor
+                        if status != .completed {
+                            bookmarkEditor
+                        }
                         dateEditor
                         ratingEditor
                         reviewEditor
@@ -311,6 +311,27 @@ struct ReadingRecordEditorSheet: View {
         }
     }
 
+    private var bookmarkEditor: some View {
+        HStack(spacing: 12) {
+            Label("책갈피", systemImage: "bookmark")
+                .font(OverlineDesign.sectionTitle)
+            Spacer(minLength: 12)
+            TextField("페이지", text: Binding(
+                get: { bookmarkPageText },
+                set: { bookmarkPageText = String($0.filter { $0.isASCII && $0.isNumber }.prefix(9)) }
+            ))
+            .font(OverlineDesign.body)
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 100)
+            .accessibilityLabel("책갈피 페이지")
+        }
+        .foregroundStyle(Color.overlineInk)
+        .padding(.horizontal, OverlineDesign.fieldInset)
+        .frame(minHeight: OverlineDesign.controlHeight)
+        .overlineContentSurface()
+    }
+
     private var statusEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             OverlineEditorLabel(title: "독서 상태")
@@ -326,11 +347,11 @@ struct ReadingRecordEditorSheet: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: status.systemImage)
-                        .font(.overline(.title3, weight: .semibold))
+                        .font(OverlineDesign.sectionTitle)
                         .foregroundStyle(Color.overlineAccent)
                         .frame(width: 24)
                     Text(status.title)
-                        .font(.overline(.title3, weight: .medium))
+                        .font(OverlineDesign.body)
                         .foregroundStyle(Color.overlineInk)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up.chevron.down")
@@ -338,11 +359,11 @@ struct ReadingRecordEditorSheet: View {
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.58))
                 }
                 .padding(.horizontal, 18)
-                .frame(minHeight: 64)
+                .frame(minHeight: OverlineDesign.controlHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
         }
     }
 
@@ -372,7 +393,7 @@ struct ReadingRecordEditorSheet: View {
                 }
             }
             .font(.overline(.body, weight: .medium))
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
         }
     }
 
@@ -382,7 +403,7 @@ struct ReadingRecordEditorSheet: View {
             ReadingRatingPicker(rating: $rating)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
-                .overlineGlassControl(cornerRadius: 22)
+                .overlineContentSurface()
         }
     }
 
@@ -409,7 +430,7 @@ struct ReadingRecordEditorSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
             .accessibilityLabel(review.trimmed.isEmpty ? "감상문 작성" : "감상문 편집")
 
             Text("\(review.count.formatted()) / \(Self.reviewLimit.formatted())")
@@ -462,6 +483,7 @@ struct ReadingRecordEditorSheet: View {
         hasEndDate = record.endedAt != nil
         status = record.status
         rating = record.rating ?? 0
+        bookmarkPageText = record.bookmarkPage.map(String.init) ?? ""
         review = record.review
     }
 
@@ -477,7 +499,8 @@ struct ReadingRecordEditorSheet: View {
                 endedAt: selectedEndDate,
                 status: status,
                 rating: selectedRating,
-                review: review
+                review: review,
+                bookmarkPage: Int(bookmarkPageText)
             )
         } else {
             library.addReadingRecord(
@@ -486,7 +509,8 @@ struct ReadingRecordEditorSheet: View {
                 endedAt: selectedEndDate,
                 status: status,
                 rating: selectedRating,
-                review: review
+                review: review,
+                bookmarkPage: Int(bookmarkPageText)
             )
         }
         dismiss()
@@ -575,7 +599,7 @@ private struct ReadingReviewFullScreenEditor: View {
                             .accessibilityLabel("감상문")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlineGlassControl(cornerRadius: 22)
+                    .overlineContentSurface()
 
                     Text("\(draftText.count.formatted()) / \(Self.reviewLimit.formatted())")
                         .font(.overline(.caption))
@@ -750,7 +774,7 @@ private struct ReadingRatingPicker: View {
             InteractiveReadingRatingStars(rating: $rating)
                 .frame(maxWidth: .infinity)
 
-            Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "평가 안 함")
+            Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "")
                 .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
                 .monospacedDigit()
@@ -915,7 +939,7 @@ private struct ReadingReviewDraftPreviewSheet: View {
                         .scrollContentBackground(.hidden)
                         .padding(14)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlineGlassControl(cornerRadius: 20)
+                        .overlineContentSurface()
                         .accessibilityLabel("AI 감상문 초안")
                 }
                 .padding(.horizontal, 20)
