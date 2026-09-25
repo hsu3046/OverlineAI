@@ -24,6 +24,12 @@ import {
 } from "../.build/lib/providers/data4library.js";
 import { aladinBestsellerCategoryID } from "../.build/lib/providers/aladin.js";
 import { matchesPlaceCategory, normalizeKakaoPlaces, searchKakaoPlaces } from "../.build/lib/providers/kakao.js";
+import { normalizeGoogleBooks, normalizeGooglePlaces } from "../.build/lib/providers/google.js";
+import { normalizeOpenLibraryBooks, rankOpenLibraryBooks } from "../.build/lib/providers/openlibrary.js";
+import { buildRakutenBookSearchURL, normalizeRakutenBooks } from "../.build/lib/providers/rakuten.js";
+import { normalizeYes24Books } from "../.build/lib/providers/yes24.js";
+import rankingsHandler from "../.build/api/v1/rankings.js";
+import searchBooksHandler from "../.build/api/v1/books/search.js";
 import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
 
 test("cleanText strips provider markup and decodes entities", () => {
@@ -33,6 +39,370 @@ test("cleanText strips provider markup and decodes entities", () => {
 test("safeHTTPURL upgrades http and rejects unsupported schemes", () => {
   assert.equal(safeHTTPURL("http://example.com/book"), "https://example.com/book");
   assert.equal(safeHTTPURL("javascript:alert(1)"), undefined);
+});
+
+test("Google Books keeps Japanese metadata and prefers ISBN-13", () => {
+  const books = normalizeGoogleBooks({ items: [{
+    id: "volume-1",
+    volumeInfo: {
+      title: "日本語の本",
+      authors: ["作家"],
+      industryIdentifiers: [
+        { type: "ISBN_10", identifier: "1234567890" },
+        { type: "ISBN_13", identifier: "9781234567890" },
+      ],
+      imageLinks: { thumbnail: "http://example.com/cover.jpg" },
+    },
+  }] });
+  assert.equal(books[0].source, "google");
+  assert.equal(books[0].title, "日本語の本");
+  assert.equal(books[0].isbn, "9781234567890");
+  assert.match(books[0].coverURLString, /^https:/);
+});
+
+test("Rakuten Books searches ISBN directly and includes unavailable editions", () => {
+  const isbnURL = buildRakutenBookSearchURL("978-4-00-310101-8", "app-id");
+  assert.equal(isbnURL.searchParams.get("isbn"), "9784003101018");
+  assert.equal(isbnURL.searchParams.get("title"), null);
+  assert.equal(isbnURL.searchParams.get("outOfStockFlag"), "1");
+  assert.equal(isbnURL.searchParams.get("formatVersion"), "2");
+
+  const titleURL = buildRakutenBookSearchURL("吾輩は猫である", "app-id");
+  assert.equal(titleURL.searchParams.get("title"), "吾輩は猫である");
+  assert.equal(titleURL.searchParams.get("isbn"), null);
+  assert.equal(titleURL.searchParams.get("accessKey"), null);
+});
+
+test("Rakuten Books maps Japanese metadata from flat and wrapped responses", () => {
+  const item = {
+    title: "<b>吾輩は猫である</b>",
+    author: "夏目漱石",
+    publisherName: "岩波書店",
+    salesDate: "2026年09月",
+    itemCaption: "日本文学 &amp; 小説",
+    isbn: "9784003101018",
+    largeImageUrl: "http://example.com/cover.jpg",
+  };
+  for (const response of [{ Items: [item] }, { Items: [{ Item: item }] }]) {
+    const [book] = normalizeRakutenBooks(response);
+    assert.equal(book.source, "rakuten");
+    assert.equal(book.title, "吾輩は猫である");
+    assert.equal(book.summary, "日本文学 & 小説");
+    assert.equal(book.publishedDate, "2026年09月");
+    assert.equal(book.coverURLString, "https://example.com/cover.jpg");
+  }
+  assert.deepEqual(normalizeRakutenBooks({ Items: [{ title: "ISBN 없음" }] }), []);
+});
+
+test("YES24 book search maps source, detail link, and ISBN without adult items", () => {
+  const books = normalizeYes24Books({ data: { items: [
+    { itemId: 41, title: "책", author: "작가", isbn13: "9781234567890",
+      link: "https://www.yes24.com/product/goods/41", adultYn: "N" },
+    { itemId: 42, title: "성인 도서", adultYn: "Y" },
+  ] } });
+  assert.equal(books.length, 1);
+  assert.equal(books[0].source, "yes24");
+  assert.equal(books[0].detailURL, "https://www.yes24.com/product/goods/41");
+  assert.equal(books[0].isbn, "9781234567890");
+});
+
+test("ranking snapshot serves page 2 from one 100-item cache without calling providers", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RANKING_CACHE_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  process.env.KNOWAI_RANKING_CACHE_URL = "https://www.aib.vote/api/x/bzogak-rankings";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  const fetchedAt = new Date().toISOString();
+  const requested = [];
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(String(input));
+    requested.push(url);
+    assert.equal(url.host, "www.aib.vote");
+    assert.equal(options.headers["x-bzogak-bridge-secret"], "test-secret");
+    return Response.json({
+      fetchedAt,
+      items: Array.from({ length: 100 }, (_, index) => ({
+        id: `yes24-${index + 1}`, rank: index + 1,
+        title: `책 ${index + 1}`, author: "작가", source: "yes24",
+      })),
+    });
+  };
+  try {
+    const request = { method: "GET", url: "/api/v1/rankings?kind=bestseller&category=all&page=2",
+      headers: { host: "localhost" } };
+    let responseBody = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { responseBody = String(value); } };
+    await rankingsHandler(request, response);
+    const body = JSON.parse(responseBody);
+    assert.equal(response.statusCode, 200);
+    assert.equal(body.items.length, 20);
+    assert.equal(body.items[0].rank, 21);
+    assert.equal(body.fetchedAt, fetchedAt);
+    assert.equal(requested.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RANKING_CACHE_URL", previousURL],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Japanese rankings use the Rakuten snapshot and never show Korean books", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RANKING_CACHE_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  process.env.KNOWAI_RANKING_CACHE_URL = "https://www.aib.vote/api/x/bzogak-rankings";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  const requested = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    requested.push(url);
+    assert.equal(url.searchParams.get("source"), "rakuten");
+    assert.equal(url.searchParams.get("category"), "fiction");
+    return Response.json({ fetchedAt: new Date().toISOString(), items: [{
+      id: "rakuten-9784003101018", rank: 1, title: "日本語の本", author: "作家", source: "rakuten",
+    }] });
+  };
+  try {
+    const request = { method: "GET", url: "/api/v1/rankings?language=ja&kind=bestseller&category=fiction",
+      headers: { host: "localhost" } };
+    let responseBody = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { responseBody = String(value); } };
+    await rankingsHandler(request, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(responseBody).items[0].source, "rakuten");
+    assert.equal(requested.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [["KNOWAI_RANKING_CACHE_URL", previousURL], ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Japanese rankings reject loans and never fall back to Korean bestsellers", async () => {
+  const previousURL = process.env.KNOWAI_RANKING_CACHE_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  delete process.env.KNOWAI_RANKING_CACHE_URL;
+  delete process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  try {
+    for (const url of [
+      "/api/v1/rankings?language=ja&kind=loans",
+      "/api/v1/rankings?language=ja&kind=bestseller",
+    ]) {
+      const request = { method: "GET", url, headers: { host: "localhost" } };
+      const response = { statusCode: 0, setHeader() {}, end() {} };
+      await rankingsHandler(request, response);
+      assert.equal(response.statusCode, url.includes("loans") ? 400 : 503);
+    }
+  } finally {
+    for (const [key, value] of [["KNOWAI_RANKING_CACHE_URL", previousURL], ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("an unseeded ranking snapshot keeps the existing loan provider available", async () => {
+  const originalFetch = globalThis.fetch;
+  const previous = {
+    url: process.env.KNOWAI_RANKING_CACHE_URL,
+    secret: process.env.BZOGAK_BOOK_BRIDGE_SECRET,
+    key: process.env.DATA4LIBRARY_AUTH_KEY,
+  };
+  process.env.KNOWAI_RANKING_CACHE_URL = "https://www.aib.vote/api/x/bzogak-rankings";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  process.env.DATA4LIBRARY_AUTH_KEY = "test-library-key";
+  const hosts = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    hosts.push(url.host);
+    if (url.host === "www.aib.vote") return Response.json({ error: "snapshot_missing" }, { status: 404 });
+    if (url.host === "data4library.kr") {
+      return Response.json({ response: { docs: [{ doc: {
+        ranking: "1", bookname: "책", authors: "작가", isbn13: "9781234567890",
+      } }] } });
+    }
+    throw new Error(`Unexpected host: ${url.host}`);
+  };
+  try {
+    const request = { method: "GET", url: "/api/v1/rankings?kind=loans&page=1",
+      headers: { host: "localhost" } };
+    let result = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { result = String(value); } };
+    await rankingsHandler(request, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(result).items[0].source, "data4library");
+    assert.deepEqual(hosts, ["www.aib.vote", "data4library.kr"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RANKING_CACHE_URL", previous.url],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previous.secret],
+      ["DATA4LIBRARY_AUTH_KEY", previous.key],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("a broken ranking bridge never fans out into provider calls", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RANKING_CACHE_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  process.env.KNOWAI_RANKING_CACHE_URL = "https://www.aib.vote/api/x/bzogak-rankings";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  const hosts = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    hosts.push(url.host);
+    return Response.json({ error: "cache_unavailable" }, { status: 503 });
+  };
+  try {
+    const request = { method: "GET", url: "/api/v1/rankings?kind=bestseller",
+      headers: { host: "localhost" } };
+    let result = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { result = String(value); } };
+    await rankingsHandler(request, response);
+    assert.equal(response.statusCode, 502);
+    assert.equal(JSON.parse(result).error, "외부 정보를 불러오지 못했습니다.");
+    assert.deepEqual(hosts, ["www.aib.vote"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RANKING_CACHE_URL", previousURL],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("pending Rakuten bridge uses Open Library without a direct Rakuten call", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RAKUTEN_SEARCH_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  const previousGoogle = process.env.GOOGLE_BOOKS_API_KEY;
+  process.env.KNOWAI_RAKUTEN_SEARCH_URL = "https://www.aib.vote/api/x/bzogak-book-search";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  delete process.env.GOOGLE_BOOKS_API_KEY;
+  const hosts = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    hosts.push(url.host);
+    if (url.host === "www.aib.vote") return Response.json({ status: "pending" }, { status: 202 });
+    if (url.host === "openlibrary.org") {
+      return Response.json({ docs: [{ key: "/works/OL1W", title: "吾輩は猫である",
+        isbn: ["9784003101018"] }] });
+    }
+    throw new Error(`Unexpected host: ${url.host}`);
+  };
+  try {
+    const request = Readable.from([Buffer.from(JSON.stringify({ query: "吾輩は猫である", language: "ja" }))]);
+    request.method = "POST";
+    request.headers = { host: "localhost" };
+    let result = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { result = String(value); } };
+    await searchBooksHandler(request, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(result).items[0].source, "openLibrary");
+    assert.deepEqual(hosts, ["www.aib.vote", "openlibrary.org"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RAKUTEN_SEARCH_URL", previousURL],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
+      ["GOOGLE_BOOKS_API_KEY", previousGoogle],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Japanese book search falls back when Rakuten denies access", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApplicationID = process.env.RAKUTEN_APPLICATION_ID;
+  const originalAccessKey = process.env.RAKUTEN_ACCESS_KEY;
+  const originalGoogleKey = process.env.GOOGLE_BOOKS_API_KEY;
+  process.env.RAKUTEN_APPLICATION_ID = "test-app";
+  process.env.RAKUTEN_ACCESS_KEY = "test-key";
+  delete process.env.GOOGLE_BOOKS_API_KEY;
+  const calledHosts = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    calledHosts.push(url.host);
+    if (url.host === "openapi.rakuten.co.jp") return new Response("denied", { status: 403 });
+    if (url.host === "openlibrary.org") {
+      return Response.json({ docs: [{ key: "/works/OL1W", title: "吾輩は猫である", isbn: ["9784003101018"] }] });
+    }
+    throw new Error(`Unexpected host: ${url.host}`);
+  };
+  try {
+    const request = Readable.from([Buffer.from(JSON.stringify({ query: "吾輩は猫である", language: "ja" }))]);
+    request.method = "POST";
+    request.headers = { host: "localhost" };
+    let result = "";
+    const response = { statusCode: 0, setHeader() {}, end(value = "") { result = String(value); } };
+    await searchBooksHandler(request, response);
+    const body = JSON.parse(result);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(calledHosts, ["openapi.rakuten.co.jp", "openlibrary.org"]);
+    assert.equal(body.items[0].source, "openLibrary");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["RAKUTEN_APPLICATION_ID", originalApplicationID],
+      ["RAKUTEN_ACCESS_KEY", originalAccessKey],
+      ["GOOGLE_BOOKS_API_KEY", originalGoogleKey],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Google Places maps type, distance, and Maps URL", () => {
+  const places = normalizeGooglePlaces({ places: [{
+    id: "place-1",
+    displayName: { text: "市立図書館" },
+    primaryType: "library",
+    formattedAddress: "東京都千代田区",
+    location: { latitude: 35.0005, longitude: 139 },
+    googleMapsUri: "https://maps.google.com/?cid=1",
+  }] }, 35, 139, "all");
+  assert.equal(places[0].kind, "library");
+  assert.equal(places[0].source, "google");
+  assert.ok(places[0].distanceMeters > 0);
+  assert.match(places[0].detailURL, /maps.google.com/);
+});
+
+test("Open Library fallback maps title, cover, and ISBN", () => {
+  const books = normalizeOpenLibraryBooks({ docs: [{
+    key: "/works/OL123W",
+    title: "吾輩は猫である",
+    author_name: ["夏目漱石"],
+    isbn: ["1234567890", "9781234567890"],
+    cover_i: 42,
+  }] });
+  assert.equal(books[0].source, "openLibrary");
+  assert.equal(books[0].isbn, "9781234567890");
+  assert.equal(books[0].coverURLString, "https://covers.openlibrary.org/b/id/42-M.jpg");
+});
+
+test("Open Library prioritizes the exact Japanese title over related essays", () => {
+  const candidates = normalizeOpenLibraryBooks({ docs: [
+    { key: "/works/essay", title: "『吾輩は猫である』下篇自序" },
+    { key: "/works/book", title: "吾輩は猫である" },
+  ] });
+  assert.equal(rankOpenLibraryBooks(candidates, "吾輩は猫である")[0].id, "openlibrary-/works/book");
 });
 
 test("numeric parsing rejects explicitly empty values", () => {

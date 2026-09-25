@@ -30,13 +30,13 @@ final class CommunityLocationService: NSObject, CLLocationManagerDelegate {
             manager.requestLocation()
         case .denied:
             isRequesting = false
-            errorMessage = "위치 권한을 허용하면 가까운 서점과 도서관을 볼 수 있습니다."
+            errorMessage = String(localized: LocalizedStringResource("위치 권한을 허용하면 가까운 서점과 도서관을 볼 수 있습니다.", locale: AppLocale.uiLocale))
         case .restricted:
             isRequesting = false
-            errorMessage = "이 iPhone에서는 위치를 사용할 수 없습니다."
+            errorMessage = String(localized: LocalizedStringResource("이 iPhone에서는 위치를 사용할 수 없습니다.", locale: AppLocale.uiLocale))
         @unknown default:
             isRequesting = false
-            errorMessage = "현재 위치를 확인할 수 없습니다."
+            errorMessage = String(localized: LocalizedStringResource("현재 위치를 확인할 수 없습니다.", locale: AppLocale.uiLocale))
         }
     }
 
@@ -60,6 +60,6 @@ final class CommunityLocationService: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         isRequesting = false
-        errorMessage = "현재 위치를 확인하지 못했습니다. 다시 시도해 주세요."
+        errorMessage = String(localized: LocalizedStringResource("현재 위치를 확인하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
     }
 }

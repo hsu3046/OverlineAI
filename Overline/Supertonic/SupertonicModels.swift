@@ -8,8 +8,8 @@ enum SpeechEngineChoice: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: "iPhone 음성"
-        case .supertonic: "고품질 온디바이스"
+        case .system: String(localized: LocalizedStringResource("iPhone 음성", locale: AppLocale.uiLocale))
+        case .supertonic: String(localized: LocalizedStringResource("고품질 온디바이스", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -30,16 +30,16 @@ enum SupertonicVoicePreset: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .f1: "여성 1"
-        case .f2: "여성 2"
-        case .f3: "여성 3"
-        case .f4: "여성 4"
-        case .f5: "여성 5"
-        case .m1: "남성 1"
-        case .m2: "남성 2"
-        case .m3: "남성 3"
-        case .m4: "남성 4"
-        case .m5: "남성 5"
+        case .f1: String(localized: LocalizedStringResource("여성 1", locale: AppLocale.uiLocale))
+        case .f2: String(localized: LocalizedStringResource("여성 2", locale: AppLocale.uiLocale))
+        case .f3: String(localized: LocalizedStringResource("여성 3", locale: AppLocale.uiLocale))
+        case .f4: String(localized: LocalizedStringResource("여성 4", locale: AppLocale.uiLocale))
+        case .f5: String(localized: LocalizedStringResource("여성 5", locale: AppLocale.uiLocale))
+        case .m1: String(localized: LocalizedStringResource("남성 1", locale: AppLocale.uiLocale))
+        case .m2: String(localized: LocalizedStringResource("남성 2", locale: AppLocale.uiLocale))
+        case .m3: String(localized: LocalizedStringResource("남성 3", locale: AppLocale.uiLocale))
+        case .m4: String(localized: LocalizedStringResource("남성 4", locale: AppLocale.uiLocale))
+        case .m5: String(localized: LocalizedStringResource("남성 5", locale: AppLocale.uiLocale))
         }
     }
 
@@ -56,15 +56,15 @@ enum SupertonicQuality: Int, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .balanced: "균형"
-        case .high: "고음질"
+        case .balanced: String(localized: LocalizedStringResource("균형", locale: AppLocale.uiLocale))
+        case .high: String(localized: LocalizedStringResource("고음질", locale: AppLocale.uiLocale))
         }
     }
 
     var detail: String {
         switch self {
-        case .balanced: "빠른 생성"
-        case .high: "더 정교한 음성"
+        case .balanced: String(localized: LocalizedStringResource("빠른 생성", locale: AppLocale.uiLocale))
+        case .high: String(localized: LocalizedStringResource("더 정교한 음성", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -112,17 +112,17 @@ enum SupertonicError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyText:
-            "읽을 문장이 없습니다."
+            String(localized: LocalizedStringResource("읽을 문장이 없습니다.", locale: AppLocale.uiLocale))
         case .packNotInstalled:
-            "고품질 음성 팩을 먼저 받아주세요."
+            String(localized: LocalizedStringResource("고품질 음성 팩을 먼저 받아주세요.", locale: AppLocale.uiLocale))
         case .invalidDownload(let filename):
             "\(filename) 파일을 확인하지 못했습니다. 다시 받아주세요."
         case .invalidAudio:
-            "생성된 음성을 재생할 수 없습니다."
+            String(localized: LocalizedStringResource("생성된 음성을 재생할 수 없습니다.", locale: AppLocale.uiLocale))
         case .modelUnavailable:
-            "고품질 음성 모델을 준비하지 못했습니다."
+            String(localized: LocalizedStringResource("고품질 음성 모델을 준비하지 못했습니다.", locale: AppLocale.uiLocale))
         case .insufficientStorage:
-            "고품질 음성 팩을 받으려면 iPhone 저장 공간을 조금 더 확보해주세요."
+            String(localized: LocalizedStringResource("고품질 음성 팩을 받으려면 iPhone 저장 공간을 조금 더 확보해주세요.", locale: AppLocale.uiLocale))
         }
     }
 }

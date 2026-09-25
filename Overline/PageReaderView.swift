@@ -15,8 +15,8 @@ enum CaptureExperienceMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .highlight: "밑줄긋기"
-        case .reader: "글 낭독"
+        case .highlight: String(localized: LocalizedStringResource("밑줄긋기", locale: AppLocale.uiLocale))
+        case .reader: String(localized: LocalizedStringResource("글 낭독", locale: AppLocale.uiLocale))
         }
     }
 
@@ -643,7 +643,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
         do {
             try activateSystemSpeechAudioSession()
         } catch {
-            playbackErrorMessage = "오디오를 시작하지 못했습니다. 다시 시도해 주세요."
+            playbackErrorMessage = String(localized: LocalizedStringResource("오디오를 시작하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             return
         }
         let utterances = queuedSystemUtterances(
@@ -739,7 +739,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
 
     private func failPlaybackToStart() {
         stopPlayback()
-        playbackErrorMessage = "오디오를 시작하지 못했습니다. 다시 시도해 주세요."
+        playbackErrorMessage = String(localized: LocalizedStringResource("오디오를 시작하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
     }
 
     private func startSupertonicCue(pageIndex: Int, cueIndex: Int) {
@@ -761,7 +761,7 @@ final class PageReadingSession: NSObject, AVSpeechSynthesizerDelegate {
             try supertonicAudioPlayer.prepareForPlayback()
         } catch {
             voiceSettings.releaseSupertonicRuntime(for: self)
-            playbackErrorMessage = "오디오를 시작하지 못했습니다. 다시 시도해 주세요."
+            playbackErrorMessage = String(localized: LocalizedStringResource("오디오를 시작하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             isSpeaking = false
             isPaused = false
             return
@@ -1451,7 +1451,7 @@ struct PageReaderView: View {
             readerStage = .camera
             activeDraftID = nil
             scheduleCameraPreparation()
-            errorMessage = "메모리 보호를 위해 읽기 세션을 종료했습니다."
+            errorMessage = String(localized: LocalizedStringResource("메모리 보호를 위해 읽기 세션을 종료했습니다.", locale: AppLocale.uiLocale))
         }
     }
 
@@ -1677,8 +1677,8 @@ struct PageReaderView: View {
     private var cameraUnavailableMessage: String {
         switch cameraScanner.status {
         case .unavailable(let message): message
-        case .requestingPermission: "카메라 권한 확인 중"
-        case .idle, .running: "카메라를 준비하고 있습니다"
+        case .requestingPermission: String(localized: LocalizedStringResource("카메라 권한 확인 중", locale: AppLocale.uiLocale))
+        case .idle, .running: String(localized: LocalizedStringResource("카메라를 준비하고 있습니다", locale: AppLocale.uiLocale))
         }
     }
 
@@ -1885,7 +1885,7 @@ struct PageReaderView: View {
             guard !Task.isCancelled, isAwaitingFrozenFrame else { return }
             isAwaitingFrozenFrame = false
             cameraScanner.clearFrozenFrame()
-            errorMessage = "페이지를 촬영하지 못했습니다. 다시 시도해 주세요."
+            errorMessage = String(localized: LocalizedStringResource("페이지를 촬영하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
         }
     }
 
@@ -1926,7 +1926,7 @@ struct PageReaderView: View {
             errorMessage = error.localizedDescription
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         } catch {
-            errorMessage = "페이지의 글자를 읽지 못했습니다. 다시 촬영해 주세요."
+            errorMessage = String(localized: LocalizedStringResource("페이지의 글자를 읽지 못했습니다. 다시 촬영해 주세요.", locale: AppLocale.uiLocale))
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
@@ -1966,12 +1966,12 @@ struct PageReaderView: View {
 
     private var newReadingConfirmationMessage: String {
         guard activeStoredDraft != nil else {
-            return "현재 읽던 내용은 임시 보관하거나 지울 수 있어요."
+            return String(localized: LocalizedStringResource("현재 읽던 내용은 임시 보관하거나 지울 수 있어요.", locale: AppLocale.uiLocale))
         }
         if currentContentMatchesStoredDraft {
-            return "읽던 위치는 자동으로 저장됩니다."
+            return String(localized: LocalizedStringResource("읽던 위치는 자동으로 저장됩니다.", locale: AppLocale.uiLocale))
         }
-        return "추가한 페이지를 저장하거나, 이전에 보관한 상태로 남길 수 있어요."
+        return String(localized: LocalizedStringResource("추가한 페이지를 저장하거나, 이전에 보관한 상태로 남길 수 있어요.", locale: AppLocale.uiLocale))
     }
 
     private func saveCurrentAndBeginNewReading() {
@@ -1996,7 +1996,7 @@ struct PageReaderView: View {
                 if shouldResumeOnFailure {
                     readingSession.resumeIfPaused()
                 }
-                errorMessage = "읽던 내용을 임시 보관하지 못했습니다. 다시 시도해 주세요."
+                errorMessage = String(localized: LocalizedStringResource("읽던 내용을 임시 보관하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
@@ -2163,7 +2163,7 @@ struct PageReaderView: View {
 
     private func saveTemporaryDraftAndClose() {
         guard let draft = makeTemporaryDraft() else {
-            errorMessage = "임시 보관할 글이 없습니다."
+            errorMessage = String(localized: LocalizedStringResource("임시 보관할 글이 없습니다.", locale: AppLocale.uiLocale))
             return
         }
 
@@ -2177,7 +2177,7 @@ struct PageReaderView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
                 closeReader()
             } catch {
-                errorMessage = "글을 임시 보관하지 못했습니다. 다시 시도해 주세요."
+                errorMessage = String(localized: LocalizedStringResource("글을 임시 보관하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
         }
@@ -2212,7 +2212,7 @@ struct PageReaderView: View {
                 storedDrafts = try await PageReadingDraftStore.shared.save(updatedDraft)
                 closeReader()
             } catch {
-                errorMessage = "읽던 위치를 저장하지 못했습니다. 다시 시도해 주세요."
+                errorMessage = String(localized: LocalizedStringResource("읽던 위치를 저장하지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             }
         }
     }
@@ -2293,7 +2293,7 @@ struct PageReaderView: View {
                 self.activeDraftID = nil
                 closeReader()
             } catch {
-                errorMessage = "임시 보관한 글을 지우지 못했습니다. 다시 시도해 주세요."
+                errorMessage = String(localized: LocalizedStringResource("임시 보관한 글을 지우지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             }
         }
     }
@@ -2316,7 +2316,7 @@ struct PageReaderView: View {
                     showsDraftPicker = false
                 }
             } catch {
-                errorMessage = "임시 보관한 글을 지우지 못했습니다. 다시 시도해 주세요."
+                errorMessage = String(localized: LocalizedStringResource("임시 보관한 글을 지우지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             }
         }
     }
@@ -2378,7 +2378,7 @@ private struct PageReadingDraftPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OverlineSheetHeader(title: "이어서 듣기") {
+            OverlineSheetHeader(title: String(localized: LocalizedStringResource("이어서 듣기", locale: AppLocale.uiLocale))) {
                 Color.clear
             } trailing: {
                 OverlineSheetIconButton(systemImage: "xmark", accessibilityLabel: "닫기") {
@@ -2461,11 +2461,11 @@ private struct PageReadingDraftRow: View {
     }
 
     private var previewText: String {
-        guard let text = draft.pages.first?.text else { return "임시 보관한 글" }
+        guard let text = draft.pages.first?.text else { return String(localized: LocalizedStringResource("임시 보관한 글", locale: AppLocale.uiLocale)) }
         let normalized = text
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
-        return normalized.isEmpty ? "임시 보관한 글" : normalized
+        return normalized.isEmpty ? String(localized: LocalizedStringResource("임시 보관한 글", locale: AppLocale.uiLocale)) : normalized
     }
 
     private var remainingDays: Int {

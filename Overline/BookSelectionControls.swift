@@ -161,7 +161,7 @@ struct OverlineBookPickerSheet: View {
     let books: [ReadingBook]
     let selectedBookID: ReadingBook.ID?
     var includesAllOption = false
-    var allTitle = "전체"
+    var allTitle = String(localized: LocalizedStringResource("전체", locale: AppLocale.uiLocale))
     var allCount: Int?
     var addBook: (() -> Void)?
     let onSelect: (ReadingBook.ID?) -> Void
@@ -177,7 +177,7 @@ struct OverlineBookPickerSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-                OverlinePillSearchField(text: $searchText, prompt: "책 제목 또는 저자 검색")
+                OverlinePillSearchField(text: $searchText, prompt: String(localized: LocalizedStringResource("책 제목 또는 저자 검색", locale: AppLocale.uiLocale)))
                     .padding(.horizontal, OverlineDesign.pageInset)
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -251,7 +251,7 @@ struct OverlineBookPickerSheet: View {
 
     private func countText(_ count: Int?) -> String? {
         guard let count else { return nil }
-        return "\(count)조각"
+        return String(format: String(localized: LocalizedStringResource("%lld조각", locale: AppLocale.uiLocale)), count)
     }
 }
 

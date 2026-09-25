@@ -66,7 +66,7 @@ final class QuoteSpeechRemoteControls {
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
             MPMediaItemPropertyTitle: bookTitle?.trimmed.nilIfEmpty ?? "글조각 이어듣기",
-            MPMediaItemPropertyArtist: "BZOGAK · 글조각 \(safeItemIndex + 1)/\(safeItemCount)",
+            MPMediaItemPropertyArtist: String(format: String(localized: LocalizedStringResource("BZOGAK · 글조각 %lld/%lld", locale: AppLocale.uiLocale)), safeItemIndex + 1, safeItemCount),
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying && !isPaused ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
         ]

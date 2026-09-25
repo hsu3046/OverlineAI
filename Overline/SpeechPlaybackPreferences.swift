@@ -38,7 +38,7 @@ struct SpeechPlaybackControls: View {
     var body: some View {
         VStack(spacing: 24) {
             SteppedSpeechSlider(
-                title: "읽기 속도",
+                title: String(localized: LocalizedStringResource("읽기 속도", locale: AppLocale.uiLocale)),
                 value: $rateMultiplier,
                 range: SpeechPlaybackPreferences.rateRange,
                 step: SpeechPlaybackPreferences.rateStep,
@@ -48,12 +48,12 @@ struct SpeechPlaybackControls: View {
             )
 
             SteppedSpeechSlider(
-                title: "문장 간격",
+                title: String(localized: LocalizedStringResource("문장 간격", locale: AppLocale.uiLocale)),
                 value: $sentencePause,
                 range: SpeechPlaybackPreferences.sentencePauseRange,
                 step: SpeechPlaybackPreferences.sentencePauseStep,
                 ticks: [0.0, 0.2, 0.4, 0.6],
-                valueText: { preciseValueText($0, suffix: "초") },
+                valueText: { preciseValueText($0, suffix: String(localized: LocalizedStringResource("초", locale: AppLocale.uiLocale))) },
                 tickText: { String(format: "%.1f", $0) }
             )
         }

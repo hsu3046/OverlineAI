@@ -130,7 +130,7 @@ struct ReadingRecordHistorySheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "독서 기록") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("독서 기록", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "닫기",
@@ -334,7 +334,7 @@ struct ReadingRecordEditorSheet: View {
 
     private var statusEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "독서 상태")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("독서 상태", locale: AppLocale.uiLocale)))
 
             Menu {
                 ForEach(ReadingStatus.allCases) { option in
@@ -369,7 +369,7 @@ struct ReadingRecordEditorSheet: View {
 
     private var dateEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "독서 날짜")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("독서 날짜", locale: AppLocale.uiLocale)))
 
             VStack(spacing: 0) {
                 DatePicker("시작", selection: $startedAt, displayedComponents: .date)
@@ -399,7 +399,7 @@ struct ReadingRecordEditorSheet: View {
 
     private var ratingEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "별점")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("별점", locale: AppLocale.uiLocale)))
             ReadingRatingPicker(rating: $rating)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
@@ -409,7 +409,7 @@ struct ReadingRecordEditorSheet: View {
 
     private var reviewEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "감상문")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("감상문", locale: AppLocale.uiLocale)))
 
             Button {
                 showsReviewEditor = true
@@ -556,7 +556,7 @@ private struct ReadingReviewFullScreenEditor: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "감상문") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("감상문", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -673,7 +673,7 @@ private struct ReadingReviewFullScreenEditor: View {
     private func requestAIDraft() {
         guard let book, !book.highlights.isEmpty else { return }
         guard let configuration = llmSettings.activeConfiguration else {
-            aiAlert = ReadingRecordAlert(title: "AI 초안", message: selectedAISetupMessage)
+            aiAlert = ReadingRecordAlert(title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)), message: selectedAISetupMessage)
             return
         }
 
@@ -718,8 +718,8 @@ private struct ReadingReviewFullScreenEditor: View {
                     library.book(with: bookID)?.highlights == snapshot.highlights
                 else {
                     aiAlert = ReadingRecordAlert(
-                        title: "AI 초안",
-                        message: "감상문이나 글조각이 바뀌어서 이번 초안을 적용하지 않았어요."
+                        title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)),
+                        message: String(localized: LocalizedStringResource("감상문이나 글조각이 바뀌어서 이번 초안을 적용하지 않았어요.", locale: AppLocale.uiLocale))
                     )
                     return
                 }
@@ -733,7 +733,7 @@ private struct ReadingReviewFullScreenEditor: View {
                 guard !Task.isCancelled else { return }
                 llmSettings.handleRequestError(error, configuration: configuration)
                 LLMUsageMetricsStore.recordFailed()
-                aiAlert = ReadingRecordAlert(title: "AI 초안", message: error.localizedDescription)
+                aiAlert = ReadingRecordAlert(title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)), message: error.localizedDescription)
             }
         }
     }
@@ -742,8 +742,8 @@ private struct ReadingReviewFullScreenEditor: View {
         guard draftText == proposal.sourceReview else {
             draftProposal = nil
             aiAlert = ReadingRecordAlert(
-                title: "AI 초안",
-                message: "감상문이 바뀌어서 초안을 적용하지 않았어요."
+                title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("감상문이 바뀌어서 초안을 적용하지 않았어요.", locale: AppLocale.uiLocale))
             )
             return
         }
@@ -908,7 +908,7 @@ private struct ReadingReviewDraftPreviewSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "AI 감상문 초안") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("AI 감상문 초안", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -1022,8 +1022,8 @@ private func readingDateRangeText(for record: ReadingRecord) -> String {
 
 private let readingRecordDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "ko_KR")
+    formatter.locale = .current
     formatter.calendar = Calendar(identifier: .gregorian)
-    formatter.dateFormat = "yyyy. M. d."
+    formatter.dateStyle = .medium
     return formatter
 }()

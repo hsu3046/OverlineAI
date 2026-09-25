@@ -65,17 +65,17 @@ struct BookEditorSheet: View {
                             searchSection
                         }
 
-                        editorField("책 이름", prompt: "책 이름", text: $title, axis: .vertical, lineLimit: 1...3)
-                        editorField("저자", prompt: "저자", text: $author, axis: .vertical, lineLimit: 1...3)
-                        editorField("책 소개", prompt: "책 소개", text: $summary, axis: .vertical, lineLimit: 3...8)
-                        editorField("태그", prompt: "태그", text: $tagsText, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
+                        editorField(String(localized: LocalizedStringResource("책 이름", locale: AppLocale.uiLocale)), prompt: String(localized: LocalizedStringResource("책 이름", locale: AppLocale.uiLocale)), text: $title, axis: .vertical, lineLimit: 1...3)
+                        editorField(String(localized: LocalizedStringResource("저자", locale: AppLocale.uiLocale)), prompt: String(localized: LocalizedStringResource("저자", locale: AppLocale.uiLocale)), text: $author, axis: .vertical, lineLimit: 1...3)
+                        editorField(String(localized: LocalizedStringResource("책 소개", locale: AppLocale.uiLocale)), prompt: String(localized: LocalizedStringResource("책 소개", locale: AppLocale.uiLocale)), text: $summary, axis: .vertical, lineLimit: 3...8)
+                        editorField(String(localized: LocalizedStringResource("태그", locale: AppLocale.uiLocale)), prompt: String(localized: LocalizedStringResource("태그", locale: AppLocale.uiLocale)), text: $tagsText, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
 
                         VStack(alignment: .leading, spacing: 14) {
-                            OverlineEditorLabel(title: "세부 정보")
-                            editorFieldContent(prompt: "출판사", text: $publisher, axis: .vertical, lineLimit: 1...2)
-                            editorFieldContent(prompt: "발행일", text: $publishedDate, autocorrectionDisabled: true)
+                            OverlineEditorLabel(title: String(localized: LocalizedStringResource("세부 정보", locale: AppLocale.uiLocale)))
+                            editorFieldContent(prompt: String(localized: LocalizedStringResource("출판사", locale: AppLocale.uiLocale)), text: $publisher, axis: .vertical, lineLimit: 1...2)
+                            editorFieldContent(prompt: String(localized: LocalizedStringResource("발행일", locale: AppLocale.uiLocale)), text: $publishedDate, autocorrectionDisabled: true)
                             editorFieldContent(prompt: "ISBN", text: $isbn, autocorrectionDisabled: true)
-                            editorFieldContent(prompt: "표지 URL", text: $coverURLString, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
+                            editorFieldContent(prompt: String(localized: LocalizedStringResource("표지 URL", locale: AppLocale.uiLocale)), text: $coverURLString, axis: .vertical, lineLimit: 1...3, autocorrectionDisabled: true)
                         }
 
                         if case .edit = mode {
@@ -127,9 +127,9 @@ struct BookEditorSheet: View {
     private var navigationTitle: String {
         switch mode {
         case .add:
-            "책 추가"
+            String(localized: LocalizedStringResource("책 추가", locale: AppLocale.uiLocale))
         case .edit:
-            "책 편집"
+            String(localized: LocalizedStringResource("책 편집", locale: AppLocale.uiLocale))
         }
     }
 
@@ -150,7 +150,7 @@ struct BookEditorSheet: View {
 
     private var searchSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "도서 찾기")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("도서 찾기", locale: AppLocale.uiLocale)))
 
             VStack(spacing: 14) {
                 Button {
@@ -217,6 +217,17 @@ struct BookEditorSheet: View {
                             .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
+                    if let detailURL = result.detailURL, let url = URL(string: detailURL) {
+                        Link(result.sourceTitle, destination: url)
+                            .font(.overline(.caption2, weight: .semibold))
+                            .foregroundStyle(Color.overlineAccent)
+                    }
+                    if result.source == .rakuten,
+                       let creditURL = URL(string: "https://developers.rakuten.com/") {
+                        Link("Supported by Rakuten Developers", destination: creditURL)
+                            .font(.overline(.caption2))
+                            .foregroundStyle(Color.overlineMutedInk)
+                    }
                 }
             }
             .padding(18)
@@ -356,7 +367,7 @@ struct BookEditorSheet: View {
             }
 
             if results.isEmpty {
-                searchErrorMessage = "검색 결과가 없습니다."
+                searchErrorMessage = String(localized: LocalizedStringResource("검색 결과가 없습니다.", locale: AppLocale.uiLocale))
             } else {
                 if autoApplyFirstResult, let firstResult = results.first {
                     apply(firstResult)
@@ -376,7 +387,7 @@ struct BookEditorSheet: View {
 
     private func apply(_ result: BookMetadataCandidate) {
         title = result.title
-        author = result.author.isEmpty ? "Unknown" : result.author
+        author = result.author.isEmpty ? String(localized: LocalizedStringResource("저자 미상", locale: AppLocale.uiLocale)) : result.author
         summary = result.summary.isEmpty ? summary : result.summary
         publisher = result.publisher
         publishedDate = result.publishedDate
@@ -450,8 +461,14 @@ private struct BookSearchResultRow: View {
             "k.circle"
         case .aladin:
             "a.circle"
+        case .yes24:
+            "y.circle"
+        case .rakuten:
+            "r.circle"
         case .google:
             "g.circle"
+        case .openLibrary:
+            "books.vertical"
         }
     }
 }

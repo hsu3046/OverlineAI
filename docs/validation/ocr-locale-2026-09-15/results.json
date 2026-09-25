@@ -1,0 +1,478 @@
+{
+  "platform" : "Version 26.3.1 (a) (Build 25D771280a)",
+  "results" : [
+    {
+      "boxes" : [
+        {
+          "height" : 0.036666666666666625,
+          "width" : 0.43023254394531252,
+          "x" : 0.065406986231478087,
+          "y" : 0.89958333412231917
+        },
+        {
+          "height" : 0.03501938025156659,
+          "width" : 0.3982558186848959,
+          "x" : 0.066860465203336952,
+          "y" : 0.83416666641167936
+        }
+      ],
+      "elapsedSeconds" : 0.62369298934936523,
+      "expected" : "오늘은 도서관에서 책을 읽었다.마음에 남는 문장을 기록했다.",
+      "joined" : "오늘은 도서관에서 책을 읽었다. 마음에 남는 문장을 기록했다.",
+      "languages" : [
+        "ko-KR",
+        "en-US",
+        "ja-JP"
+      ],
+      "rawLines" : [
+        "오늘은 도서관에서 책을 읽었다.",
+        "마음에 남는 문장을 기록했다."
+      ],
+      "revision" : 3,
+      "sample" : "ko-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    },
+    {
+      "boxes" : [
+        {
+          "height" : 0.036666666666666625,
+          "width" : 0.43023254394531252,
+          "x" : 0.065406986231478087,
+          "y" : 0.89958333412231917
+        },
+        {
+          "height" : 0.03501938025156659,
+          "width" : 0.3982558186848959,
+          "x" : 0.066860465203336952,
+          "y" : 0.83416666641167936
+        }
+      ],
+      "elapsedSeconds" : 0.27827107906341553,
+      "expected" : "오늘은 도서관에서 책을 읽었다.마음에 남는 문장을 기록했다.",
+      "joined" : "오늘은 도서관에서 책을 읽었다. 마음에 남는 문장을 기록했다.",
+      "languages" : [
+        "ko-KR"
+      ],
+      "rawLines" : [
+        "오늘은 도서관에서 책을 읽었다.",
+        "마음에 남는 문장을 기록했다."
+      ],
+      "revision" : 3,
+      "sample" : "ko-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    },
+    {
+      "boxes" : [
+        {
+          "height" : 0.045833333333333282,
+          "width" : 0.47916666666666674,
+          "x" : 0.062500005989583177,
+          "y" : 0.89166666671875006
+        },
+        {
+          "height" : 0.045833333333333282,
+          "width" : 0.47499999999999998,
+          "x" : 0.062499994062500168,
+          "y" : 0.82499999984375005
+        }
+      ],
+      "elapsedSeconds" : 0.3110729455947876,
+      "expected" : "今日は図書館で本を読みました。心に残る言葉を書き留めました。",
+      "joined" : "今日は図書館で本を読みました。 心に残る言葉を書き留めました。",
+      "languages" : [
+        "ko-KR",
+        "en-US",
+        "ja-JP"
+      ],
+      "rawLines" : [
+        "今日は図書館で本を読みました。",
+        "心に残る言葉を書き留めました。"
+      ],
+      "revision" : 3,
+      "sample" : "ja-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    },
+    {
+      "boxes" : [
+        {
+          "height" : 0.045833333333333282,
+          "width" : 0.47916666666666674,
+          "x" : 0.062500005989583177,
+          "y" : 0.89166666671875006
+        },
+        {
+          "height" : 0.045833333333333282,
+          "width" : 0.47499999999999998,
+          "x" : 0.062499994062500168,
+          "y" : 0.82499999984375005
+        }
+      ],
+      "elapsedSeconds" : 0.27971506118774414,
+      "expected" : "今日は図書館で本を読みました。心に残る言葉を書き留めました。",
+      "joined" : "今日は図書館で本を読みました。 心に残る言葉を書き留めました。",
+      "languages" : [
+        "ja-JP"
+      ],
+      "rawLines" : [
+        "今日は図書館で本を読みました。",
+        "心に残る言葉を書き留めました。"
+      ],
+      "revision" : 3,
+      "sample" : "ja-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    },
+    {
+      "boxes" : [
+
+      ],
+      "elapsedSeconds" : 0.15361905097961426,
+      "expected" : "今日は図書館で本を読む心に残る言葉を記録する明日も新しい本を開こう",
+      "joined" : "",
+      "languages" : [
+        "ko-KR",
+        "en-US",
+        "ja-JP"
+      ],
+      "rawLines" : [
+
+      ],
+      "revision" : 3,
+      "sample" : "ja-vertical",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 1
+    },
+    {
+      "boxes" : [
+
+      ],
+      "elapsedSeconds" : 0.15849804878234863,
+      "expected" : "今日は図書館で本を読む心に残る言葉を記録する明日も新しい本を開こう",
+      "joined" : "",
+      "languages" : [
+        "ja-JP"
+      ],
+      "rawLines" : [
+
+      ],
+      "revision" : 3,
+      "sample" : "ja-vertical",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 1
+    },
+    {
+      "boxes" : [
+        {
+          "height" : 0.033750000000000058,
+          "width" : 0.4869185892740886,
+          "x" : 0.06540698747596442,
+          "y" : 0.89958333282554681
+        },
+        {
+          "height" : 0.03421151796976718,
+          "width" : 0.5657394917805989,
+          "x" : 0.063819514789733731,
+          "y" : 0.83568571894659316
+        }
+      ],
+      "elapsedSeconds" : 0.34493792057037354,
+      "expected" : "Today I read a book at the library. I wrote down a sentence to remember.",
+      "joined" : "Today I read a book at the library. I wrote down a sentence to remember.",
+      "languages" : [
+        "ko-KR",
+        "en-US",
+        "ja-JP"
+      ],
+      "rawLines" : [
+        "Today I read a book at the library.",
+        "I wrote down a sentence to remember."
+      ],
+      "revision" : 3,
+      "sample" : "en-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    },
+    {
+      "boxes" : [
+        {
+          "height" : 0.033750000000000058,
+          "width" : 0.4869185892740886,
+          "x" : 0.06540698747596442,
+          "y" : 0.89958333282554681
+        },
+        {
+          "height" : 0.03421151796976718,
+          "width" : 0.5657394917805989,
+          "x" : 0.063819514789733731,
+          "y" : 0.83568571894659316
+        }
+      ],
+      "elapsedSeconds" : 0.27652502059936523,
+      "expected" : "Today I read a book at the library. I wrote down a sentence to remember.",
+      "joined" : "Today I read a book at the library. I wrote down a sentence to remember.",
+      "languages" : [
+        "en-US"
+      ],
+      "rawLines" : [
+        "Today I read a book at the library.",
+        "I wrote down a sentence to remember."
+      ],
+      "revision" : 3,
+      "sample" : "en-horizontal",
+      "supportedLanguages" : [
+        "en-US",
+        "fr-FR",
+        "it-IT",
+        "de-DE",
+        "es-ES",
+        "pt-BR",
+        "zh-Hans",
+        "zh-Hant",
+        "yue-Hans",
+        "yue-Hant",
+        "ko-KR",
+        "ja-JP",
+        "ru-RU",
+        "uk-UA",
+        "th-TH",
+        "vi-VT",
+        "ar-SA",
+        "ars-SA",
+        "tr-TR",
+        "id-ID",
+        "cs-CZ",
+        "da-DK",
+        "nl-NL",
+        "no-NO",
+        "nn-NO",
+        "nb-NO",
+        "ms-MY",
+        "pl-PL",
+        "ro-RO",
+        "sv-SE"
+      ],
+      "whitespaceInsensitiveCER" : 0
+    }
+  ],
+  "scope" : "Synthetic desktop Vision baseline; whitespace excluded from CER; no camera, ruby or real-book coverage."
+}

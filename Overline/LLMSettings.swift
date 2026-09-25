@@ -100,7 +100,7 @@ enum LLMAuthMode: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        "API 키 사용"
+        String(localized: LocalizedStringResource("API 키 사용", locale: AppLocale.uiLocale))
     }
 
     var systemImage: String {

@@ -9,9 +9,9 @@ nonisolated enum CommunitySection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .nearby: "내 주변"
-        case .articles: "관련 글"
-        case .rankings: "인기 도서"
+        case .nearby: String(localized: LocalizedStringResource("내 주변", locale: AppLocale.uiLocale))
+        case .articles: String(localized: LocalizedStringResource("관련 글", locale: AppLocale.uiLocale))
+        case .rankings: String(localized: LocalizedStringResource("인기 도서", locale: AppLocale.uiLocale))
         }
     }
 
@@ -33,9 +33,9 @@ nonisolated enum CommunityPlaceKind: String, CaseIterable, Identifiable, Codable
 
     var title: String {
         switch self {
-        case .all: "전체"
-        case .bookstore: "서점"
-        case .library: "도서관"
+        case .all: String(localized: LocalizedStringResource("전체", locale: AppLocale.uiLocale))
+        case .bookstore: String(localized: LocalizedStringResource("서점", locale: AppLocale.uiLocale))
+        case .library: String(localized: LocalizedStringResource("도서관", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -49,7 +49,7 @@ nonisolated enum CommunityArticleSource: String, CaseIterable, Identifiable, Cod
 
     var title: String {
         switch self {
-        case .all: "전체"
+        case .all: String(localized: LocalizedStringResource("전체", locale: AppLocale.uiLocale))
         case .naver: "NAVER"
         case .daum: "Daum"
         }
@@ -61,7 +61,7 @@ nonisolated enum CommunityArticleSort: String, CaseIterable, Identifiable, Senda
     case latest
 
     var id: String { rawValue }
-    var title: String { self == .relevance ? "관련도순" : "최신순" }
+    var title: String { self == .relevance ? String(localized: LocalizedStringResource("관련도순", locale: AppLocale.uiLocale)) : String(localized: LocalizedStringResource("최신순", locale: AppLocale.uiLocale)) }
 }
 
 nonisolated enum CommunityRankingKind: String, CaseIterable, Identifiable, Sendable {
@@ -69,7 +69,12 @@ nonisolated enum CommunityRankingKind: String, CaseIterable, Identifiable, Senda
     case loans
 
     var id: String { rawValue }
-    var title: String { self == .bestseller ? "베스트셀러" : "대출 순위" }
+    var title: String {
+        if self == .bestseller && AppLocale.languageCode == "ja" { return "売れ筋" }
+        return self == .bestseller
+            ? String(localized: LocalizedStringResource("베스트셀러", locale: AppLocale.uiLocale))
+            : String(localized: LocalizedStringResource("대출 순위", locale: AppLocale.uiLocale))
+    }
 }
 
 nonisolated enum CommunityRankingCategory: String, Identifiable, Sendable {
@@ -91,21 +96,33 @@ nonisolated enum CommunityRankingCategory: String, Identifiable, Sendable {
     var id: String { rawValue }
 
     var title: String {
-        switch self {
-        case .all: "전체 분야"
-        case .fiction: "소설·시·희곡"
-        case .essay: "에세이"
-        case .humanities: "인문학"
-        case .business: "경제·경영"
-        case .selfDevelopment: "자기계발"
-        case .children: "어린이"
-        case .literature: "문학"
-        case .philosophy: "철학"
-        case .socialScience: "사회과학"
-        case .naturalScience: "자연과학"
-        case .technology: "기술과학"
-        case .arts: "예술"
-        case .history: "역사"
+        if AppLocale.languageCode == "ja" {
+            switch self {
+            case .all: return "全分野"
+            case .fiction: return "小説・エッセイ"
+            case .essay: return "エッセイ"
+            case .humanities: return "人文・思想・社会"
+            case .business: return "ビジネス・経済・就職"
+            case .selfDevelopment: return "自己啓発"
+            case .children: return "絵本・児童書・図鑑"
+            default: break
+            }
+        }
+        return switch self {
+        case .all: String(localized: LocalizedStringResource("전체 분야", locale: AppLocale.uiLocale))
+        case .fiction: String(localized: LocalizedStringResource("소설·시·희곡", locale: AppLocale.uiLocale))
+        case .essay: String(localized: LocalizedStringResource("에세이", locale: AppLocale.uiLocale))
+        case .humanities: String(localized: LocalizedStringResource("인문학", locale: AppLocale.uiLocale))
+        case .business: String(localized: LocalizedStringResource("경제·경영", locale: AppLocale.uiLocale))
+        case .selfDevelopment: String(localized: LocalizedStringResource("자기계발", locale: AppLocale.uiLocale))
+        case .children: String(localized: LocalizedStringResource("어린이", locale: AppLocale.uiLocale))
+        case .literature: String(localized: LocalizedStringResource("문학", locale: AppLocale.uiLocale))
+        case .philosophy: String(localized: LocalizedStringResource("철학", locale: AppLocale.uiLocale))
+        case .socialScience: String(localized: LocalizedStringResource("사회과학", locale: AppLocale.uiLocale))
+        case .naturalScience: String(localized: LocalizedStringResource("자연과학", locale: AppLocale.uiLocale))
+        case .technology: String(localized: LocalizedStringResource("기술과학", locale: AppLocale.uiLocale))
+        case .arts: String(localized: LocalizedStringResource("예술", locale: AppLocale.uiLocale))
+        case .history: String(localized: LocalizedStringResource("역사", locale: AppLocale.uiLocale))
         }
     }
 

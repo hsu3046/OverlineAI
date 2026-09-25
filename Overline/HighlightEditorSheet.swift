@@ -28,7 +28,7 @@ struct HighlightEditorSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "글조각 편집") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("글조각 편집", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -85,7 +85,7 @@ struct HighlightEditorSheet: View {
             }
             .sheet(isPresented: $isBookSelectionPresented) {
                 OverlineBookPickerSheet(
-                    title: "책 선택",
+                    title: String(localized: LocalizedStringResource("책 선택", locale: AppLocale.uiLocale)),
                     books: library.books,
                     selectedBookID: selectedBookID,
                     onSelect: { bookID in
@@ -177,7 +177,7 @@ struct HighlightEditorSheet: View {
 
     private var bookSelector: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "책 이름")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("책 이름", locale: AppLocale.uiLocale)))
 
             OverlineBookSelectorButton(
                 title: selectedBook?.title ?? "Inbox",
@@ -193,7 +193,7 @@ struct HighlightEditorSheet: View {
     private var tagsEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                OverlineEditorLabel(title: "태그")
+                OverlineEditorLabel(title: String(localized: LocalizedStringResource("태그", locale: AppLocale.uiLocale)))
 
                 Spacer(minLength: 0)
 
@@ -238,7 +238,7 @@ struct HighlightEditorSheet: View {
 
     private var toneEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "색상")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("색상", locale: AppLocale.uiLocale)))
 
             HStack {
                 HighlightTonePicker(selectedTone: $selectedTone)
@@ -252,7 +252,7 @@ struct HighlightEditorSheet: View {
 
     private var pageEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "책 페이지")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("책 페이지", locale: AppLocale.uiLocale)))
 
             HStack(spacing: 8) {
                 Image(systemName: "text.book.closed")
@@ -358,7 +358,7 @@ struct HighlightEditorSheet: View {
         guard !trimmedText.isEmpty else { return }
 
         guard let configuration = llmSettings.activeConfiguration else {
-            showAIAlert(title: "AI 교정", message: selectedAISetupMessage)
+            showAIAlert(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale)), message: selectedAISetupMessage)
             return
         }
 
@@ -382,12 +382,12 @@ struct HighlightEditorSheet: View {
                 )
 
                 guard text == sourceText else {
-                    showAIAlert(title: "AI 교정", message: "글조각이 바뀌어서 교정 제안을 적용하지 않았어요.")
+                    showAIAlert(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("글조각이 바뀌어서 교정 제안을 적용하지 않았어요.", locale: AppLocale.uiLocale)))
                     return
                 }
 
                 guard result.correctedText != trimmedText else {
-                    showAIAlert(title: "AI 교정", message: "교정할 부분을 찾지 못했어요.")
+                    showAIAlert(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("교정할 부분을 찾지 못했어요.", locale: AppLocale.uiLocale)))
                     return
                 }
 
@@ -399,14 +399,14 @@ struct HighlightEditorSheet: View {
                 )
             } catch {
                 llmSettings.handleRequestError(error, configuration: configuration)
-                showAIAlert(title: "AI 교정", message: error.localizedDescription)
+                showAIAlert(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale)), message: error.localizedDescription)
             }
         }
     }
 
     private func applyCorrection(_ proposal: OCRCorrectionProposal) {
         guard text == proposal.sourceText else {
-            showAIAlert(title: "AI 교정", message: "글조각이 바뀌어서 교정을 적용하지 않았어요.")
+            showAIAlert(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("글조각이 바뀌어서 교정을 적용하지 않았어요.", locale: AppLocale.uiLocale)))
             return
         }
 
@@ -425,7 +425,7 @@ struct HighlightEditorSheet: View {
         guard !trimmedText.isEmpty else { return }
 
         guard let configuration = llmSettings.activeConfiguration else {
-            showAIAlert(title: "AI 태그", message: selectedAISetupMessage)
+            showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: selectedAISetupMessage)
             return
         }
 
@@ -454,17 +454,17 @@ struct HighlightEditorSheet: View {
                 )
 
                 guard currentTagRegenerationSnapshot == snapshot else {
-                    showAIAlert(title: "AI 태그", message: "편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.")
+                    showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.", locale: AppLocale.uiLocale)))
                     return
                 }
 
                 guard !suggestedTags.isEmpty else {
-                    showAIAlert(title: "AI 태그", message: "추천할 태그를 찾지 못했어요.")
+                    showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("추천할 태그를 찾지 못했어요.", locale: AppLocale.uiLocale)))
                     return
                 }
 
                 guard canonicalTags(currentTags) != canonicalTags(suggestedTags) else {
-                    showAIAlert(title: "AI 태그", message: "현재 태그가 이 글조각에 잘 맞아요.")
+                    showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("현재 태그가 이 글조각에 잘 맞아요.", locale: AppLocale.uiLocale)))
                     return
                 }
 
@@ -475,14 +475,14 @@ struct HighlightEditorSheet: View {
                 )
             } catch {
                 llmSettings.handleRequestError(error, configuration: configuration)
-                showAIAlert(title: "AI 태그", message: error.localizedDescription)
+                showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: error.localizedDescription)
             }
         }
     }
 
     private func applyTagRegeneration(_ proposal: TagRegenerationProposal) {
         guard currentTagRegenerationSnapshot == proposal.snapshot else {
-            showAIAlert(title: "AI 태그", message: "편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.")
+            showAIAlert(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale)), message: String(localized: LocalizedStringResource("편집 내용이 바뀌어서 태그 제안을 적용하지 않았어요.", locale: AppLocale.uiLocale)))
             return
         }
 
@@ -582,7 +582,7 @@ private struct OCRCorrectionPreviewSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "AI 교정") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("AI 교정", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -601,7 +601,7 @@ private struct OCRCorrectionPreviewSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         correctionTextCard(
-                            title: "교정 제안",
+                            title: String(localized: LocalizedStringResource("교정 제안", locale: AppLocale.uiLocale)),
                             text: proposal.correctedText,
                             isPrimary: true
                         )
@@ -611,7 +611,7 @@ private struct OCRCorrectionPreviewSheet: View {
                         }
 
                         correctionTextCard(
-                            title: "원문",
+                            title: String(localized: LocalizedStringResource("원문", locale: AppLocale.uiLocale)),
                             text: proposal.sourceText,
                             isPrimary: false
                         )
@@ -628,7 +628,7 @@ private struct OCRCorrectionPreviewSheet: View {
 
     private var changesCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "변경점")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("변경점", locale: AppLocale.uiLocale)))
                 .padding(.leading, 0)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -674,7 +674,7 @@ private struct TagRegenerationPreviewSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "AI 태그") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("AI 태그", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -692,8 +692,8 @@ private struct TagRegenerationPreviewSheet: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        tagCard(title: "새 태그", tags: proposal.suggestedTags, isPrimary: true)
-                        tagCard(title: "현재 태그", tags: proposal.currentTags, isPrimary: false)
+                        tagCard(title: String(localized: LocalizedStringResource("새 태그", locale: AppLocale.uiLocale)), tags: proposal.suggestedTags, isPrimary: true)
+                        tagCard(title: String(localized: LocalizedStringResource("현재 태그", locale: AppLocale.uiLocale)), tags: proposal.currentTags, isPrimary: false)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 10)

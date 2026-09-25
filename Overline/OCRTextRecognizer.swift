@@ -8,9 +8,9 @@ enum OCRTextRecognizerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidImage:
-            "이미지를 읽을 수 없습니다."
+            String(localized: LocalizedStringResource("이미지를 읽을 수 없습니다.", locale: AppLocale.uiLocale))
         case .noTextFound:
-            "이미지에서 글자를 찾지 못했습니다."
+            String(localized: LocalizedStringResource("이미지에서 글자를 찾지 못했습니다.", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -34,11 +34,26 @@ struct OCRTextRecognizer {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
-        request.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        request.recognitionLanguages = AppLocale.ocrRecognitionLanguages
         request.automaticallyDetectsLanguage = true
 
         let recognitionTask = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
+            if #available(iOS 26.0, *) {
+                let lines = try await OCRDocumentRecognizer.recognize(
+                    in: cgImage,
+                    orientation: CGImagePropertyOrientation(image.imageOrientation)
+                )
+                let text = OCRLineJoiner.joined(lines.map(\.text))
+                guard !text.isEmpty else { throw OCRTextRecognizerError.noTextFound }
+                return OCRTextRecognitionResult(
+                    text: text,
+                    lineCount: lines.count,
+                    inferredPageReference: PageReferenceInference.inferredPageReference(
+                        from: lines.map { PageReferenceLine(text: $0.text, boundingBox: $0.boundingBox) }
+                    )
+                )
+            }
             let handler = VNImageRequestHandler(
                 cgImage: cgImage,
                 orientation: CGImagePropertyOrientation(image.imageOrientation),

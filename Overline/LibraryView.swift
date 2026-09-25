@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct LibraryView: View {
+    @Environment(AppIntentRouter.self) private var intentRouter
+    @State private var handledWidgetRequest: UUID?
     @Environment(\.captureTutorial) private var tutorial
     @Environment(ReadingLibrary.self) private var library
     @Environment(LLMSettingsStore.self) private var llmSettings
@@ -26,7 +28,7 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     SectionHeader(
-                        title: "책",
+                        title: String(localized: LocalizedStringResource("책", locale: AppLocale.uiLocale)),
                         systemImage: "books.vertical",
                         trailingText: "\(library.books.count)"
                     )
@@ -77,9 +79,9 @@ struct LibraryView: View {
                 if library.books.isEmpty {
                     LibraryEmptyStateCard(
                         systemImage: "book.closed",
-                        title: "첫 책을 추가하세요",
-                        message: "ISBN을 스캔하거나 직접 입력해 캡처할 책을 준비할 수 있습니다.",
-                        actionTitle: "책 추가",
+                        title: String(localized: LocalizedStringResource("첫 책을 추가하세요", locale: AppLocale.uiLocale)),
+                        message: String(localized: LocalizedStringResource("ISBN을 스캔하거나 직접 입력해 캡처할 책을 준비할 수 있습니다.", locale: AppLocale.uiLocale)),
+                        actionTitle: String(localized: LocalizedStringResource("책 추가", locale: AppLocale.uiLocale)),
                         action: {
                             presentedSheet = .addBook
                         }
@@ -90,7 +92,7 @@ struct LibraryView: View {
 
             HStack(spacing: 10) {
                 SectionHeader(
-                    title: "최근 글조각",
+                    title: String(localized: LocalizedStringResource("최근 글조각", locale: AppLocale.uiLocale)),
                     systemImage: "quote.opening"
                 )
 
@@ -133,7 +135,7 @@ struct LibraryView: View {
 
             ForEach(Array(displayedHighlights.enumerated()), id: \.element.id) { index, highlight in
                 if pendingDeletedHighlight?.visibleIndex == index {
-                    OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                    OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                         .listRowChrome(top: 0, bottom: 12)
                 }
 
@@ -157,15 +159,15 @@ struct LibraryView: View {
             }
 
             if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= displayedHighlights.count {
-                OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                     .listRowChrome(top: 0, bottom: 12)
             }
 
             if library.recentHighlights.isEmpty && pendingDeletedHighlight == nil {
                 LibraryEmptyStateCard(
                     systemImage: "text.viewfinder",
-                    title: "아직 글조각이 없습니다",
-                    message: "캡처 탭에서 문장 위를 쓸어 저장하면 이곳에 모입니다.",
+                    title: String(localized: LocalizedStringResource("아직 글조각이 없습니다", locale: AppLocale.uiLocale)),
+                    message: String(localized: LocalizedStringResource("캡처 탭에서 문장 위를 쓸어 저장하면 이곳에 모입니다.", locale: AppLocale.uiLocale)),
                     actionTitle: nil,
                     action: nil
                 )
@@ -183,6 +185,11 @@ struct LibraryView: View {
         .overlineBottomMenuCompaction()
         .onAppear {
             if tutorial?.step == .bookForm { presentedSheet = .addBook }
+            applyWidgetRequest()
+        }
+        .onChange(of: intentRouter.request) { _, _ in applyWidgetRequest() }
+        .onChange(of: presentedSheet?.id) { _, id in
+            if id == nil { applyWidgetRequest() }
         }
         .onChange(of: tutorial?.step) { _, step in
             if step == .bookForm { presentedSheet = .addBook }
@@ -230,6 +237,17 @@ struct LibraryView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+        }
+    }
+
+    private func applyWidgetRequest() {
+        guard let request = intentRouter.request, request.tab == .library,
+              request.id != handledWidgetRequest, presentedSheet == nil else { return }
+        handledWidgetRequest = request.id
+        if let id = request.highlightID, let bookID = library.bookID(containing: id) {
+            activeBookID = bookID
+        } else if let id = request.bookID, library.books.contains(where: { $0.id == id }) {
+            activeBookID = id
         }
     }
 
@@ -387,8 +405,8 @@ private enum HighlightSpeechScope: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .recent: "최근"
-        case .book: "책별"
+        case .recent: String(localized: LocalizedStringResource("최근", locale: AppLocale.uiLocale))
+        case .book: String(localized: LocalizedStringResource("책별", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -507,7 +525,7 @@ private struct HighlightSpeechSelectionSheet: View {
             }
             .sheet(isPresented: $isBookPickerPresented) {
                 OverlineBookPickerSheet(
-                    title: "책 선택",
+                    title: String(localized: LocalizedStringResource("책 선택", locale: AppLocale.uiLocale)),
                     books: library.books,
                     selectedBookID: selectedBookID,
                     onSelect: { bookID in
@@ -764,7 +782,7 @@ private struct HighlightBrowserSheet: View {
                             }
                         }
 
-                        OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 책 검색")
+                        OverlinePillSearchField(text: $searchText, prompt: String(localized: LocalizedStringResource("글조각, 태그, 책 검색", locale: AppLocale.uiLocale)))
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 14)
@@ -774,7 +792,7 @@ private struct HighlightBrowserSheet: View {
                 List {
                     ForEach(Array(visibleHighlights.enumerated()), id: \.element.id) { index, highlight in
                         if pendingDeletedHighlight?.visibleIndex == index {
-                            OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                            OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                                 .listRowChrome(top: 0, bottom: 12)
                         }
 
@@ -799,7 +817,7 @@ private struct HighlightBrowserSheet: View {
                     }
 
                     if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= visibleHighlights.count {
-                        OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                        OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                             .listRowChrome(top: 0, bottom: 12)
                     }
 
@@ -828,7 +846,7 @@ private struct HighlightBrowserSheet: View {
             }
             .sheet(isPresented: $isBookFilterPresented) {
                 OverlineBookPickerSheet(
-                    title: "책 선택",
+                    title: String(localized: LocalizedStringResource("책 선택", locale: AppLocale.uiLocale)),
                     books: library.books,
                     selectedBookID: selectedBookID,
                     includesAllOption: true,
@@ -1066,14 +1084,14 @@ struct ScrapbookView: View {
                             .frame(height: 1)
                             .listRowChrome(top: 0, bottom: 18)
 
-                        OverlinePillSearchField(text: $searchText, prompt: "글조각, 태그, 메모 검색")
+                        OverlinePillSearchField(text: $searchText, prompt: String(localized: LocalizedStringResource("글조각, 태그, 메모 검색", locale: AppLocale.uiLocale)))
                             .listRowChrome(top: 0, bottom: 12)
                     }
 
                     let highlights = filteredHighlights(in: book)
                     ForEach(Array(highlights.enumerated()), id: \.element.id) { index, highlight in
                         if pendingDeletedHighlight?.visibleIndex == index {
-                            OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                            OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                                 .listRowChrome(top: 0, bottom: 12)
                         }
 
@@ -1097,7 +1115,7 @@ struct ScrapbookView: View {
                     }
 
                     if let pendingDeletedHighlight, pendingDeletedHighlight.visibleIndex >= highlights.count {
-                        OverlineInlineUndoRow(message: "글조각 삭제됨", undo: restoreDeletedHighlight)
+                        OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("글조각 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedHighlight)
                             .listRowChrome(top: 0, bottom: 12)
                     }
 
@@ -1723,9 +1741,9 @@ private func readingRecordShareDateRange(for record: ReadingRecord) -> String {
 
 private let readingRecordShareDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "ko_KR")
+    formatter.locale = .current
     formatter.calendar = Calendar(identifier: .gregorian)
-    formatter.dateFormat = "yyyy. M. d."
+    formatter.dateStyle = .medium
     return formatter
 }()
 

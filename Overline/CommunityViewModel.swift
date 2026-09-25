@@ -235,6 +235,9 @@ final class CommunityViewModel {
     }
 
     func loadRankings(force: Bool = false) async {
+        if AppLocale.languageCode == "ja" && rankingKind == .loans {
+            selectRankingKind(.bestseller)
+        }
         let kind = rankingKind
         let category = rankingCategory
         let key = rankingKey(kind: kind, category: category)
@@ -300,7 +303,7 @@ final class CommunityViewModel {
         radius: Int? = nil,
         kind: CommunityPlaceKind? = nil
     ) -> String {
-        "\(latitude)-\(longitude)-\(radius ?? placeRadius)-\((kind ?? placeKind).rawValue)"
+        "\(latitude)-\(longitude)-\(radius ?? placeRadius)-\((kind ?? placeKind).rawValue)-\(AppLocale.languageCode)-\(AppLocale.regionCode)"
     }
 
     private func articleKey(
@@ -316,7 +319,7 @@ final class CommunityViewModel {
         kind: CommunityRankingKind? = nil,
         category: CommunityRankingCategory? = nil
     ) -> String {
-        "\((kind ?? rankingKind).rawValue)-\((category ?? rankingCategory).rawValue)"
+        "\(AppLocale.languageCode)-\((kind ?? rankingKind).rawValue)-\((category ?? rankingCategory).rawValue)"
     }
 
     @discardableResult

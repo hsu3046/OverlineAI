@@ -3,11 +3,14 @@ import SwiftUI
 import UIKit
 
 struct CommunityView: View {
+    @AppStorage(AppLocale.selectionKey) private var languageSelection = AppLocale.systemLanguageSelection
+    @Environment(AppIntentRouter.self) private var intentRouter
     @Environment(ReadingLibrary.self) private var library
     @Environment(\.openURL) private var openURL
     var isActive = true
 
-    @AppStorage("overline.community.selectedSection") private var selectedSectionRaw = CommunitySection.articles.rawValue
+    @AppStorage("overline.community.selectedSection") private var selectedSectionRaw = AppLocale.languageCode == "ko"
+        ? CommunitySection.articles.rawValue : CommunitySection.nearby.rawValue
     @State private var model = CommunityViewModel()
     @State private var locationService = CommunityLocationService()
     @State private var forcePlaceReloadAfterLocation = false
@@ -30,6 +33,13 @@ struct CommunityView: View {
                     locationService.requestCurrentLocation()
                 }
             }
+        }
+        .onChange(of: intentRouter.request, initial: true) { _, request in
+            guard let request, request.tab == .community,
+                  let raw = request.rankingKind, let kind = CommunityRankingKind(rawValue: raw) else { return }
+            selectedSectionRaw = CommunitySection.rankings.rawValue
+            model.selectRankingKind(kind)
+            model.rankingCategory = .all
         }
     }
 
@@ -111,45 +121,53 @@ struct CommunityView: View {
         if let locationError = locationService.errorMessage {
             CommunityMessageRow(
                 systemImage: "location.slash",
-                title: "위치를 사용할 수 없습니다",
+                title: String(localized: LocalizedStringResource("위치를 사용할 수 없습니다", locale: AppLocale.uiLocale)),
                 message: locationError,
-                actionTitle: locationService.authorizationStatus == .denied ? "설정 열기" : "다시 시도",
+                actionTitle: locationService.authorizationStatus == .denied ? String(localized: LocalizedStringResource("설정 열기", locale: AppLocale.uiLocale)) : String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: recoverLocationAccess
             )
             .communityListRow(top: 0, bottom: 16)
         } else if locationService.location == nil || locationService.isRequesting {
-            CommunityLoadingRow(message: "가까운 책 공간을 찾고 있습니다")
+            CommunityLoadingRow(message: String(localized: LocalizedStringResource("가까운 책 공간을 찾고 있습니다", locale: AppLocale.uiLocale)))
                 .communityListRow(top: 12, bottom: 16)
         } else if let error = model.placeError {
             CommunityMessageRow(
                 systemImage: "wifi.exclamationmark",
-                title: "장소를 불러오지 못했습니다",
+                title: String(localized: LocalizedStringResource("장소를 불러오지 못했습니다", locale: AppLocale.uiLocale)),
                 message: error,
-                actionTitle: "다시 시도",
+                actionTitle: String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
+            if AppLocale.languageCode != "ko" {
+                Button(String(localized: LocalizedStringResource("Google Maps에서 주변 장소 찾기", locale: AppLocale.uiLocale)), action: openNearbyGoogleMaps)
+                    .communityListRow(top: 0, bottom: 16)
+            }
         } else if model.isLoadingPlaces && model.places.isEmpty {
-            CommunityLoadingRow(message: "가까운 책 공간을 찾고 있습니다")
+            CommunityLoadingRow(message: String(localized: LocalizedStringResource("가까운 책 공간을 찾고 있습니다", locale: AppLocale.uiLocale)))
                 .communityListRow(top: 12, bottom: 16)
         } else if !model.placeWarnings.isEmpty && model.places.isEmpty {
             CommunityMessageRow(
                 systemImage: "exclamationmark.circle",
-                title: "일부 장소를 불러오지 못했습니다",
-                message: "잠시 후 다시 확인해 주세요.",
-                actionTitle: "다시 시도",
+                title: String(localized: LocalizedStringResource("일부 장소를 불러오지 못했습니다", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("잠시 후 다시 확인해 주세요.", locale: AppLocale.uiLocale)),
+                actionTitle: String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
         } else if model.places.isEmpty {
             CommunityMessageRow(
                 systemImage: "mappin.slash",
-                title: "주변 장소를 찾지 못했습니다",
-                message: "검색 범위를 넓혀 다시 확인해 보세요.",
+                title: String(localized: LocalizedStringResource("주변 장소를 찾지 못했습니다", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("검색 범위를 넓혀 다시 확인해 보세요.", locale: AppLocale.uiLocale)),
                 actionTitle: nil,
                 action: nil
             )
             .communityListRow(top: 0, bottom: 16)
+            if AppLocale.languageCode != "ko" {
+                Button(String(localized: LocalizedStringResource("Google Maps에서 주변 장소 찾기", locale: AppLocale.uiLocale)), action: openNearbyGoogleMaps)
+                    .communityListRow(top: 0, bottom: 16)
+            }
         } else {
             ForEach(model.places) { place in
                 CommunityPlaceRow(place: place, openURL: openExternalURL)
@@ -161,6 +179,11 @@ struct CommunityView: View {
     @ViewBuilder
     private var articleContent: some View {
         VStack(spacing: 12) {
+            if AppLocale.languageCode != "ko" {
+                Text("이 섹션은 한국 출처의 정보입니다.")
+                    .font(.overline(.caption))
+                    .foregroundStyle(Color.overlineMutedInk)
+            }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.overline(.body, weight: .semibold))
@@ -257,10 +280,10 @@ struct CommunityView: View {
         if model.articleQueryTitle.isEmpty {
             CommunityMessageRow(
                 systemImage: "text.magnifyingglass",
-                title: "찾고 싶은 책을 입력해 주세요",
+                title: String(localized: LocalizedStringResource("찾고 싶은 책을 입력해 주세요", locale: AppLocale.uiLocale)),
                 message: library.books.isEmpty
-                    ? "책 제목이나 저자로 관련 글을 찾을 수 있습니다."
-                    : "직접 검색하거나 책장에서 골라보세요.",
+                    ? String(localized: LocalizedStringResource("책 제목이나 저자로 관련 글을 찾을 수 있습니다.", locale: AppLocale.uiLocale))
+                    : String(localized: LocalizedStringResource("직접 검색하거나 책장에서 골라보세요.", locale: AppLocale.uiLocale)),
                 actionTitle: nil,
                 action: nil
             )
@@ -268,29 +291,29 @@ struct CommunityView: View {
         } else if let error = model.articleError {
             CommunityMessageRow(
                 systemImage: "wifi.exclamationmark",
-                title: "관련 글을 불러오지 못했습니다",
+                title: String(localized: LocalizedStringResource("관련 글을 불러오지 못했습니다", locale: AppLocale.uiLocale)),
                 message: error,
-                actionTitle: "다시 시도",
+                actionTitle: String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
         } else if model.isLoadingArticles && model.articles.isEmpty {
-            CommunityLoadingRow(message: "책에 관한 글을 찾고 있습니다")
+            CommunityLoadingRow(message: String(localized: LocalizedStringResource("책에 관한 글을 찾고 있습니다", locale: AppLocale.uiLocale)))
                 .communityListRow(top: 12, bottom: 16)
         } else if !model.articleWarnings.isEmpty && model.articles.isEmpty {
             CommunityMessageRow(
                 systemImage: "exclamationmark.circle",
-                title: "일부 출처를 불러오지 못했습니다",
-                message: "잠시 후 다시 확인해 주세요.",
-                actionTitle: "다시 시도",
+                title: String(localized: LocalizedStringResource("일부 출처를 불러오지 못했습니다", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("잠시 후 다시 확인해 주세요.", locale: AppLocale.uiLocale)),
+                actionTitle: String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
         } else if model.articles.isEmpty {
             CommunityMessageRow(
                 systemImage: "text.magnifyingglass",
-                title: "관련 글을 찾지 못했습니다",
-                message: "검색어를 바꾸거나 최신순으로 확인해 보세요.",
+                title: String(localized: LocalizedStringResource("관련 글을 찾지 못했습니다", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("검색어를 바꾸거나 최신순으로 확인해 보세요.", locale: AppLocale.uiLocale)),
                 actionTitle: nil,
                 action: nil
             )
@@ -305,9 +328,20 @@ struct CommunityView: View {
 
     @ViewBuilder
     private var rankingContent: some View {
+        if AppLocale.languageCode == "ja" {
+            Text(verbatim: "楽天ブックスの販売順です。週刊ランキングではありません。")
+                .font(.overline(.caption))
+                .foregroundStyle(Color.overlineMutedInk)
+                .communityListRow(top: 0, bottom: 8)
+        } else if AppLocale.languageCode != "ko" {
+            Text("이 섹션은 한국 출처의 정보입니다.")
+                .font(.overline(.caption))
+                .foregroundStyle(Color.overlineMutedInk)
+                .communityListRow(top: 0, bottom: 8)
+        }
         HStack(spacing: 8) {
             Menu {
-                ForEach(CommunityRankingKind.allCases) { kind in
+                ForEach(AppLocale.languageCode == "ja" ? [.bestseller] : CommunityRankingKind.allCases) { kind in
                     Button {
                         model.selectRankingKind(kind)
                     } label: {
@@ -351,20 +385,20 @@ struct CommunityView: View {
         if let error = model.rankingError {
             CommunityMessageRow(
                 systemImage: "wifi.exclamationmark",
-                title: "순위를 불러오지 못했습니다",
+                title: String(localized: LocalizedStringResource("순위를 불러오지 못했습니다", locale: AppLocale.uiLocale)),
                 message: error,
-                actionTitle: "다시 시도",
+                actionTitle: String(localized: LocalizedStringResource("다시 시도", locale: AppLocale.uiLocale)),
                 action: { Task { await loadSelectedSection(force: true) } }
             )
             .communityListRow(top: 0, bottom: 16)
         } else if model.isLoadingRankings {
-            CommunityLoadingRow(message: "인기 도서를 불러오고 있습니다")
+            CommunityLoadingRow(message: String(localized: LocalizedStringResource("인기 도서를 불러오고 있습니다", locale: AppLocale.uiLocale)))
                 .communityListRow(top: 12, bottom: 16)
         } else if model.rankings.isEmpty {
             CommunityMessageRow(
                 systemImage: "chart.bar.xaxis",
-                title: "순위 정보가 없습니다",
-                message: "잠시 후 다시 확인해 주세요.",
+                title: String(localized: LocalizedStringResource("순위 정보가 없습니다", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("잠시 후 다시 확인해 주세요.", locale: AppLocale.uiLocale)),
                 actionTitle: nil,
                 action: nil
             )
@@ -375,7 +409,14 @@ struct CommunityView: View {
                     .communityListRow(top: 0, bottom: 10)
             }
 
-            if model.rankingKind == .loans {
+            if AppLocale.languageCode == "ja",
+               let creditURL = URL(string: "https://developers.rakuten.com/") {
+                Link("Supported by Rakuten Developers", destination: creditURL)
+                    .font(.overline(.caption2))
+                    .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .communityListRow(top: 2, bottom: 18)
+            } else if model.rankingKind == .loans {
                 Text("출처: 도서관 정보나루 · 국립중앙도서관")
                     .font(.overline(.caption2))
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.74))
@@ -413,14 +454,15 @@ struct CommunityView: View {
 
     private var loadTaskID: String {
         guard isActive else { return "inactive" }
+        let language = AppLocale.locale(for: languageSelection).language.languageCode?.identifier ?? "ko"
         switch selectedSection {
         case .nearby:
             let coordinate = locationService.location?.coordinate
-            return "nearby-\(locationService.locationRevision)-\(coordinate?.latitude ?? 0)-\(coordinate?.longitude ?? 0)-\(model.placeKind.rawValue)-\(model.placeRadius)"
+            return "nearby-\(language)-\(locationService.locationRevision)-\(coordinate?.latitude ?? 0)-\(coordinate?.longitude ?? 0)-\(model.placeKind.rawValue)-\(model.placeRadius)"
         case .articles:
-            return "articles-\(model.articleQueryTitle)-\(model.articleQueryAuthor)-\(model.articleSource.rawValue)-\(model.articleSort.rawValue)"
+            return "articles-\(language)-\(model.articleQueryTitle)-\(model.articleQueryAuthor)-\(model.articleSource.rawValue)-\(model.articleSort.rawValue)"
         case .rankings:
-            return "rankings-\(model.rankingKind.rawValue)-\(model.rankingCategory.rawValue)"
+            return "rankings-\(language)-\(model.rankingKind.rawValue)-\(model.rankingCategory.rawValue)"
         }
     }
 
@@ -457,6 +499,17 @@ struct CommunityView: View {
 
     private func openExternalURL(_ value: String?) {
         guard let value, let url = URL(string: value) else { return }
+        openURL(url)
+    }
+
+    private func openNearbyGoogleMaps() {
+        var components = URLComponents(string: "https://www.google.com/maps/search/")
+        let kind = model.placeKind == .library ? "library" : model.placeKind == .bookstore ? "bookstore" : "bookstore or library"
+        components?.queryItems = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "query", value: "\(kind) near me")
+        ]
+        guard let url = components?.url else { return }
         openURL(url)
     }
 
@@ -735,6 +788,11 @@ private struct CommunityRankingRow: View {
                             .font(.overline(.caption))
                             .foregroundStyle(Color.overlineMutedInk.opacity(0.76))
                             .lineLimit(1)
+                    }
+                    if item.source == "yes24" || item.source == "rakuten" {
+                        Text(item.source == "rakuten" ? "Rakuten Books" : "YES24")
+                            .font(.overline(.caption2, weight: .semibold))
+                            .foregroundStyle(Color.overlineMutedInk)
                     }
                     if let loanCount = item.loanCount {
                         Label("\(loanCount.formatted())회 대출", systemImage: "arrow.left.arrow.right")

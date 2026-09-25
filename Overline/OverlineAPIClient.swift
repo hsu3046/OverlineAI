@@ -54,7 +54,9 @@ nonisolated struct OverlineAPIClient {
                 latitude: latitude,
                 longitude: longitude,
                 radius: radius,
-                kind: kind.rawValue
+                kind: kind.rawValue,
+                language: AppLocale.languageCode,
+                region: AppLocale.regionCode
             )
         )
     }
@@ -84,7 +86,8 @@ nonisolated struct OverlineAPIClient {
             path: "api/v1/rankings",
             queryItems: [
                 URLQueryItem(name: "kind", value: kind.rawValue),
-                URLQueryItem(name: "category", value: category.rawValue)
+                URLQueryItem(name: "category", value: category.rawValue),
+                URLQueryItem(name: "language", value: AppLocale.languageCode)
             ]
         )
     }
@@ -172,6 +175,8 @@ nonisolated private struct NearbyPlacesRequest: Encodable {
     let longitude: Double
     let radius: Int
     let kind: String
+    let language: String
+    let region: String
 }
 
 nonisolated private struct ArticleSearchRequest: Encodable {
@@ -192,20 +197,24 @@ nonisolated enum OverlineAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingServerURL:
-            "커뮤니티 서버 연결이 아직 설정되지 않았습니다."
+            String(localized: LocalizedStringResource("커뮤니티 서버 연결이 아직 설정되지 않았습니다.", locale: AppLocale.uiLocale))
         case .invalidURL:
-            "서버 요청 주소를 만들 수 없습니다."
+            String(localized: LocalizedStringResource("서버 요청 주소를 만들 수 없습니다.", locale: AppLocale.uiLocale))
         case .invalidResponse:
-            "서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
+            String(localized: LocalizedStringResource("서버 응답을 읽을 수 없습니다. 잠시 후 다시 시도해 주세요.", locale: AppLocale.uiLocale))
         case .timedOut:
-            "응답이 지연되고 있습니다. 네트워크 상태를 확인해 주세요."
+            String(localized: LocalizedStringResource("응답이 지연되고 있습니다. 네트워크 상태를 확인해 주세요.", locale: AppLocale.uiLocale))
         case .networkUnavailable:
-            "인터넷에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요."
+            String(localized: LocalizedStringResource("인터넷에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.", locale: AppLocale.uiLocale))
         case .requestFailed(let statusCode, let message):
             if statusCode == 429 {
-                "요청이 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요."
+                String(localized: LocalizedStringResource("요청이 잠시 제한되었습니다. 잠시 후 다시 시도해 주세요.", locale: AppLocale.uiLocale))
+            } else if statusCode == 503 {
+                String(localized: LocalizedStringResource("서비스 설정이 아직 완료되지 않았습니다.", locale: AppLocale.uiLocale))
             } else if message.isEmpty {
-                "정보를 불러오지 못했습니다. (\(statusCode))"
+                String(format: String(localized: LocalizedStringResource("정보를 불러오지 못했습니다. (%lld)", locale: AppLocale.uiLocale)), statusCode)
+            } else if AppLocale.languageCode != "ko" {
+                String(localized: LocalizedStringResource("정보를 불러오지 못했습니다. 다시 시도해 주세요.", locale: AppLocale.uiLocale))
             } else {
                 message
             }

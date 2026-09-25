@@ -59,13 +59,13 @@ struct InsightsView: View {
 
             if !library.savedInsights.isEmpty {
                 InsightSectionHeader(
-                    title: "저장됨",
+                    title: String(localized: LocalizedStringResource("저장됨", locale: AppLocale.uiLocale)),
                     systemImage: "tray.full",
                     trailingText: "\(library.savedInsights.count)"
                 )
                 .insightListRowChrome(top: 12, bottom: 8)
 
-                OverlinePillSearchField(text: $savedInsightSearchText, prompt: "인사이트, 질문 검색")
+                OverlinePillSearchField(text: $savedInsightSearchText, prompt: String(localized: LocalizedStringResource("인사이트, 질문 검색", locale: AppLocale.uiLocale)))
                     .insightListRowChrome(top: 0, bottom: 10)
 
                 if visibleSavedInsights.isEmpty && pendingDeletedInsight == nil {
@@ -82,7 +82,7 @@ struct InsightsView: View {
                 } else {
                     ForEach(Array(visibleSavedInsights.enumerated()), id: \.element.id) { index, insight in
                         if pendingDeletedInsight?.visibleIndex == index {
-                            OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
+                            OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("인사이트 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedInsight)
                                 .insightListRowChrome(top: 0, bottom: 12)
                         }
 
@@ -109,7 +109,7 @@ struct InsightsView: View {
                     }
 
                     if let pendingDeletedInsight, pendingDeletedInsight.visibleIndex >= visibleSavedInsights.count {
-                        OverlineInlineUndoRow(message: "인사이트 삭제됨", undo: restoreDeletedInsight)
+                        OverlineInlineUndoRow(message: String(localized: LocalizedStringResource("인사이트 삭제됨", locale: AppLocale.uiLocale)), undo: restoreDeletedInsight)
                             .insightListRowChrome(top: 0, bottom: 12)
                     }
                 }
@@ -588,6 +588,7 @@ struct OverlineSettingsSheet: View {
     @State private var backupNotice: LibraryBackupNotice?
     @State private var customModelProviders: Set<LLMProvider> = []
     @State private var customModelDrafts: [LLMProvider: String] = [:]
+    @State private var languageSelection = AppLocale.languageSelection
 
     init(
         settings: LLMSettingsStore,
@@ -601,6 +602,21 @@ struct OverlineSettingsSheet: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             Form {
+                Section {
+                    Picker("앱 언어", selection: $languageSelection) {
+                        Text("기기 설정에 따름").tag(AppLocale.systemLanguageSelection)
+                        Text(verbatim: "한국어").tag("ko")
+                        Text(verbatim: "日本語").tag("ja")
+                        Text(verbatim: "English").tag("en")
+                    }
+                    .pickerStyle(.navigationLink)
+                    .settingsRowSeparator()
+                } header: {
+                    Text("언어")
+                } footer: {
+                    Text("언어를 선택하면 화면과 검색에 적용됩니다.")
+                }
+
                 Section {
                     LLMActiveModelSummary(settings: settings)
                         .settingsRowSeparator()
@@ -798,6 +814,9 @@ struct OverlineSettingsSheet: View {
                 }
             }
             .navigationTitle("설정")
+            .onChange(of: languageSelection) { _, selection in
+                AppLocale.setLanguageSelection(selection)
+            }
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: OverlineSettingsDestination.self) { destination in
                 switch destination {
@@ -865,11 +884,11 @@ struct OverlineSettingsSheet: View {
                 switch result {
                 case .success:
                     backupNotice = LibraryBackupNotice(
-                        title: "백업 파일을 내보냈습니다",
-                        message: "선택한 위치에 독서 기록을 저장했습니다."
+                        title: String(localized: LocalizedStringResource("백업 파일을 내보냈습니다", locale: AppLocale.uiLocale)),
+                        message: String(localized: LocalizedStringResource("선택한 위치에 독서 기록을 저장했습니다.", locale: AppLocale.uiLocale))
                     )
                 case let .failure(error):
-                    presentBackupError(error, title: "백업 파일을 내보내지 못했습니다")
+                    presentBackupError(error, title: String(localized: LocalizedStringResource("백업 파일을 내보내지 못했습니다", locale: AppLocale.uiLocale)))
                 }
             }
             .fileImporter(
@@ -882,7 +901,7 @@ struct OverlineSettingsSheet: View {
                     guard let url = urls.first else { return }
                     loadBackup(from: url)
                 case let .failure(error):
-                    presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+                    presentBackupError(error, title: String(localized: LocalizedStringResource("백업 파일을 열지 못했습니다", locale: AppLocale.uiLocale)))
                 }
             }
             .alert(item: $backupNotice) { notice in
@@ -903,7 +922,7 @@ struct OverlineSettingsSheet: View {
             backupFilename = backupFilename(for: exportedAt)
             isBackupExporterPresented = true
         } catch {
-            presentBackupError(error, title: "백업 파일을 만들지 못했습니다")
+            presentBackupError(error, title: String(localized: LocalizedStringResource("백업 파일을 만들지 못했습니다", locale: AppLocale.uiLocale)))
         }
     }
 
@@ -918,7 +937,7 @@ struct OverlineSettingsSheet: View {
             } catch is CancellationError {
                 return
             } catch {
-                presentBackupError(error, title: "백업 파일을 열지 못했습니다")
+                presentBackupError(error, title: String(localized: LocalizedStringResource("백업 파일을 열지 못했습니다", locale: AppLocale.uiLocale)))
             }
         }
     }
@@ -934,7 +953,7 @@ struct OverlineSettingsSheet: View {
             ? " 가져오기 전 상태는 ‘최근 초기화 복구’에서 되돌릴 수 있습니다."
             : ""
         backupNotice = LibraryBackupNotice(
-            title: "보관함을 가져왔습니다",
+            title: String(localized: LocalizedStringResource("보관함을 가져왔습니다", locale: AppLocale.uiLocale)),
             message: "\(backup.summary.description)\(recoveryMessage)"
         )
     }
@@ -1108,7 +1127,7 @@ struct OverlineSettingsSheet: View {
             settings.handleRequestSuccess(configuration: configuration)
             connectionTestResult = LLMConnectionTestResult(
                 isSuccess: true,
-                message: "AI 연결 테스트 완료"
+                message: String(localized: LocalizedStringResource("AI 연결 테스트 완료", locale: AppLocale.uiLocale))
             )
             MVPReadinessStore.markVerified(
                 .llmInsight,
@@ -1557,28 +1576,28 @@ private struct PrivacyTransmissionPolicyView: View {
     private let policies: [PrivacyTransmissionPolicy] = [
         PrivacyTransmissionPolicy(
             systemImage: "iphone",
-            title: "기기 내 저장",
-            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
+            title: String(localized: LocalizedStringResource("기기 내 저장", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다.", locale: AppLocale.uiLocale))
         ),
         PrivacyTransmissionPolicy(
             systemImage: "key",
-            title: "인증 정보 보호",
-            body: "API 키는 이 기기의 iOS Keychain에 저장됩니다."
+            title: String(localized: LocalizedStringResource("인증 정보 보호", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("API 키는 이 기기의 iOS Keychain에 저장됩니다.", locale: AppLocale.uiLocale))
         ),
         PrivacyTransmissionPolicy(
             systemImage: "sparkles",
-            title: "AI로 전송되는 정보",
-            body: "인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다."
+            title: String(localized: LocalizedStringResource("AI로 전송되는 정보", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능에 필요한 글조각, 메모와 책 정보가 선택한 AI 제공자로 전송됩니다.", locale: AppLocale.uiLocale))
         ),
         PrivacyTransmissionPolicy(
             systemImage: "nosign",
-            title: "글조각 서랍의 처리",
-            body: "AI 요청은 선택한 제공자에게 직접 전송됩니다. 글조각 서랍은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다."
+            title: String(localized: LocalizedStringResource("글조각 서랍의 처리", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("AI 요청은 선택한 제공자에게 직접 전송됩니다. 글조각 서랍은 이 내용을 별도로 저장하거나 학습에 사용하지 않습니다. 제공자에서 처리되는 방식은 해당 서비스의 정책을 따릅니다.", locale: AppLocale.uiLocale))
         ),
         PrivacyTransmissionPolicy(
             systemImage: "location",
-            title: "주변 장소와 검색",
-            body: "주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 커뮤니티 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 커뮤니티 서버에는 내용을 저장하지 않습니다."
+            title: String(localized: LocalizedStringResource("주변 장소와 검색", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("주변 장소를 찾을 때 현재 위치를, 관련 글을 찾을 때 검색어를 커뮤니티 서버와 검색 제공자에게 보냅니다. 결과를 돌려준 뒤 커뮤니티 서버에는 내용을 저장하지 않습니다.", locale: AppLocale.uiLocale))
         )
     ]
 
@@ -1646,18 +1665,18 @@ private struct OverlineTermsView: View {
     private let terms: [OverlineTerm] = [
         OverlineTerm(
             systemImage: "person.crop.circle",
-            title: "개인 독서 기록",
-            body: "책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다."
+            title: String(localized: LocalizedStringResource("개인 독서 기록", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("책, 글조각, 메모와 인사이트는 이 기기에 저장됩니다. 캡처 사진은 OCR이 끝나면 삭제됩니다.", locale: AppLocale.uiLocale))
         ),
         OverlineTerm(
             systemImage: "sparkles",
-            title: "AI 기능 사용",
-            body: "인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다."
+            title: String(localized: LocalizedStringResource("AI 기능 사용", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("인사이트, 감상문 초안, 자동 태그, OCR 교정 등 AI 기능을 사용할 때 필요한 정보가 선택한 AI 제공자로 전송됩니다.", locale: AppLocale.uiLocale))
         ),
         OverlineTerm(
             systemImage: "square.and.arrow.up",
-            title: "공유 전 확인",
-            body: "책의 원문을 공유할 때에는 저작권과 인용 범위를 확인해 주세요."
+            title: String(localized: LocalizedStringResource("공유 전 확인", locale: AppLocale.uiLocale)),
+            body: String(localized: LocalizedStringResource("책의 원문을 공유할 때에는 저작권과 인용 범위를 확인해 주세요.", locale: AppLocale.uiLocale))
         )
     ]
 
@@ -1985,8 +2004,8 @@ private enum HighlightPickerMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .books: "책"
-        case .highlights: "글조각"
+        case .books: String(localized: LocalizedStringResource("책", locale: AppLocale.uiLocale))
+        case .highlights: String(localized: LocalizedStringResource("글조각", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -2002,7 +2021,7 @@ private struct HighlightPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OverlineSheetHeader(title: "글조각 선택") {
+            OverlineSheetHeader(title: String(localized: LocalizedStringResource("글조각 선택", locale: AppLocale.uiLocale))) {
                 Color.clear
             } trailing: {
                 OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
@@ -2013,7 +2032,7 @@ private struct HighlightPickerSheet: View {
             if !selectableHighlights.isEmpty {
                 VStack(spacing: 10) {
                     HighlightPickerModeControl(mode: $mode)
-                    OverlinePillSearchField(text: $searchText, prompt: "검색")
+                    OverlinePillSearchField(text: $searchText, prompt: String(localized: LocalizedStringResource("검색", locale: AppLocale.uiLocale)))
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 10)
@@ -2305,7 +2324,7 @@ private struct InsightSourceSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OverlineSheetHeader(title: "근거 글조각") {
+            OverlineSheetHeader(title: String(localized: LocalizedStringResource("근거 글조각", locale: AppLocale.uiLocale))) {
                 Color.clear
             } trailing: {
                 OverlineSheetIconButton(systemImage: "checkmark", accessibilityLabel: "완료") {
@@ -2456,7 +2475,7 @@ private struct InsightDetailSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            OverlineSheetHeader(title: "인사이트") {
+            OverlineSheetHeader(title: String(localized: LocalizedStringResource("인사이트", locale: AppLocale.uiLocale))) {
                 OverlineSheetIconButton(
                     systemImage: "trash",
                     accessibilityLabel: "인사이트 삭제",
@@ -2502,7 +2521,7 @@ private struct InsightDetailSheet: View {
                     if !sources.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             InsightSectionHeader(
-                                title: "근거 글조각",
+                                title: String(localized: LocalizedStringResource("근거 글조각", locale: AppLocale.uiLocale)),
                                 systemImage: "doc.text",
                                 trailingText: "\(sources.count)"
                             )
@@ -2640,10 +2659,10 @@ enum InsightPrompt: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .questions: "질문"
-        case .connect: "연결"
-        case .expand: "확장"
-        case .digest: "요약"
+        case .questions: String(localized: LocalizedStringResource("질문", locale: AppLocale.uiLocale))
+        case .connect: String(localized: LocalizedStringResource("연결", locale: AppLocale.uiLocale))
+        case .expand: String(localized: LocalizedStringResource("확장", locale: AppLocale.uiLocale))
+        case .digest: String(localized: LocalizedStringResource("요약", locale: AppLocale.uiLocale))
         }
     }
 

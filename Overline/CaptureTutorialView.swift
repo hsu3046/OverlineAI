@@ -5,23 +5,23 @@ enum CaptureTutorialStep: Int {
 
     var title: String {
         switch self {
-        case .addBook: "책 등록하기"
-        case .bookForm: "책 정보 입력하기"
-        case .chooseBook: "저장할 책 선택하기"
-        case .capture: "책 페이지 캡처하기"
-        case .selection: "문장 선택하기"
-        case .saved: "글조각 활용하기"
+        case .addBook: String(localized: LocalizedStringResource("책 등록하기", locale: AppLocale.uiLocale))
+        case .bookForm: String(localized: LocalizedStringResource("책 정보 입력하기", locale: AppLocale.uiLocale))
+        case .chooseBook: String(localized: LocalizedStringResource("저장할 책 선택하기", locale: AppLocale.uiLocale))
+        case .capture: String(localized: LocalizedStringResource("책 페이지 캡처하기", locale: AppLocale.uiLocale))
+        case .selection: String(localized: LocalizedStringResource("문장 선택하기", locale: AppLocale.uiLocale))
+        case .saved: String(localized: LocalizedStringResource("글조각 활용하기", locale: AppLocale.uiLocale))
         }
     }
 
     var message: String {
         switch self {
-        case .addBook: "위의 + 버튼으로 읽고 있는 책을 등록하세요."
-        case .bookForm: "책을 검색하거나 책 이름을 직접 입력한 뒤, 오른쪽 위 체크를 누르세요. 등록한 책은 내 책장에 남습니다."
-        case .chooseBook: "위에서 글조각을 담을 책을 선택하세요. 지금 표시된 책에 저장됩니다."
-        case .capture: "글 캡처를 누르거나 오른쪽 사진 버튼으로 책 페이지를 불러오세요."
-        case .selection: "문장에 밑줄이나 네모를 그려보세요. 손을 떼면 자동으로 인식해 저장합니다."
-        case .saved: "저장한 글조각은 책장에서 메모를 더하거나 음성으로 들을 수 있어요. 인사이트에서 생각을 정리해보세요. 지우개는 화면의 선택만 지웁니다."
+        case .addBook: String(localized: LocalizedStringResource("위의 + 버튼으로 읽고 있는 책을 등록하세요.", locale: AppLocale.uiLocale))
+        case .bookForm: String(localized: LocalizedStringResource("책을 검색하거나 책 이름을 직접 입력한 뒤, 오른쪽 위 체크를 누르세요. 등록한 책은 내 책장에 남습니다.", locale: AppLocale.uiLocale))
+        case .chooseBook: String(localized: LocalizedStringResource("위에서 글조각을 담을 책을 선택하세요. 지금 표시된 책에 저장됩니다.", locale: AppLocale.uiLocale))
+        case .capture: String(localized: LocalizedStringResource("글 캡처를 누르거나 오른쪽 사진 버튼으로 책 페이지를 불러오세요.", locale: AppLocale.uiLocale))
+        case .selection: String(localized: LocalizedStringResource("문장에 밑줄이나 네모를 그려보세요. 손을 떼면 자동으로 인식해 저장합니다.", locale: AppLocale.uiLocale))
+        case .saved: String(localized: LocalizedStringResource("저장한 글조각은 책장에서 메모를 더하거나 음성으로 들을 수 있어요. 인사이트에서 생각을 정리해보세요. 지우개는 화면의 선택만 지웁니다.", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -104,7 +104,7 @@ struct CaptureTutorialTip: View {
                         .foregroundStyle(Color.tutorialSecondary.opacity(step == .addBook ? 0.4 : 1))
                         .disabled(step == .addBook)
                         .frame(minWidth: 44, minHeight: 44)
-                    Button(step == .saved ? "완료" : "다음") { tutorial?.next() }
+                    Button(step == .saved ? String(localized: LocalizedStringResource("완료", locale: AppLocale.uiLocale)) : String(localized: LocalizedStringResource("다음", locale: AppLocale.uiLocale))) { tutorial?.next() }
                         .font(.overline(.subheadline, weight: .bold))
                         .foregroundStyle(Color.overlineInk)
                         .frame(minWidth: 88, minHeight: 44)

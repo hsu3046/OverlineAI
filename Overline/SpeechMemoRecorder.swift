@@ -22,7 +22,6 @@ final class SpeechMemoRecorder {
     var state: SpeechMemoState = .idle
     var transcript = ""
 
-    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ko-KR"))
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -45,22 +44,22 @@ final class SpeechMemoRecorder {
         transcript = ""
 
         guard await requestSpeechAuthorization() else {
-            state = .failed("음성 인식 권한이 필요합니다.")
+            state = .failed(String(localized: LocalizedStringResource("음성 인식 권한이 필요합니다.", locale: AppLocale.uiLocale)))
             return
         }
 
         guard await requestMicrophoneAuthorization() else {
-            state = .failed("마이크 권한이 필요합니다.")
+            state = .failed(String(localized: LocalizedStringResource("마이크 권한이 필요합니다.", locale: AppLocale.uiLocale)))
             return
         }
 
-        guard let recognizer, recognizer.isAvailable else {
-            state = .failed("지금은 음성 인식을 사용할 수 없습니다.")
+        guard let recognizer = SFSpeechRecognizer(locale: AppLocale.speechLocale), recognizer.isAvailable else {
+            state = .failed(String(localized: LocalizedStringResource("지금은 음성 인식을 사용할 수 없습니다.", locale: AppLocale.uiLocale)))
             return
         }
 
         guard recognizer.supportsOnDeviceRecognition else {
-            state = .failed("이 기기에서는 온디바이스 음성 인식을 사용할 수 없습니다.")
+            state = .failed(String(localized: LocalizedStringResource("이 기기에서는 온디바이스 음성 인식을 사용할 수 없습니다.", locale: AppLocale.uiLocale)))
             return
         }
 
@@ -69,7 +68,7 @@ final class SpeechMemoRecorder {
             state = .recording
         } catch {
             stopRecording()
-            state = .failed("음성 메모를 시작할 수 없습니다.")
+            state = .failed(String(localized: LocalizedStringResource("음성 메모를 시작할 수 없습니다.", locale: AppLocale.uiLocale)))
         }
     }
 

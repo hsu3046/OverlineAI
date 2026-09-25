@@ -27,7 +27,7 @@ struct HighlightTonePicker: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(tone.accessibilityName) 형광펜")
+                .accessibilityLabel(String(format: String(localized: LocalizedStringResource("%@ 형광펜", locale: AppLocale.uiLocale)), tone.accessibilityName))
                 .accessibilityAddTraits(selectedTone == tone ? [.isSelected] : [])
             }
         }

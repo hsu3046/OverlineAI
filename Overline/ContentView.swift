@@ -44,6 +44,7 @@ struct ContentView: View {
             .environment(\.selectAppTab, selectTab)
             .environment(\.captureTutorial, tutorial)
             .onAppear {
+                WidgetSnapshotPublisher.publish(books: library.books)
                 if !didCheckTutorial {
                     didCheckTutorial = true
                     if !UserDefaults.standard.bool(forKey: CaptureTutorial.completedKey), intentRouter.request == nil {
@@ -99,6 +100,15 @@ struct ContentView: View {
             }
             .onChange(of: intentRouter.request) { _, request in
                 apply(request)
+            }
+            .onOpenURL { url in
+                guard let link = WidgetLink(url: url) else { return }
+                switch link {
+                case .capture: intentRouter.open(.capture)
+                case .book(let id): intentRouter.open(.library, bookID: id)
+                case .quote(let id): intentRouter.open(.library, highlightID: id)
+                case .rankings(let kind): intentRouter.open(.community, rankingKind: kind)
+                }
             }
     }
 
@@ -168,7 +178,9 @@ struct ContentView: View {
     private func apply(_ request: AppIntentRequest?) {
         guard let request else { return }
         tutorial.step = nil
-        selectTab(request.tab)
+        if selectedTab != request.tab || (request.bookID == nil && request.highlightID == nil) {
+            selectTab(request.tab)
+        }
     }
 
     private func setBottomMenuCompact(_ isCompact: Bool) {
@@ -457,10 +469,10 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .capture: "캡처"
-        case .library: "책장"
-        case .insights: "인사이트"
-        case .community: "커뮤니티"
+        case .capture: String(localized: LocalizedStringResource("캡처", locale: AppLocale.uiLocale))
+        case .library: String(localized: LocalizedStringResource("책장", locale: AppLocale.uiLocale))
+        case .insights: String(localized: LocalizedStringResource("인사이트", locale: AppLocale.uiLocale))
+        case .community: String(localized: LocalizedStringResource("커뮤니티", locale: AppLocale.uiLocale))
         }
     }
 

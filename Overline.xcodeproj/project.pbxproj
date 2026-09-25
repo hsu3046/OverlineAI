@@ -7,10 +7,36 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BA0909000000000000000001 /* BZOGAKWidgets.appex in Embed Widgets */ = {isa = PBXBuildFile; fileRef = BA0909000000000000000002 /* BZOGAKWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		EC56B1902FF0000100188824 /* onnxruntime in Frameworks */ = {isa = PBXBuildFile; productRef = EC56B1922FF0000100188824 /* onnxruntime */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		BA090900000000000000000E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC56B1662FEBE5AF00188824 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BA0909000000000000000008;
+			remoteInfo = BZOGAKWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BA0909000000000000000006 /* Embed Widgets */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BA0909000000000000000001 /* BZOGAKWidgets.appex in Embed Widgets */,
+			);
+			name = "Embed Widgets";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		BA0909000000000000000002 /* BZOGAKWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BZOGAKWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC56B16E2FEBE5AF00188824 /* BZOGAK.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BZOGAK.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC56B1802FECC00000188824 /* Overline.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Overline.xcconfig; sourceTree = "<group>"; };
 		EC56B1812FECC00000188824 /* Secrets.example.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.example.xcconfig; sourceTree = "<group>"; };
@@ -18,6 +44,16 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		BA0909000000000000000003 /* WidgetShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = WidgetShared;
+			sourceTree = "<group>";
+		};
+		BA0909000000000000000004 /* BZOGAKWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = BZOGAKWidgets;
+			sourceTree = "<group>";
+		};
 		EC56B1702FEBE5AF00188824 /* Overline */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Overline;
@@ -26,6 +62,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		BA0909000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		EC56B16B2FEBE5AF00188824 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -41,6 +84,8 @@
 			isa = PBXGroup;
 			children = (
 				EC56B1822FECC00000188824 /* Config */,
+				BA0909000000000000000003 /* WidgetShared */,
+				BA0909000000000000000004 /* BZOGAKWidgets */,
 				EC56B1702FEBE5AF00188824 /* Overline */,
 				EC56B16F2FEBE5AF00188824 /* Products */,
 			);
@@ -50,6 +95,7 @@
 			isa = PBXGroup;
 			children = (
 				EC56B16E2FEBE5AF00188824 /* BZOGAK.app */,
+				BA0909000000000000000002 /* BZOGAKWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -67,6 +113,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		BA0909000000000000000008 /* BZOGAKWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BA0909000000000000000009 /* Build configuration list for PBXNativeTarget "BZOGAKWidgets" */;
+			buildPhases = (
+				BA090900000000000000000A /* Sources */,
+				BA0909000000000000000005 /* Frameworks */,
+				BA090900000000000000000B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				BA0909000000000000000003 /* WidgetShared */,
+				BA0909000000000000000004 /* BZOGAKWidgets */,
+			);
+			name = BZOGAKWidgets;
+			productName = BZOGAKWidgets;
+			productReference = BA0909000000000000000002 /* BZOGAKWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		EC56B16D2FEBE5AF00188824 /* Overline */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = EC56B1792FEBE5B100188824 /* Build configuration list for PBXNativeTarget "Overline" */;
@@ -75,12 +142,15 @@
 				EC56B16B2FEBE5AF00188824 /* Frameworks */,
 				EC56B16C2FEBE5AF00188824 /* Resources */,
 				EC56B1942FF0000200188824 /* Fix and Sign ONNX Runtime */,
+				BA0909000000000000000006 /* Embed Widgets */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BA0909000000000000000007 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				BA0909000000000000000003 /* WidgetShared */,
 				EC56B1702FEBE5AF00188824 /* Overline */,
 			);
 			name = Overline;
@@ -111,6 +181,8 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				ko,
+				ja,
+				en,
 				Base,
 			);
 			mainGroup = EC56B1652FEBE5AF00188824;
@@ -123,12 +195,20 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				BA0909000000000000000008 /* BZOGAKWidgets */,
 				EC56B16D2FEBE5AF00188824 /* Overline */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		BA090900000000000000000B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		EC56B16C2FEBE5AF00188824 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -162,6 +242,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		BA090900000000000000000A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		EC56B16A2FEBE5AF00188824 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -171,7 +258,67 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		BA0909000000000000000007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BA0909000000000000000008 /* BZOGAKWidgets */;
+			targetProxy = BA090900000000000000000E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		BA090900000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Config/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Widgets-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BA090900000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Config/Widgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/Widgets-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.2;
+				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		EC56B1772FEBE5B100188824 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -297,8 +444,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/Overline.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -308,7 +456,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
 				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -327,8 +475,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Config/Overline.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 9BF5ZBVYYF;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -338,7 +487,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = vote.aib.bzogak.ios;
 				PRODUCT_NAME = BZOGAK;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -354,6 +503,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		BA0909000000000000000009 /* Build configuration list for PBXNativeTarget "BZOGAKWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA090900000000000000000C /* Debug */,
+				BA090900000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		EC56B1692FEBE5AF00188824 /* Build configuration list for PBXProject "Overline" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -10,6 +10,7 @@ nonisolated struct BookMetadataCandidate: Identifiable, Hashable, Decodable {
     let isbn: String
     let coverURLString: String
     let source: BookMetadataSource
+    let detailURL: String?
 
     var sourceTitle: String {
         switch source {
@@ -19,8 +20,14 @@ nonisolated struct BookMetadataCandidate: Identifiable, Hashable, Decodable {
             "Kakao"
         case .aladin:
             "Aladin"
+        case .yes24:
+            "YES24"
+        case .rakuten:
+            "Rakuten Books"
         case .google:
             "Google"
+        case .openLibrary:
+            "Open Library"
         }
     }
 }
@@ -45,7 +52,7 @@ nonisolated struct BookMetadataSearchClient {
 
         let response: BookMetadataServerResponse = try await apiClient.post(
             path: "api/v1/books/search",
-            body: BookMetadataServerRequest(query: trimmedQuery)
+            body: BookMetadataServerRequest(query: trimmedQuery, language: AppLocale.languageCode)
         )
         return BookMetadataSearchResult(
             candidates: response.items,
@@ -56,6 +63,7 @@ nonisolated struct BookMetadataSearchClient {
 
 nonisolated private struct BookMetadataServerRequest: Encodable {
     let query: String
+    let language: String
 }
 
 nonisolated private struct BookMetadataServerResponse: Decodable {
