@@ -1733,19 +1733,20 @@ private extension ReadingBook {
 }
 
 private func readingRecordShareDateRange(for record: ReadingRecord) -> String {
-    let start = readingRecordShareDateFormatter.string(from: record.startedAt)
+    let formatter = readingRecordShareDateFormatter()
+    let start = formatter.string(from: record.startedAt)
     guard let endedAt = record.endedAt else { return start }
-    let end = readingRecordShareDateFormatter.string(from: endedAt)
+    let end = formatter.string(from: endedAt)
     return start == end ? start : "\(start) - \(end)"
 }
 
-private let readingRecordShareDateFormatter: DateFormatter = {
+private func readingRecordShareDateFormatter() -> DateFormatter {
     let formatter = DateFormatter()
-    formatter.locale = .current
+    formatter.locale = AppLocale.uiLocale
     formatter.calendar = Calendar(identifier: .gregorian)
     formatter.dateStyle = .medium
     return formatter
-}()
+}
 
 private struct HighlighterStroke: View {
     var body: some View {

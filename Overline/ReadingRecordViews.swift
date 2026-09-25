@@ -1014,16 +1014,17 @@ private func evenlySampled<T>(_ values: [T], maximumCount: Int) -> [T] {
 }
 
 private func readingDateRangeText(for record: ReadingRecord) -> String {
-    let start = readingRecordDateFormatter.string(from: record.startedAt)
+    let formatter = readingRecordDateFormatter()
+    let start = formatter.string(from: record.startedAt)
     guard let endedAt = record.endedAt else { return start }
-    let end = readingRecordDateFormatter.string(from: endedAt)
+    let end = formatter.string(from: endedAt)
     return start == end ? start : "\(start) - \(end)"
 }
 
-private let readingRecordDateFormatter: DateFormatter = {
+private func readingRecordDateFormatter() -> DateFormatter {
     let formatter = DateFormatter()
-    formatter.locale = .current
+    formatter.locale = AppLocale.uiLocale
     formatter.calendar = Calendar(identifier: .gregorian)
     formatter.dateStyle = .medium
     return formatter
-}()
+}

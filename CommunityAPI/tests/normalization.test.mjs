@@ -28,6 +28,7 @@ import { normalizeGoogleBooks, normalizeGooglePlaces } from "../.build/lib/provi
 import { normalizeOpenLibraryBooks, rankOpenLibraryBooks } from "../.build/lib/providers/openlibrary.js";
 import { buildRakutenBookSearchURL, normalizeRakutenBooks } from "../.build/lib/providers/rakuten.js";
 import { normalizeYes24Books } from "../.build/lib/providers/yes24.js";
+import { searchCachedRakutenBooks } from "../.build/lib/rakuten-cache.js";
 import rankingsHandler from "../.build/api/v1/rankings.js";
 import searchBooksHandler from "../.build/api/v1/books/search.js";
 import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
@@ -322,6 +323,39 @@ test("pending Rakuten bridge uses Open Library without a direct Rakuten call", a
       ["KNOWAI_RAKUTEN_SEARCH_URL", previousURL],
       ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
       ["GOOGLE_BOOKS_API_KEY", previousGoogle],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("Rakuten cache rejects incomplete book metadata and invalid detail URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RAKUTEN_SEARCH_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  process.env.KNOWAI_RAKUTEN_SEARCH_URL = "https://www.aib.vote/api/x/bzogak-book-search";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  const complete = {
+    source: "rakuten", id: "book-1", title: "本", author: "著者", summary: "",
+    publisher: "出版社", publishedDate: "", isbn: "9784003101018", coverURLString: "",
+  };
+  try {
+    for (const field of ["summary", "publisher", "publishedDate", "coverURLString"]) {
+      const invalid = { ...complete };
+      delete invalid[field];
+      globalThis.fetch = async () => Response.json({ items: [invalid] });
+      await assert.rejects(searchCachedRakutenBooks("本"), /invalid_rakuten_cache/);
+    }
+    globalThis.fetch = async () => Response.json({ items: [{ ...complete, detailURL: 42 }] });
+    await assert.rejects(searchCachedRakutenBooks("本"), /invalid_rakuten_cache/);
+    globalThis.fetch = async () => Response.json({ items: [complete] });
+    assert.equal((await searchCachedRakutenBooks("本"))[0].id, "book-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RAKUTEN_SEARCH_URL", previousURL],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
     ]) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

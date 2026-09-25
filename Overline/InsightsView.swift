@@ -818,6 +818,7 @@ struct OverlineSettingsSheet: View {
             .onChange(of: languageSelection) { _, selection in
                 AppLocale.setLanguageSelection(selection)
                 WidgetCenter.shared.reloadTimelines(ofKind: WidgetStore.rankingKind)
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetStore.quoteKind)
             }
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: OverlineSettingsDestination.self) { destination in

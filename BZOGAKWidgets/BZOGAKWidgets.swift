@@ -35,6 +35,7 @@ struct QuoteEntry: TimelineEntry {
     let date: Date
     let quote: WidgetQuote?
     let books: [WidgetBook]
+    var languageCode = "ko"
     var unavailable = false
     var coverData: Data? = nil
 }
@@ -49,13 +50,14 @@ struct QuoteProvider: AppIntentTimelineProvider {
         await Timeline(entries: entries(configuration: configuration, now: .now, family: context.family), policy: .atEnd)
     }
     private func entries(configuration: QuoteConfiguration, now: Date, family: WidgetFamily, snapshotOnly: Bool = false) async -> [QuoteEntry] {
+        let language = WidgetLanguage.current
         do {
             let snapshot = try WidgetStore().readSnapshot()
             let bookID = configuration.book.flatMap { UUID(uuidString: $0.id) }
             let candidates = snapshot.candidates(bookID: bookID)
             let dates = snapshotOnly ? [now] : QuoteSchedule.dates(from: now)
             var entries = dates.map {
-                QuoteEntry(date: $0, quote: QuoteSchedule.quote(in: candidates, at: $0), books: Array(snapshot.readingBooks.prefix(2)))
+                QuoteEntry(date: $0, quote: QuoteSchedule.quote(in: candidates, at: $0), books: Array(snapshot.readingBooks.prefix(2)), languageCode: language)
             }
             if family == .systemLarge {
                 // A timeline can reference 50 books; fetch at most three covers before WidgetKit's deadline.
@@ -69,8 +71,8 @@ struct QuoteProvider: AppIntentTimelineProvider {
             }
             return entries
         } catch {
-            return [QuoteEntry(date: now, quote: nil, books: [], unavailable: true),
-                    QuoteEntry(date: now.addingTimeInterval(3600), quote: nil, books: [], unavailable: true)]
+            return [QuoteEntry(date: now, quote: nil, books: [], languageCode: language, unavailable: true),
+                    QuoteEntry(date: now.addingTimeInterval(3600), quote: nil, books: [], languageCode: language, unavailable: true)]
         }
     }
 }
@@ -92,6 +94,7 @@ struct QuoteWidgetView: View {
         .foregroundStyle(.primary)
         .containerBackground(for: .widget) { widgetBackground }
         .widgetURL(entry.quote.map { WidgetLink.quote($0.id).url } ?? WidgetLink.capture.url)
+        .environment(\.locale, Locale(identifier: entry.languageCode))
     }
 
     private var quoteContent: some View {
@@ -140,8 +143,13 @@ struct QuoteWidgetView: View {
                 }
             } else {
                 Spacer(minLength: 0)
-                Text(entry.unavailable ? "앱을 열어 글조각을 불러오세요" : "마음에 남은 문장을 담아보세요")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                if entry.unavailable {
+                    Text("앱을 열어 글조각을 불러오세요")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text("마음에 남은 문장을 담아보세요")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 0)
             }
 
@@ -417,8 +425,13 @@ struct RankingWidgetView: View {
                     }.font(.subheadline)
                 }
             } else {
-                Text(entry.failed ? "순위를 불러오지 못했어요" : "표시할 순위가 없어요")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                if entry.failed {
+                    Text("순위를 불러오지 못했어요")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text("표시할 순위가 없어요")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
             HStack {
@@ -459,7 +472,7 @@ enum WidgetSamples {
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, bookID: book.id,
         text: "한 조각씩 쌓인 문장들이 나만의 생각으로 성장합니다.", bookTitle: book.title,
         author: "글조각 서랍", page: "p.128", tone: "yellow", createdAt: .now
-    ), books: [book])
+    ), books: [book], languageCode: WidgetLanguage.current)
     static let rankingEntry = RankingEntry(date: .now, kind: .bestseller, data: WidgetRankings(
         items: (1...3).map { WidgetRankingItem(id: "preview-\($0)", rank: $0, title: "새롭게 만날 책 \($0)", author: "작가") },
         fetchedAt: "2026-09-09T00:00:00Z", cachedAt: .now

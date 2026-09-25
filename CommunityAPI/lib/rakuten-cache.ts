@@ -29,7 +29,12 @@ export async function searchCachedRakutenBooks(query: string): Promise<BookMetad
       && typeof book.id === "string"
       && typeof book.title === "string"
       && typeof book.author === "string"
-      && typeof book.isbn === "string";
+      && typeof book.summary === "string"
+      && typeof book.publisher === "string"
+      && typeof book.publishedDate === "string"
+      && typeof book.isbn === "string"
+      && typeof book.coverURLString === "string"
+      && (book.detailURL === undefined || typeof book.detailURL === "string");
   })) {
     throw new Error("invalid_rakuten_cache");
   }
