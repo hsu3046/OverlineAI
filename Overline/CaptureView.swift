@@ -725,7 +725,11 @@ struct CaptureView: View {
     private func recognizeSelectedPhoto() async {
         guard let selectedPhotoItem else { return }
         isRecognizingText = true
-        defer { isRecognizingText = false }
+        defer {
+            isRecognizingText = false
+            // Clearing the completed selection lets PhotosPicker retry the same image.
+            if self.selectedPhotoItem == selectedPhotoItem { self.selectedPhotoItem = nil }
+        }
 
         do {
             guard
@@ -741,7 +745,6 @@ struct CaptureView: View {
             captureMessage = nil
             importedPhotoRevision += 1
             resetCaptureTimer()
-            self.selectedPhotoItem = nil
         } catch is CancellationError {
             return
         } catch {
@@ -3156,10 +3159,16 @@ private struct CompletedCameraCaptureActions: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            actionButton("새로 밑줄긋기", systemImage: "plus", action: startNew)
+            actionButton(
+                String(localized: LocalizedStringResource("새로 밑줄긋기", locale: AppLocale.uiLocale)),
+                systemImage: "plus", action: startNew
+            )
 
             if canContinue {
-                actionButton("이어서 밑줄긋기", systemImage: "text.append", action: continueCapture)
+                actionButton(
+                    String(localized: LocalizedStringResource("이어서 밑줄긋기", locale: AppLocale.uiLocale)),
+                    systemImage: "text.append", action: continueCapture
+                )
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
             CameraSelectionEraserButton(isEnabled: canErase, action: erase)

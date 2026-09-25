@@ -13,7 +13,11 @@ function isItem(value: unknown, source: RankingSource): value is CommunityRankin
     && typeof item.author === "string"
     && item.source === source
     && Number.isSafeInteger(item.rank)
-    && Number(item.rank) > 0;
+    && Number(item.rank) > 0
+    && ["publisher", "publishedDate", "isbn13", "coverURL", "detailURL"].every(
+      (field) => item[field] === undefined || typeof item[field] === "string",
+    )
+    && (item.loanCount === undefined || (Number.isSafeInteger(item.loanCount) && Number(item.loanCount) >= 0));
 }
 
 /**

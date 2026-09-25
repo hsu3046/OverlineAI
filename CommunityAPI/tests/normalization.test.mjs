@@ -29,6 +29,7 @@ import { normalizeOpenLibraryBooks, rankOpenLibraryBooks } from "../.build/lib/p
 import { buildRakutenBookSearchURL, normalizeRakutenBooks } from "../.build/lib/providers/rakuten.js";
 import { normalizeYes24Books } from "../.build/lib/providers/yes24.js";
 import { searchCachedRakutenBooks } from "../.build/lib/rakuten-cache.js";
+import { readRankingSnapshot } from "../.build/lib/ranking-snapshot.js";
 import rankingsHandler from "../.build/api/v1/rankings.js";
 import searchBooksHandler from "../.build/api/v1/books/search.js";
 import { buildNaverBlogRequest } from "../.build/lib/providers/naver.js";
@@ -142,6 +143,42 @@ test("ranking snapshot serves page 2 from one 100-item cache without calling pro
     assert.equal(body.items[0].rank, 21);
     assert.equal(body.fetchedAt, fetchedAt);
     assert.equal(requested.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of [
+      ["KNOWAI_RANKING_CACHE_URL", previousURL],
+      ["BZOGAK_BOOK_BRIDGE_SECRET", previousSecret],
+    ]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("ranking snapshots reject invalid optional metadata before Swift decoding", async () => {
+  const originalFetch = globalThis.fetch;
+  const previousURL = process.env.KNOWAI_RANKING_CACHE_URL;
+  const previousSecret = process.env.BZOGAK_BOOK_BRIDGE_SECRET;
+  process.env.KNOWAI_RANKING_CACHE_URL = "https://www.aib.vote/api/x/bzogak-rankings";
+  process.env.BZOGAK_BOOK_BRIDGE_SECRET = "test-secret";
+  const base = { id: "book-1", rank: 1, title: "책", author: "작가", source: "yes24" };
+  try {
+    for (const field of ["publisher", "publishedDate", "isbn13", "coverURL", "detailURL"]) {
+      globalThis.fetch = async () => Response.json({
+        fetchedAt: new Date().toISOString(), items: [{ ...base, [field]: 42 }],
+      });
+      await assert.rejects(readRankingSnapshot("yes24", "all"), /invalid_or_expired_ranking_snapshot/);
+    }
+    for (const loanCount of ["3", 1.5, -1, null]) {
+      globalThis.fetch = async () => Response.json({
+        fetchedAt: new Date().toISOString(), items: [{ ...base, loanCount }],
+      });
+      await assert.rejects(readRankingSnapshot("yes24", "all"), /invalid_or_expired_ranking_snapshot/);
+    }
+    globalThis.fetch = async () => Response.json({
+      fetchedAt: new Date().toISOString(), items: [{ ...base, publisher: "출판사", loanCount: 3 }],
+    });
+    assert.equal((await readRankingSnapshot("yes24", "all")).items[0].loanCount, 3);
   } finally {
     globalThis.fetch = originalFetch;
     for (const [key, value] of [

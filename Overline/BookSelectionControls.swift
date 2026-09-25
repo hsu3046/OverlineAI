@@ -226,7 +226,7 @@ struct OverlineBookPickerSheet: View {
                             } label: {
                                 OverlineBookPickerRow(
                                     systemImage: "plus",
-                                    title: "책 추가",
+                                    title: String(localized: LocalizedStringResource("책 추가", locale: AppLocale.uiLocale)),
                                     subtitle: nil,
                                     trailingText: nil,
                                     isSelected: false,
