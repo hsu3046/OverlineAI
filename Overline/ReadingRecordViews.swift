@@ -774,7 +774,12 @@ private struct ReadingRatingPicker: View {
             InteractiveReadingRatingStars(rating: $rating)
                 .frame(maxWidth: .infinity)
 
-            Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "")
+            Text(rating > 0
+                ? String(localized: LocalizedStringResource(
+                    "\(rating.formatted(.number.precision(.fractionLength(1)).locale(AppLocale.uiLocale)))점",
+                    locale: AppLocale.uiLocale
+                ))
+                : "")
                 .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
                 .monospacedDigit()
