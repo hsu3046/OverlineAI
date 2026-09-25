@@ -204,13 +204,13 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard granted else {
-                    self?.notifyUnavailable("ISBN 스캔을 사용하려면 카메라 권한이 필요합니다.")
+                    self?.notifyUnavailable(String(localized: LocalizedStringResource("ISBN 스캔을 사용하려면 카메라 권한이 필요합니다.", locale: AppLocale.uiLocale)))
                     return
                 }
                 self?.configureAndStart()
             }
         default:
-            notifyUnavailable("카메라 권한이 꺼져 있어 ISBN을 직접 입력해 주세요.")
+            notifyUnavailable(String(localized: LocalizedStringResource("카메라 권한이 꺼져 있어 ISBN을 직접 입력해 주세요.", locale: AppLocale.uiLocale)))
             return
         }
     }
@@ -229,7 +229,7 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
                 let input = try? AVCaptureDeviceInput(device: camera),
                 session.canAddInput(input)
             else {
-                notifyUnavailable("이 기기에서는 ISBN 스캔 카메라를 사용할 수 없습니다.")
+                notifyUnavailable(String(localized: LocalizedStringResource("이 기기에서는 ISBN 스캔 카메라를 사용할 수 없습니다.", locale: AppLocale.uiLocale)))
                 return
             }
 
@@ -242,7 +242,7 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
             let metadataOutput = AVCaptureMetadataOutput()
             guard session.canAddOutput(metadataOutput) else {
                 session.commitConfiguration()
-                notifyUnavailable("ISBN 바코드 스캔을 시작할 수 없습니다.")
+                notifyUnavailable(String(localized: LocalizedStringResource("ISBN 바코드 스캔을 시작할 수 없습니다.", locale: AppLocale.uiLocale)))
                 return
             }
 
@@ -254,7 +254,7 @@ private final class ISBNScannerViewController: UIViewController, AVCaptureMetada
 
             guard !supportedTypes.isEmpty else {
                 session.commitConfiguration()
-                notifyUnavailable("이 기기에서는 ISBN 바코드 형식을 스캔할 수 없습니다.")
+                notifyUnavailable(String(localized: LocalizedStringResource("이 기기에서는 ISBN 바코드 형식을 스캔할 수 없습니다.", locale: AppLocale.uiLocale)))
                 return
             }
 

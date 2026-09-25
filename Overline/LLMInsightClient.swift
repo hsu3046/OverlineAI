@@ -71,24 +71,24 @@ enum LLMInsightError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingCredential(let provider, let mode):
-            "\(provider) \(mode.title)를 먼저 설정해 주세요."
+            String(format: String(localized: LocalizedStringResource("%@ %@를 먼저 설정해 주세요.", locale: AppLocale.uiLocale)), provider, mode.title)
         case .invalidURL:
-            "요청 주소를 만들 수 없습니다."
+            String(localized: LocalizedStringResource("요청 주소를 만들 수 없습니다.", locale: AppLocale.uiLocale))
         case .invalidResponse:
-            "AI 응답 형식이 예상과 다릅니다."
+            String(localized: LocalizedStringResource("AI 응답 형식이 예상과 다릅니다.", locale: AppLocale.uiLocale))
         case .timedOut:
-            "AI 응답이 지연되고 있습니다. 네트워크나 모델 상태를 확인한 뒤 다시 시도해 주세요."
+            String(localized: LocalizedStringResource("AI 응답이 지연되고 있습니다. 네트워크나 모델 상태를 확인한 뒤 다시 시도해 주세요.", locale: AppLocale.uiLocale))
         case .networkUnavailable:
-            "AI 서비스에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요."
+            String(localized: LocalizedStringResource("AI 서비스에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.", locale: AppLocale.uiLocale))
         case .emptyResponse:
-            "AI가 비어 있는 응답을 반환했습니다."
+            String(localized: LocalizedStringResource("AI가 비어 있는 응답을 반환했습니다.", locale: AppLocale.uiLocale))
         case .unsafeCorrection:
-            "AI 교정 결과가 원문과 너무 달라 적용하지 않았어요."
+            String(localized: LocalizedStringResource("AI 교정 결과가 원문과 너무 달라 적용하지 않았어요.", locale: AppLocale.uiLocale))
         case .requestFailed(let statusCode, let message):
             if message.isEmpty {
-                "AI 요청이 실패했습니다. (\(statusCode))"
+                String(format: String(localized: LocalizedStringResource("AI 요청이 실패했습니다. (%lld)", locale: AppLocale.uiLocale)), statusCode)
             } else {
-                "AI 요청이 실패했습니다. (\(statusCode)) \(message)"
+                String(format: String(localized: LocalizedStringResource("AI 요청이 실패했습니다. (%lld) %@", locale: AppLocale.uiLocale)), statusCode, message)
             }
         }
     }
@@ -431,6 +431,26 @@ struct LLMInsightClient {
     }
 
     private func systemPrompt(for request: LLMInsightRequest) -> String {
+        if AppLocale.languageCode != "ko" {
+            let outputLanguage = AppLocale.languageCode == "ja" ? "Japanese" : "English"
+            if request.category == "OCR교정" {
+                return """
+                You correct OCR from book pages. Preserve the original language, meaning, wording, order, and style.
+                Correct only clear OCR errors, spacing, punctuation, quotation marks, and line breaks.
+                Never translate, summarize, paraphrase, or invent text. Keep uncertain proper nouns unchanged.
+                Return JSON only: {"correctedText":"full corrected text","changes":["short change description"],"risk":"low|medium|high"}.
+                Write change descriptions in \(outputLanguage).
+                """
+            }
+            return """
+            You are BZOGAK's reading insight assistant. Write the final answer in \(outputLanguage).
+            Use the user's selected quotes as primary evidence. Book metadata is background context only.
+            Do not invent events, claims, numbers, or author intentions. Do not quote long passages.
+            If OCR starts or ends mid-sentence, write a natural complete sentence without inventing facts.
+            Return only the final text, without a preface, apology, or explanation.
+            \(localizedModePrompt(for: request))
+            """
+        }
         if request.category == "OCR교정" {
             return """
             당신은 BZOGAK의 OCR 교정 엔진입니다.
@@ -632,6 +652,25 @@ struct LLMInsightClient {
             작업 지시: \(request.instruction)
             답변은 선택한 글조각과 책 맥락만 근거로 2-4문장으로 작성하세요.
             """
+        }
+    }
+
+    private func localizedModePrompt(for request: LLMInsightRequest) -> String {
+        switch request.category {
+        case "질문":
+            return "Write 1–3 short, open-ended questions that help the reader think further about the selected quotes."
+        case "연결":
+            return "In 2–4 sentences, explain a meaningful pattern or contrast connecting the selected quotes."
+        case "확장":
+            return "In 2–4 sentences, suggest a careful counterpoint or a promising direction for further thought."
+        case "요약":
+            return "Summarize the central meaning of the selected quotes in one natural paragraph of 2–3 sentences."
+        case "태그":
+            return "Return only JSON in the form {\"tags\":[\"tag1\",\"tag2\"]}. Use 2–4 short, specific nouns in the requested language, without # signs."
+        case "독서 감상문":
+            return "Write a 600–1,000 character review draft based only on the selected quotes. Do not invent the reader's experiences or feelings. Return prose only."
+        default:
+            return "Follow this task instruction and answer in 2–4 sentences: \(request.instruction)"
         }
     }
 

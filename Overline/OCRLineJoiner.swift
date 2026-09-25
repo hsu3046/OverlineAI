@@ -43,7 +43,8 @@ nonisolated enum OCRLineJoiner {
     private static func endsWithSpacingPunctuation(_ text: String) -> Bool {
         let trimmedText = text.trimmed
         guard let lastCharacter = trimmedText.last else { return false }
-        if ".!?;:,。！？；：、，".contains(lastCharacter) {
+        // Japanese full-width punctuation does not introduce a word-separating space.
+        if ".!?;:,".contains(lastCharacter) {
             return true
         }
 
@@ -51,7 +52,7 @@ nonisolated enum OCRLineJoiner {
         let strippedText = trimmedText
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"”’'」』").union(.whitespacesAndNewlines))
         guard let previousCharacter = strippedText.last else { return false }
-        return ".!?;:,。！？；：、，".contains(previousCharacter)
+        return ".!?;:,".contains(previousCharacter)
     }
 }
 

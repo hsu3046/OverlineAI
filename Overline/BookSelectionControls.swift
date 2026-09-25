@@ -11,7 +11,7 @@ struct OverlineDoneToolbarButton: View {
                 .font(.overline(.body, weight: .semibold))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(isDisabled ? Color.overlineMutedInk.opacity(0.38) : Color.overlineAccent)
-                .frame(width: 34, height: 34)
+                .frame(width: OverlineDesign.touchTarget, height: OverlineDesign.touchTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -27,9 +27,9 @@ struct OverlineSettingsButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "gearshape")
-                .font(.system(size: 18, weight: .semibold))
+                .font(OverlineDesign.icon)
                 .foregroundStyle(Color.overlineMutedInk.opacity(0.84))
-                .frame(width: 34, height: 34)
+                .frame(width: OverlineDesign.touchTarget, height: OverlineDesign.touchTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -93,7 +93,7 @@ struct OverlineEditorLabel: View {
 
     var body: some View {
         Text(title)
-            .font(.overline(.headline, weight: .bold))
+            .font(OverlineDesign.sectionTitle)
             .foregroundStyle(Color.overlineMutedInk.opacity(0.72))
             .padding(.leading, 18)
     }
@@ -103,10 +103,11 @@ struct OverlineBookSelectorButton: View {
     let title: String
     var subtitle: String?
     var systemImage = "book.closed"
-    var height: CGFloat = 52
-    var cornerRadius: CGFloat = 26
-    var titleFont: Font = .overline(.subheadline, weight: .semibold)
-    var subtitleFont: Font = .overline(.caption, weight: .semibold)
+    var height: CGFloat = OverlineDesign.controlHeight
+    var cornerRadius: CGFloat = OverlineDesign.controlRadius
+    var titleFont: Font = OverlineDesign.button
+    var subtitleFont: Font = OverlineDesign.detail
+    var highlightsChevron = false
     let action: () -> Void
 
     var body: some View {
@@ -137,13 +138,14 @@ struct OverlineBookSelectorButton: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.up.chevron.down")
+                    .tutorialHighlight(highlightsChevron)
                     .font(.overline(.caption2, weight: .bold))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Color.overlineMutedInk.opacity(0.58))
             }
             .padding(.horizontal, 14)
             .frame(minHeight: height)
-            .overlineGlassControl(cornerRadius: cornerRadius, interactive: true)
+            .overlineControlSurface()
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -153,78 +155,95 @@ struct OverlineBookSelectorButton: View {
 
 struct OverlineBookPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
 
     let title: String
     let books: [ReadingBook]
     let selectedBookID: ReadingBook.ID?
     var includesAllOption = false
-    var allTitle = "전체"
+    var allTitle = String(localized: LocalizedStringResource("전체", locale: AppLocale.uiLocale))
     var allCount: Int?
     var addBook: (() -> Void)?
     let onSelect: (ReadingBook.ID?) -> Void
 
+    private var filteredBooks: [ReadingBook] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return books }
+        return books.filter {
+            $0.title.localizedStandardContains(query) || $0.author.localizedStandardContains(query)
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    if includesAllOption {
-                        Button {
-                            onSelect(nil)
-                            dismiss()
-                        } label: {
-                            OverlineBookPickerRow(
-                                systemImage: "tray.full",
-                                title: allTitle,
-                                subtitle: nil,
-                                trailingText: countText(allCount),
-                                isSelected: selectedBookID == nil
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    ForEach(books) { book in
-                        Button {
-                            onSelect(book.id)
-                            dismiss()
-                        } label: {
-                            OverlineBookPickerRow(
-                                systemImage: "book.closed",
-                                title: book.title,
-                                subtitle: book.author,
-                                trailingText: countText(book.highlights.count),
-                                isSelected: selectedBookID == book.id
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if let addBook {
-                        Button {
-                            dismiss()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                                addBook()
+            VStack(spacing: 12) {
+                OverlinePillSearchField(text: $searchText, prompt: String(localized: LocalizedStringResource("책 제목 또는 저자 검색", locale: AppLocale.uiLocale)))
+                    .padding(.horizontal, OverlineDesign.pageInset)
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        if includesAllOption {
+                            Button {
+                                onSelect(nil)
+                                dismiss()
+                            } label: {
+                                OverlineBookPickerRow(
+                                    systemImage: "tray.full",
+                                    title: allTitle,
+                                    subtitle: nil,
+                                    trailingText: countText(allCount),
+                                    isSelected: selectedBookID == nil
+                                )
                             }
-                        } label: {
-                            OverlineBookPickerRow(
-                                systemImage: "plus",
-                                title: "책 추가",
-                                subtitle: nil,
-                                trailingText: nil,
-                                isSelected: false,
-                                isAddAction: true
-                            )
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.top, 4)
+
+                        ForEach(filteredBooks) { book in
+                            Button {
+                                onSelect(book.id)
+                                dismiss()
+                            } label: {
+                                OverlineBookPickerRow(
+                                    systemImage: "book.closed",
+                                    title: book.title,
+                                    subtitle: book.author,
+                                    trailingText: countText(book.highlights.count),
+                                    isSelected: selectedBookID == book.id
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if filteredBooks.isEmpty && !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                        }
+
+                        if let addBook {
+                            Button {
+                                dismiss()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                                    addBook()
+                                }
+                            } label: {
+                                OverlineBookPickerRow(
+                                    systemImage: "plus",
+                                    title: String(localized: LocalizedStringResource("책 추가", locale: AppLocale.uiLocale)),
+                                    subtitle: nil,
+                                    trailingText: nil,
+                                    isSelected: false,
+                                    isAddAction: true
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 26)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 18)
-                .padding(.bottom, 26)
+                .scrollIndicators(.hidden)
+                .background(Color.clear)
             }
-            .scrollIndicators(.hidden)
-            .background(Color.clear)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -232,7 +251,7 @@ struct OverlineBookPickerSheet: View {
 
     private func countText(_ count: Int?) -> String? {
         guard let count else { return nil }
-        return "\(count)조각"
+        return String(format: String(localized: LocalizedStringResource("%lld조각", locale: AppLocale.uiLocale)), count)
     }
 }
 
@@ -241,7 +260,7 @@ struct OverlineBookPickerMetrics {
         let rowCount = bookCount
             + (includesAllOption ? 1 : 0)
             + (includesAddBook ? 1 : 0)
-        return min(max(CGFloat(rowCount) * 88 + 124, 292), 560)
+        return min(max(CGFloat(rowCount) * 88 + 180, 348), 560)
     }
 }
 
@@ -289,41 +308,12 @@ private struct OverlineBookPickerRow: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .frame(minHeight: 78)
-        .overlineGlassControl(cornerRadius: 24, selected: isSelected, interactive: true)
+        .overlineContentSurface(selected: isSelected)
         .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var iconColor: Color {
         if isAddAction { return Color.overlineAccent }
         return isSelected ? Color.overlineAccent : Color.overlineMutedInk.opacity(0.62)
-    }
-}
-
-extension View {
-    @ViewBuilder
-    func overlineGlassControl(cornerRadius: CGFloat, selected: Bool = false, interactive: Bool = false) -> some View {
-        if #available(iOS 26.0, *) {
-            self
-                .background {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(selected ? 0.16 : 0.045))
-                }
-                .glassEffect(
-                    .regular.tint(Color.white.opacity(selected ? 0.18 : 0.07)),
-                    in: .rect(cornerRadius: cornerRadius)
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(selected ? 0.54 : 0.26), lineWidth: 1)
-                }
-        } else {
-            self
-                .background(Color.white.opacity(selected ? 0.26 : 0.12), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(selected ? 0.54 : 0.26), lineWidth: 1)
-                }
-        }
     }
 }

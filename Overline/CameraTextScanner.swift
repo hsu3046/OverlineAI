@@ -8,6 +8,10 @@ import UIKit
 
 nonisolated private let cameraLifecycleLogger = Logger(subsystem: "vote.aib.bzogak", category: "CameraLifecycle")
 
+nonisolated enum CameraCaptureLayout {
+    static let stageAspectRatio: CGFloat = 0.76
+}
+
 struct CameraRecognizedTextLine: Identifiable, Hashable {
     let id: String
     let text: String
@@ -15,6 +19,11 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
     let quadrilateral: CameraTextQuadrilateral?
     let confidence: VNConfidence
     let readingIndex: Int
+    let isVertical: Bool
+    let characterBoxes: [CGRect?]
+    let isExactSelection: Bool
+    let selectionOffset: Int
+    let sourceLineID: String?
 
     nonisolated init(
         id: String? = nil,
@@ -22,7 +31,12 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
         boundingBox: CGRect,
         quadrilateral: CameraTextQuadrilateral? = nil,
         confidence: VNConfidence,
-        readingIndex: Int = .max
+        readingIndex: Int = .max,
+        isVertical: Bool = false,
+        characterBoxes: [CGRect?] = [],
+        isExactSelection: Bool = false,
+        selectionOffset: Int = 0,
+        sourceLineID: String? = nil
     ) {
         self.id = id ?? Self.stableID(text: text, boundingBox: boundingBox)
         self.text = text
@@ -30,6 +44,11 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
         self.quadrilateral = quadrilateral
         self.confidence = confidence
         self.readingIndex = readingIndex
+        self.isVertical = isVertical
+        self.characterBoxes = characterBoxes
+        self.isExactSelection = isExactSelection
+        self.selectionOffset = selectionOffset
+        self.sourceLineID = sourceLineID
     }
 
     private nonisolated static func stableID(text: String, boundingBox: CGRect) -> String {
@@ -48,6 +67,10 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
         )
     }
 
+    func displayCharacterBoxes(in size: CGSize) -> [CGRect?] {
+        characterBoxes.map { box in box.map { CameraVisionGeometry.displayRect(for: $0, in: size) } }
+    }
+
     func displaySamplePoints(in size: CGSize, videoAspectRatio: CGFloat = 9.0 / 16.0) -> [CGPoint] {
         guard let corners = quadrilateral?.displayCorners(in: size, videoAspectRatio: videoAspectRatio), corners.count == 4 else {
             return displayRect(in: size, videoAspectRatio: videoAspectRatio).samplePoints
@@ -62,6 +85,9 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
     }
 
     func displayThickness(in size: CGSize, videoAspectRatio: CGFloat = 9.0 / 16.0) -> CGFloat {
+        if isVertical {
+            return max(displayRect(in: size, videoAspectRatio: videoAspectRatio).width, 1)
+        }
         guard let corners = quadrilateral?.displayCorners(in: size, videoAspectRatio: videoAspectRatio), corners.count == 4 else {
             return displayRect(in: size, videoAspectRatio: videoAspectRatio).height
         }
@@ -69,6 +95,18 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
         let leftHeight = hypot(corners[0].x - corners[3].x, corners[0].y - corners[3].y)
         let rightHeight = hypot(corners[1].x - corners[2].x, corners[1].y - corners[2].y)
         return max((leftHeight + rightHeight) / 2, 1)
+    }
+
+    func sentenceFragment(in range: Range<Int>) -> CameraRecognizedTextLine? {
+        guard let fragment = OCRSentenceSelector.fragment(text: text, characterBoxes: characterBoxes, lineRect: boundingBox, range: range) else { return nil }
+        let fullLine = range == 0..<text.count
+        return CameraRecognizedTextLine(
+            id: "\(id)|sentence:\(range.lowerBound)-\(range.upperBound)",
+            text: fragment.text, boundingBox: fragment.rect,
+            quadrilateral: fullLine ? quadrilateral : nil, confidence: confidence,
+            readingIndex: readingIndex, isVertical: isVertical,
+            isExactSelection: true, selectionOffset: range.lowerBound, sourceLineID: id
+        )
     }
 
     private func midpoint(_ firstPoint: CGPoint, _ secondPoint: CGPoint) -> CGPoint {
@@ -85,7 +123,12 @@ struct CameraRecognizedTextLine: Identifiable, Hashable {
             boundingBox: transform.rect(boundingBox),
             quadrilateral: quadrilateral.map(transform.quadrilateral),
             confidence: confidence,
-            readingIndex: readingIndex
+            readingIndex: readingIndex,
+            isVertical: isVertical,
+            characterBoxes: characterBoxes.map { $0.map(transform.rect) },
+            isExactSelection: isExactSelection,
+            selectionOffset: selectionOffset,
+            sourceLineID: sourceLineID
         )
     }
 }
@@ -263,10 +306,13 @@ fileprivate nonisolated enum CameraPageDetection {
 
     static func inferredPage(from lines: [CameraRecognizedTextLine]) -> CameraDetectedPage? {
         let bodyRects = lines
-            .map(\.boundingBox)
-            .filter { rect in
-                rect.width >= 0.16 && rect.height >= 0.006
+            .filter { line in
+                let rect = line.boundingBox
+                return line.isVertical
+                    ? rect.height >= 0.16 && rect.width >= 0.006
+                    : rect.width >= 0.16 && rect.height >= 0.006
             }
+            .map(\.boundingBox)
 
         guard bodyRects.count >= 4 else {
             return nil
@@ -275,7 +321,7 @@ fileprivate nonisolated enum CameraPageDetection {
         let unionRect = bodyRects.dropFirst().reduce(bodyRects[0]) { partialResult, rect in
             partialResult.union(rect)
         }
-        let medianHeight = median(bodyRects.map(\.height))
+        let medianHeight = median(bodyRects.map { min($0.width, $0.height) })
         let expandedBox = CGRect(
             x: unionRect.minX - max(0.055, medianHeight * 2.0),
             y: unionRect.minY - max(0.070, medianHeight * 2.5),
@@ -544,6 +590,8 @@ struct OCRTextAssembler {
         and currentLine: CameraRecognizedTextLine,
         metrics: LayoutMetrics
     ) -> Bool {
+        // Horizontal indentation/line-height heuristics cannot describe vertical columns.
+        if previousLine.isVertical || currentLine.isVertical { return false }
         let verticalGap = max(previousLine.boundingBox.minY - currentLine.boundingBox.maxY, 0)
         let trailingRoom = metrics.bodyRight - previousLine.boundingBox.maxX
         let previousLineIsShort = trailingRoom > max(metrics.medianHeight * 2.4, 0.08)
@@ -633,7 +681,10 @@ struct OCRTextAssembler {
         for span in spans {
             if let previousEnd {
                 let gap = substring(in: documentText, from: previousEnd, to: span.start)
-                output += gap.contains("\n") ? "\n" : " "
+                output += gap.contains("\n") ? "\n" : OCRLineJoiner.inlineSeparator(
+                    between: output,
+                    and: substring(in: documentText, from: span.start, to: span.end)
+                )
             }
 
             output += substring(in: documentText, from: span.start, to: span.end)
@@ -782,7 +833,7 @@ struct OCRTextAssembler {
 
         guard isClosingQuote(lastCharacter) else { return false }
         let withoutClosingQuotes = trimmedText
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\"”’'").union(.whitespacesAndNewlines))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"”’'」』").union(.whitespacesAndNewlines))
         guard let previousCharacter = withoutClosingQuotes.last else { return false }
         return isSentenceClosingPunctuation(previousCharacter)
     }
@@ -1144,6 +1195,8 @@ final class CameraTextScanner {
     var isAnalyzingText = false
     var recognitionUpdateCount = 0
     var frozenFrameImage: UIImage?
+    private(set) var recognitionErrorMessage: String?
+    private(set) var isImportedPhoto = false
 
     var session: AVCaptureSession {
         core.session
@@ -1170,12 +1223,18 @@ final class CameraTextScanner {
         }
         core.onFrozenFrame = { [weak self] image in
             Task { @MainActor in
+                guard self?.isImportedPhoto != true else { return }
                 self?.frozenFrameImage = image
             }
         }
         core.onFailure = { [weak self] message in
             Task { @MainActor in
                 self?.status = .unavailable(message)
+            }
+        }
+        core.onRecognitionFailure = { [weak self] message in
+            Task { @MainActor in
+                self?.recognitionErrorMessage = message
             }
         }
     }
@@ -1216,6 +1275,7 @@ final class CameraTextScanner {
     }
 
     func start(owner: String = "unspecified") {
+        guard !isImportedPhoto else { return }
         lifecycleRequestSequence += 1
         let requestID = lifecycleRequestSequence
         cameraLifecycleLogger.info(
@@ -1230,7 +1290,7 @@ final class CameraTextScanner {
         }
 
         #if targetEnvironment(simulator)
-        status = .unavailable("시뮬레이터에서는 카메라 대신 목업 캡처를 사용합니다.")
+        status = .unavailable(String(localized: LocalizedStringResource("시뮬레이터에서는 카메라 대신 목업 캡처를 사용합니다.", locale: AppLocale.uiLocale)))
         cameraLifecycleLogger.info(
             "camera_start_skipped owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=simulator"
         )
@@ -1257,7 +1317,7 @@ final class CameraTextScanner {
                             authorization: authorization
                         )
                     } else {
-                        self.status = .unavailable("카메라 권한이 필요합니다.")
+                        self.status = .unavailable(String(localized: LocalizedStringResource("카메라 권한이 필요합니다.", locale: AppLocale.uiLocale)))
                         cameraLifecycleLogger.error(
                             "camera_authorization_denied owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public)"
                         )
@@ -1265,7 +1325,7 @@ final class CameraTextScanner {
                 }
             }
         default:
-            status = .unavailable("카메라 권한이 필요합니다.")
+            status = .unavailable(String(localized: LocalizedStringResource("카메라 권한이 필요합니다.", locale: AppLocale.uiLocale)))
             cameraLifecycleLogger.error(
                 "camera_start_blocked owner=\(owner, privacy: .public) request_id=\(requestID, privacy: .public) reason=authorization"
             )
@@ -1300,6 +1360,7 @@ final class CameraTextScanner {
         maxFrames: Int = 4,
         minimumFrameInterval: TimeInterval = 0.22
     ) {
+        recognitionErrorMessage = nil
         if resetResults || !isAnalyzingText {
             lines.removeAll()
             recognitionUpdateCount = 0
@@ -1335,20 +1396,28 @@ final class CameraTextScanner {
         recognitionUpdateCount = 0
         selectedLineCache.removeAll()
         isAnalyzingText = true
+        recognitionErrorMessage = nil
 
         recognitionWindowTask = Task { [weak self, frozenFrameImage] in
-            let result = try? await CameraFrozenFrameRecognizer.recognize(in: frozenFrameImage)
+            let result: CameraFrozenFrameRecognitionResult
+            do {
+                result = try await CameraFrozenFrameRecognizer.recognize(in: frozenFrameImage)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self?.recognitionErrorMessage = String(localized: LocalizedStringResource("글자 인식 중 오류가 발생했어요. 다시 촬영해 주세요.", locale: AppLocale.uiLocale))
+                self?.isAnalyzingText = false
+                self?.recognitionWindowTask = nil
+                return
+            }
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
                 guard let self else { return }
 
-                if let result {
-                    self.lines = result.lines
-                    self.detectedPage = result.page
-                    self.recognitionUpdateCount += 1
-                    self.core.storeDetectedPage(result.page)
-                }
+                self.lines = result.lines
+                self.detectedPage = result.page
+                self.recognitionUpdateCount += 1
+                self.core.storeDetectedPage(result.page)
             }
 
             try? await Task.sleep(nanoseconds: 520_000_000)
@@ -1388,15 +1457,48 @@ final class CameraTextScanner {
     }
 
     func clearFrozenFrame() {
+        isImportedPhoto = false
         core.cancelFreezeFrameRequest()
         core.clearSnapshot()
         frozenFrameImage = nil
+    }
+
+    func prepareImportedPhoto(_ image: UIImage) {
+        stop(clearRecognitionResults: true, owner: "highlight.photo_import")
+        stopSwipeRecognition()
+        core.cancelFreezeFrameRequest()
+        isImportedPhoto = true
+        // Match the camera's 9:16 coordinate space and fit the photo in the visible stage.
+        let size = CGSize(width: 1440, height: 2560)
+        let visibleHeight = size.width / CameraCaptureLayout.stageAspectRatio
+        let scale = min(size.width / max(image.size.width, 1), visibleHeight / max(image.size.height, 1))
+        let drawnSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        frozenFrameImage = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(x: (size.width - drawnSize.width) / 2, y: (size.height - drawnSize.height) / 2, width: drawnSize.width, height: drawnSize.height))
+        }
+        detectedPage = nil
+        recognitionUpdateCount = 0
     }
 
     func cacheSelectedLines(for selectedIDs: Set<CameraRecognizedTextLine.ID>) {
         for line in lines where selectedIDs.contains(line.id) {
             selectedLineCache[line.id] = line
         }
+    }
+
+    func cacheSelectedFragments(_ fragments: [CameraRecognizedTextLine]) {
+        for fragment in fragments { selectedLineCache[fragment.id] = fragment }
+    }
+
+    func reportSentenceSelectionAmbiguity(_ isAmbiguous: Bool) {
+        recognitionErrorMessage = isAmbiguous
+            ? String(localized: LocalizedStringResource("문장을 하나로 정하기 어려워요. 원하는 문장 안쪽을 따라 다시 그어 주세요.", locale: AppLocale.uiLocale))
+            : nil
     }
 
     func clearSelectedLineCache() {
@@ -1412,6 +1514,10 @@ final class CameraTextScanner {
         boundaryTrimming: OCRBoundaryTrimming = .all
     ) -> String {
         let selectedLines = selectedLines(for: selectedIDs)
+        // A sentence gesture already owns exact source slices. Never expand them again.
+        if selectedLines.contains(where: \.isExactSelection) {
+            return OCRLineJoiner.joined(selectedLines.map(\.text))
+        }
         let referenceLines = lines + selectedLines
         let bodyPageLines = OCRPageMarginMetadataFilter.bodyLines(
             from: lines,
@@ -1513,6 +1619,7 @@ final class CameraTextScanner {
         let liveIDs = Set(liveMatches.map(\.id))
         let cachedMatches = selectedLineCache.values
             .filter { selectedIDs.contains($0.id) && !liveIDs.contains($0.id) }
+            .filter { $0.sourceLineID.map { !liveIDs.contains($0) } ?? true }
         mergedLines.append(contentsOf: cachedMatches)
         return deduplicatedSelection(mergedLines.sorted(by: readingOrder))
     }
@@ -1523,6 +1630,10 @@ final class CameraTextScanner {
             return lhs.readingIndex < rhs.readingIndex
         }
 
+        if lhs.isExactSelection && rhs.isExactSelection, lhs.selectionOffset != rhs.selectionOffset {
+            return lhs.selectionOffset < rhs.selectionOffset
+        }
+
         let yDelta = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
         if yDelta > 0.025 {
             return lhs.boundingBox.midY > rhs.boundingBox.midY
@@ -1531,10 +1642,16 @@ final class CameraTextScanner {
     }
 
     private func deduplicatedSelection(_ lines: [CameraRecognizedTextLine]) -> [CameraRecognizedTextLine] {
-        lines.reduce(into: [CameraRecognizedTextLine]()) { result, line in
+        let wholeLineIDs = Set(lines.filter { !$0.isExactSelection }.map(\.id))
+        return lines.filter { line in
+            line.sourceLineID.map { !wholeLineIDs.contains($0) } ?? true
+        }.reduce(into: [CameraRecognizedTextLine]()) { result, line in
             let normalizedText = line.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let hasEquivalentLine = result.contains { existingLine in
-                existingLine.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedText &&
+                if line.isExactSelection || existingLine.isExactSelection {
+                    return line.id == existingLine.id
+                }
+                return existingLine.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedText &&
                     abs(existingLine.boundingBox.midY - line.boundingBox.midY) < 0.025
             }
 
@@ -1551,11 +1668,45 @@ private enum CameraFrozenFrameRecognizer {
             throw CameraScannerError.cameraUnavailable
         }
 
+        if #available(iOS 26.0, *) {
+            let task = Task.detached(priority: .userInitiated) {
+                let documentLines = try await OCRDocumentRecognizer.recognize(in: cgImage)
+                let lines = documentLines.enumerated().map { index, line in
+                    CameraRecognizedTextLine(
+                        text: line.text,
+                        boundingBox: line.boundingBox,
+                        quadrilateral: CameraTextQuadrilateral(
+                            topLeft: line.topLeft, topRight: line.topRight,
+                            bottomRight: line.bottomRight, bottomLeft: line.bottomLeft
+                        ),
+                        confidence: line.confidence,
+                        readingIndex: index,
+                        isVertical: line.isVertical,
+                        characterBoxes: line.characterBoxes
+                    )
+                }
+                // Document coordinates already match the upright image. Do not run the legacy
+                // horizontal-line orientation scorer, which would rotate vertical text boxes.
+                let pageRequest = VNDetectDocumentSegmentationRequest()
+                try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([pageRequest])
+                try Task.checkCancellation()
+                let page = CameraPageDetection.bestCandidate(
+                    from: pageRequest.results ?? [], coordinateTransform: .identity
+                ) ?? CameraPageDetection.inferredPage(from: lines)
+                return CameraFrozenFrameRecognitionResult(lines: lines, page: page)
+            }
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        }
+
         let documentRequest = VNDetectDocumentSegmentationRequest()
         let textRequest = VNRecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
-        textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        textRequest.recognitionLanguages = AppLocale.ocrRecognitionLanguages
         textRequest.automaticallyDetectsLanguage = true
 
         let recognitionTask = Task.detached(priority: .userInitiated) {
@@ -1587,7 +1738,10 @@ private enum CameraFrozenFrameRecognizer {
                         boundingBox: recognizedTextBox?.boundingBox ?? observation.boundingBox,
                         quadrilateral: recognizedTextBox.map(CameraTextQuadrilateral.init(rectangle:)),
                         confidence: candidate.confidence,
-                        readingIndex: index
+                        readingIndex: index,
+                        characterBoxes: OCRCharacterGeometry.boxes(text: candidate.string.trimmed, source: candidate.string) {
+                            (try? candidate.boundingBox(for: $0))?.boundingBox
+                        }
                     )
                 }
 
@@ -1884,6 +2038,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
     var onBrightness: ((Float?) -> Void)?
     var onFrozenFrame: ((UIImage) -> Void)?
     var onFailure: ((String) -> Void)?
+    var onRecognitionFailure: ((String) -> Void)?
 
     private let sessionQueue = DispatchQueue(
         label: "vote.aib.bzogak.camera.session",
@@ -2129,6 +2284,38 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
 
         isRecognizingFrame = true
 
+        if #available(iOS 26.0, *) {
+            // Materialize one upright frame; never retain a capture pixel buffer across await.
+            guard let frame = image(from: pixelBuffer, orientation: frozenFrameDisplayOrientation(for: pixelBuffer)) else {
+                isRecognizingFrame = false
+                onRecognitionFailure?(String(localized: LocalizedStringResource("촬영한 이미지를 읽지 못했어요. 다시 촬영해 주세요.", locale: AppLocale.uiLocale)))
+                return
+            }
+            onBrightness?(averageBrightness(from: pixelBuffer))
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let result = try await CameraFrozenFrameRecognizer.recognize(in: frame)
+                    visionQueue.async { [weak self] in
+                        guard let self else { return }
+                        defer { self.isRecognizingFrame = false }
+                        guard self.isRecognitionTokenCurrent(recognitionToken) else { return }
+                        self.onLines?(result.lines)
+                        self.onPage?(result.page)
+                        self.storeDetectedPage(result.page)
+                    }
+                } catch {
+                    visionQueue.async { [weak self] in
+                        guard let self else { return }
+                        self.isRecognizingFrame = false
+                        guard self.isRecognitionTokenCurrent(recognitionToken) else { return }
+                        self.onRecognitionFailure?(String(localized: LocalizedStringResource("글자 인식 중 오류가 발생했어요. 다시 촬영해 주세요.", locale: AppLocale.uiLocale)))
+                    }
+                }
+            }
+            return
+        }
+
         let textRequest = VNRecognizeTextRequest()
         let shouldRefreshPage = now.timeIntervalSince(lastPageDetectionTime) > 1.8
         let documentRequest = shouldRefreshPage ? VNDetectDocumentSegmentationRequest() : nil
@@ -2143,7 +2330,7 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
 
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
-        textRequest.recognitionLanguages = ["ko-KR", "en-US", "ja-JP"]
+        textRequest.recognitionLanguages = AppLocale.ocrRecognitionLanguages
         textRequest.automaticallyDetectsLanguage = true
 
         do {
@@ -2173,7 +2360,10 @@ nonisolated final class CameraTextScannerCore: @unchecked Sendable {
                         boundingBox: recognizedTextBox?.boundingBox ?? observation.boundingBox,
                         quadrilateral: recognizedTextBox.map(CameraTextQuadrilateral.init(rectangle:)),
                         confidence: candidate.confidence,
-                        readingIndex: index
+                        readingIndex: index,
+                        characterBoxes: OCRCharacterGeometry.boxes(text: candidate.string.trimmed, source: candidate.string) {
+                            (try? candidate.boundingBox(for: $0))?.boundingBox
+                        }
                     )
                 }
             let coordinateTransform = CameraVisionCoordinateTransform.bestTransform(for: rawRecognizedLines)
@@ -2500,15 +2690,15 @@ private enum CameraScannerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cameraUnavailable:
-            "카메라를 사용할 수 없습니다."
+            String(localized: LocalizedStringResource("카메라를 사용할 수 없습니다.", locale: AppLocale.uiLocale))
         case .cannotAddInput:
-            "카메라 입력을 연결할 수 없습니다."
+            String(localized: LocalizedStringResource("카메라 입력을 연결할 수 없습니다.", locale: AppLocale.uiLocale))
         case .cannotAddOutput:
-            "카메라 프레임 출력을 연결할 수 없습니다."
+            String(localized: LocalizedStringResource("카메라 프레임 출력을 연결할 수 없습니다.", locale: AppLocale.uiLocale))
         case .torchUnavailable:
-            "이 기기에서는 플래시를 사용할 수 없습니다."
+            String(localized: LocalizedStringResource("이 기기에서는 플래시를 사용할 수 없습니다.", locale: AppLocale.uiLocale))
         case .cannotSetTorch:
-            "플래시를 전환할 수 없습니다."
+            String(localized: LocalizedStringResource("플래시를 전환할 수 없습니다.", locale: AppLocale.uiLocale))
         }
     }
 }

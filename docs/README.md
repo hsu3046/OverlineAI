@@ -9,12 +9,15 @@
 - [App Store 메타데이터](APP_STORE_METADATA.md)
 - [App Store 출시 체크리스트](APP_STORE_RELEASE_CHECKLIST.md)
 - [1.0.1 출시 기록](AppStore/RELEASE_1.0.1.md)
+- [1.0.2 검증 및 배포 준비](AppStore/RELEASE_1.0.2.md)
 - [심사 자료 사용 안내](AppStore/Review/SUBMISSION_GUIDE_KO.md)
 
 ## 사용자 기능
 
+- [한국어·일본어·영어 로케일](LOCALIZATION.md)
 - [보관함 백업](LIBRARY_BACKUP.md)
 - [독서 기록](READING_RECORDS.md)
+- [홈 화면 위젯](WIDGETS.md)
 - [페이지 이어 읽기](CAPTURE_CONTINUATION.md)
 - [로컬 페이지 낭독](LOCAL_PAGE_READER.md)
 - [로컬 TTS](LOCAL_TTS.md)

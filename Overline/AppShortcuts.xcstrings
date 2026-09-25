@@ -1,0 +1,172 @@
+{
+  "sourceLanguage": "ko",
+  "strings": {
+    "${applicationName}에 생각 저장": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에 생각 저장",
+              "${applicationName}에 독서 메모",
+              "Save a reading thought with ${applicationName}",
+              "Add a note to ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」に考えを保存"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save a thought in ${applicationName}"
+          }
+        }
+      }
+    },
+    "${applicationName}에서 생각 정리": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에서 생각 정리",
+              "${applicationName}에서 인사이트 만들기",
+              "${applicationName} 글조각 요약",
+              "Organize thoughts in ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」で考えを整理"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Organize thoughts in ${applicationName}"
+          }
+        }
+      }
+    },
+    "${applicationName}에서 인사이트 열기": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에서 인사이트 열기",
+              "${applicationName} 생각 정리",
+              "Open insights in ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」でインサイトを開く"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Insights in ${applicationName}"
+          }
+        }
+      }
+    },
+    "${applicationName}에서 책장 열기": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에서 책장 열기",
+              "${applicationName} 책장",
+              "Open library in ${applicationName}",
+              "Show books in ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」で本棚を開く"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Library in ${applicationName}"
+          }
+        }
+      }
+    },
+    "${applicationName}에서 캡처": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에서 캡처",
+              "${applicationName}으로 책 캡처",
+              "Capture with ${applicationName}",
+              "Open capture in ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」で撮影"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture in ${applicationName}"
+          }
+        }
+      }
+    },
+    "${applicationName}에서 커뮤니티 열기": {
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "ko": {
+          "stringSet": {
+            "state": "new",
+            "values": [
+              "${applicationName}에서 커뮤니티 열기",
+              "${applicationName} 책 커뮤니티",
+              "Open community in ${applicationName}"
+            ]
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「${applicationName}」でコミュニティを開く"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Community in ${applicationName}"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.3"
+}

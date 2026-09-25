@@ -53,11 +53,11 @@ nonisolated enum LibraryBackupError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .emptyLibrary:
-            "내보내거나 가져올 독서 기록이 없습니다."
+            String(localized: LocalizedStringResource("내보내거나 가져올 독서 기록이 없습니다.", locale: AppLocale.uiLocale))
         case .fileTooLarge:
-            "백업 파일이 너무 큽니다. 내보내기와 가져오기는 50MB 이하만 지원합니다."
+            String(localized: LocalizedStringResource("백업 파일이 너무 큽니다. 내보내기와 가져오기는 50MB 이하만 지원합니다.", locale: AppLocale.uiLocale))
         case .invalidFile:
-            "글조각 서랍에서 만든 올바른 백업 파일이 아닙니다."
+            String(localized: LocalizedStringResource("글조각 서랍에서 만든 올바른 백업 파일이 아닙니다.", locale: AppLocale.uiLocale))
         case let .unsupportedVersion(version):
             "이 앱에서 아직 지원하지 않는 백업 형식입니다. 앱을 업데이트한 뒤 다시 시도해 주세요. (버전 \(version))"
         }

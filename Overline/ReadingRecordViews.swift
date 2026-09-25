@@ -80,11 +80,7 @@ struct ReadingRecordSection: View {
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.overlineInk.opacity(0.08), lineWidth: 1)
-        }
+        .overlineContentSurface()
     }
 }
 
@@ -134,7 +130,7 @@ struct ReadingRecordHistorySheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "독서 기록") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("독서 기록", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "닫기",
@@ -222,7 +218,7 @@ private struct ReadingRecordHistoryRow: View {
             }
         }
         .padding(18)
-        .overlineGlassControl(cornerRadius: 20)
+        .overlineContentSurface()
         .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
@@ -241,6 +237,7 @@ struct ReadingRecordEditorSheet: View {
     @State private var hasEndDate = false
     @State private var status: ReadingStatus = .reading
     @State private var rating = 0.0
+    @State private var bookmarkPageText = ""
     @State private var review = ""
     @State private var showsReviewEditor = false
     @State private var showsDeleteConfirmation = false
@@ -267,6 +264,9 @@ struct ReadingRecordEditorSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         statusEditor
+                        if status != .completed {
+                            bookmarkEditor
+                        }
                         dateEditor
                         ratingEditor
                         reviewEditor
@@ -311,9 +311,30 @@ struct ReadingRecordEditorSheet: View {
         }
     }
 
+    private var bookmarkEditor: some View {
+        HStack(spacing: 12) {
+            Label("책갈피", systemImage: "bookmark")
+                .font(OverlineDesign.sectionTitle)
+            Spacer(minLength: 12)
+            TextField("페이지", text: Binding(
+                get: { bookmarkPageText },
+                set: { bookmarkPageText = String($0.filter { $0.isASCII && $0.isNumber }.prefix(9)) }
+            ))
+            .font(OverlineDesign.body)
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .frame(width: 100)
+            .accessibilityLabel("책갈피 페이지")
+        }
+        .foregroundStyle(Color.overlineInk)
+        .padding(.horizontal, OverlineDesign.fieldInset)
+        .frame(minHeight: OverlineDesign.controlHeight)
+        .overlineContentSurface()
+    }
+
     private var statusEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "독서 상태")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("독서 상태", locale: AppLocale.uiLocale)))
 
             Menu {
                 ForEach(ReadingStatus.allCases) { option in
@@ -326,11 +347,11 @@ struct ReadingRecordEditorSheet: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: status.systemImage)
-                        .font(.overline(.title3, weight: .semibold))
+                        .font(OverlineDesign.sectionTitle)
                         .foregroundStyle(Color.overlineAccent)
                         .frame(width: 24)
                     Text(status.title)
-                        .font(.overline(.title3, weight: .medium))
+                        .font(OverlineDesign.body)
                         .foregroundStyle(Color.overlineInk)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.up.chevron.down")
@@ -338,17 +359,17 @@ struct ReadingRecordEditorSheet: View {
                         .foregroundStyle(Color.overlineMutedInk.opacity(0.58))
                 }
                 .padding(.horizontal, 18)
-                .frame(minHeight: 64)
+                .frame(minHeight: OverlineDesign.controlHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
         }
     }
 
     private var dateEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "독서 날짜")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("독서 날짜", locale: AppLocale.uiLocale)))
 
             VStack(spacing: 0) {
                 DatePicker("시작", selection: $startedAt, displayedComponents: .date)
@@ -372,23 +393,23 @@ struct ReadingRecordEditorSheet: View {
                 }
             }
             .font(.overline(.body, weight: .medium))
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
         }
     }
 
     private var ratingEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "별점")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("별점", locale: AppLocale.uiLocale)))
             ReadingRatingPicker(rating: $rating)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 14)
-                .overlineGlassControl(cornerRadius: 22)
+                .overlineContentSurface()
         }
     }
 
     private var reviewEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            OverlineEditorLabel(title: "감상문")
+            OverlineEditorLabel(title: String(localized: LocalizedStringResource("감상문", locale: AppLocale.uiLocale)))
 
             Button {
                 showsReviewEditor = true
@@ -409,7 +430,7 @@ struct ReadingRecordEditorSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .overlineGlassControl(cornerRadius: 22)
+            .overlineContentSurface()
             .accessibilityLabel(review.trimmed.isEmpty ? "감상문 작성" : "감상문 편집")
 
             Text("\(review.count.formatted()) / \(Self.reviewLimit.formatted())")
@@ -462,6 +483,7 @@ struct ReadingRecordEditorSheet: View {
         hasEndDate = record.endedAt != nil
         status = record.status
         rating = record.rating ?? 0
+        bookmarkPageText = record.bookmarkPage.map(String.init) ?? ""
         review = record.review
     }
 
@@ -477,7 +499,8 @@ struct ReadingRecordEditorSheet: View {
                 endedAt: selectedEndDate,
                 status: status,
                 rating: selectedRating,
-                review: review
+                review: review,
+                bookmarkPage: Int(bookmarkPageText)
             )
         } else {
             library.addReadingRecord(
@@ -486,7 +509,8 @@ struct ReadingRecordEditorSheet: View {
                 endedAt: selectedEndDate,
                 status: status,
                 rating: selectedRating,
-                review: review
+                review: review,
+                bookmarkPage: Int(bookmarkPageText)
             )
         }
         dismiss()
@@ -532,7 +556,7 @@ private struct ReadingReviewFullScreenEditor: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "감상문") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("감상문", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -575,7 +599,7 @@ private struct ReadingReviewFullScreenEditor: View {
                             .accessibilityLabel("감상문")
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlineGlassControl(cornerRadius: 22)
+                    .overlineContentSurface()
 
                     Text("\(draftText.count.formatted()) / \(Self.reviewLimit.formatted())")
                         .font(.overline(.caption))
@@ -649,7 +673,7 @@ private struct ReadingReviewFullScreenEditor: View {
     private func requestAIDraft() {
         guard let book, !book.highlights.isEmpty else { return }
         guard let configuration = llmSettings.activeConfiguration else {
-            aiAlert = ReadingRecordAlert(title: "AI 초안", message: selectedAISetupMessage)
+            aiAlert = ReadingRecordAlert(title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)), message: selectedAISetupMessage)
             return
         }
 
@@ -694,8 +718,8 @@ private struct ReadingReviewFullScreenEditor: View {
                     library.book(with: bookID)?.highlights == snapshot.highlights
                 else {
                     aiAlert = ReadingRecordAlert(
-                        title: "AI 초안",
-                        message: "감상문이나 글조각이 바뀌어서 이번 초안을 적용하지 않았어요."
+                        title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)),
+                        message: String(localized: LocalizedStringResource("감상문이나 글조각이 바뀌어서 이번 초안을 적용하지 않았어요.", locale: AppLocale.uiLocale))
                     )
                     return
                 }
@@ -709,7 +733,7 @@ private struct ReadingReviewFullScreenEditor: View {
                 guard !Task.isCancelled else { return }
                 llmSettings.handleRequestError(error, configuration: configuration)
                 LLMUsageMetricsStore.recordFailed()
-                aiAlert = ReadingRecordAlert(title: "AI 초안", message: error.localizedDescription)
+                aiAlert = ReadingRecordAlert(title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)), message: error.localizedDescription)
             }
         }
     }
@@ -718,8 +742,8 @@ private struct ReadingReviewFullScreenEditor: View {
         guard draftText == proposal.sourceReview else {
             draftProposal = nil
             aiAlert = ReadingRecordAlert(
-                title: "AI 초안",
-                message: "감상문이 바뀌어서 초안을 적용하지 않았어요."
+                title: String(localized: LocalizedStringResource("AI 초안", locale: AppLocale.uiLocale)),
+                message: String(localized: LocalizedStringResource("감상문이 바뀌어서 초안을 적용하지 않았어요.", locale: AppLocale.uiLocale))
             )
             return
         }
@@ -750,7 +774,12 @@ private struct ReadingRatingPicker: View {
             InteractiveReadingRatingStars(rating: $rating)
                 .frame(maxWidth: .infinity)
 
-            Text(rating > 0 ? "\(rating.formatted(.number.precision(.fractionLength(1))))점" : "평가 안 함")
+            Text(rating > 0
+                ? String(localized: LocalizedStringResource(
+                    "\(rating.formatted(.number.precision(.fractionLength(1)).locale(AppLocale.uiLocale)))점",
+                    locale: AppLocale.uiLocale
+                ))
+                : "")
                 .font(.overline(.subheadline, weight: .semibold))
                 .foregroundStyle(Color.overlineMutedInk)
                 .monospacedDigit()
@@ -884,7 +913,7 @@ private struct ReadingReviewDraftPreviewSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                OverlineSheetHeader(title: "AI 감상문 초안") {
+                OverlineSheetHeader(title: String(localized: LocalizedStringResource("AI 감상문 초안", locale: AppLocale.uiLocale))) {
                     OverlineSheetIconButton(
                         systemImage: "xmark",
                         accessibilityLabel: "취소",
@@ -915,7 +944,7 @@ private struct ReadingReviewDraftPreviewSheet: View {
                         .scrollContentBackground(.hidden)
                         .padding(14)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlineGlassControl(cornerRadius: 20)
+                        .overlineContentSurface()
                         .accessibilityLabel("AI 감상문 초안")
                 }
                 .padding(.horizontal, 20)
@@ -990,16 +1019,17 @@ private func evenlySampled<T>(_ values: [T], maximumCount: Int) -> [T] {
 }
 
 private func readingDateRangeText(for record: ReadingRecord) -> String {
-    let start = readingRecordDateFormatter.string(from: record.startedAt)
+    let formatter = readingRecordDateFormatter()
+    let start = formatter.string(from: record.startedAt)
     guard let endedAt = record.endedAt else { return start }
-    let end = readingRecordDateFormatter.string(from: endedAt)
+    let end = formatter.string(from: endedAt)
     return start == end ? start : "\(start) - \(end)"
 }
 
-private let readingRecordDateFormatter: DateFormatter = {
+private func readingRecordDateFormatter() -> DateFormatter {
     let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "ko_KR")
+    formatter.locale = AppLocale.uiLocale
     formatter.calendar = Calendar(identifier: .gregorian)
-    formatter.dateFormat = "yyyy. M. d."
+    formatter.dateStyle = .medium
     return formatter
-}()
+}

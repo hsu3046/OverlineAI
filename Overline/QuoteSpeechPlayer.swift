@@ -18,11 +18,11 @@ struct QuoteSpeechVoiceOption: Identifiable {
     var qualityTitle: String {
         switch quality {
         case .some(.premium):
-            "최고 음질"
+            String(localized: LocalizedStringResource("최고 음질", locale: AppLocale.uiLocale))
         case .some(.enhanced):
             "고음질"
         case .some:
-            "기본"
+            String(localized: LocalizedStringResource("기본", locale: AppLocale.uiLocale))
         case .none:
             ""
         }
@@ -193,7 +193,7 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     func voiceOptions(for language: CaptureLanguage) -> [QuoteSpeechVoiceOption] {
         let automatic = QuoteSpeechVoiceOption(
             id: QuoteSpeechVoiceIdentifier.systemAutomatic,
-            name: "최고 음질 자동 선택",
+            name: String(localized: LocalizedStringResource("최고 음질 자동 선택", locale: AppLocale.uiLocale)),
             language: language.speechLocaleIdentifier,
             quality: nil
         )
@@ -236,12 +236,12 @@ final class QuoteSpeechPlayer: NSObject, AVSpeechSynthesizerDelegate {
     func selectedVoiceName(for language: CaptureLanguage) -> String {
         if language == .korean, speechEngineChoice == .supertonic {
             if supertonicAssetState.isInstalled {
-                return "고품질 온디바이스 · \(selectedSupertonicVoice.title)"
+                return String(format: String(localized: LocalizedStringResource("고품질 온디바이스 · %@", locale: AppLocale.uiLocale)), selectedSupertonicVoice.title)
             }
-            return "고품질 온디바이스 · 받기 필요"
+            return String(localized: LocalizedStringResource("고품질 온디바이스 · 받기 필요", locale: AppLocale.uiLocale))
         }
         let identifier = selectedVoiceIdentifier(for: language)
-        return voiceOptions(for: language).first(where: { $0.id == identifier })?.name ?? "기본 음성"
+        return voiceOptions(for: language).first(where: { $0.id == identifier })?.name ?? String(localized: LocalizedStringResource("기본 음성", locale: AppLocale.uiLocale))
     }
 
     func usesSupertonic(for language: CaptureLanguage) -> Bool {

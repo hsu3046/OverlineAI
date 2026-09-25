@@ -1,6 +1,6 @@
 export type PlaceKind = "bookstore" | "library";
 export type ArticleSource = "naver" | "daum";
-export type RankingSource = "aladin" | "data4library";
+export type RankingSource = "aladin" | "yes24" | "data4library" | "rakuten";
 
 export interface CommunityPlace {
   id: string;
@@ -9,7 +9,7 @@ export interface CommunityPlace {
   category: string;
   address: string;
   distanceMeters: number;
-  source: "kakao";
+  source: "kakao" | "google";
   phone?: string;
   detailURL?: string;
 }
@@ -48,7 +48,8 @@ export interface BookMetadataCandidate {
   publishedDate: string;
   isbn: string;
   coverURLString: string;
-  source: "kakao" | "aladin";
+  source: "kakao" | "aladin" | "yes24" | "rakuten" | "google" | "openLibrary";
+  detailURL?: string;
 }
 
 export interface ListResponse<T> {

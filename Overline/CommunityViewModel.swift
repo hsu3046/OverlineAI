@@ -28,6 +28,13 @@ final class CommunityViewModel {
     private(set) var rankingError: String?
 
     private let client: OverlineAPIClient
+    private let now: () -> Date
+    private struct RankingCacheEntry {
+        let items: [CommunityRankingItem]
+        let expiresAt: Date
+    }
+    private var rankingCache: [String: RankingCacheEntry] = [:]
+    private static let rankingCacheLifetime: TimeInterval = 8 * 60 * 60
     private var loadedPlaceKey: String?
     private var loadedArticleKey: String?
     private var loadedRankingKey: String?
@@ -41,8 +48,9 @@ final class CommunityViewModel {
     private var selectedBookAuthor = ""
     private var hasInitializedArticleSearch = false
 
-    init(client: OverlineAPIClient = OverlineAPIClient()) {
+    init(client: OverlineAPIClient = OverlineAPIClient(), now: @escaping () -> Date = Date.init) {
         self.client = client
+        self.now = now
     }
 
     func selectDefaultBook(from library: ReadingLibrary) {
@@ -227,11 +235,21 @@ final class CommunityViewModel {
     }
 
     func loadRankings(force: Bool = false) async {
+        if AppLocale.languageCode == "ja" && rankingKind == .loans {
+            selectRankingKind(.bestseller)
+        }
         let kind = rankingKind
         let category = rankingCategory
         let key = rankingKey(kind: kind, category: category)
         latestRankingRequestKey = key
-        if !force, loadedRankingKey == key {
+        let currentDate = now()
+        rankingCache = rankingCache.filter { $0.value.expiresAt > currentDate }
+        if !force, let cached = rankingCache[key] {
+            // Invalidate an older request before displaying cached results.
+            rankingRequestID = nil
+            isLoadingRankings = false
+            rankings = cached.items
+            loadedRankingKey = key
             rankingError = nil
             return
         }
@@ -240,6 +258,9 @@ final class CommunityViewModel {
         rankingRequestID = requestID
         isLoadingRankings = true
         rankingError = nil
+        if loadedRankingKey != key {
+            rankings = []
+        }
         defer {
             if rankingRequestID == requestID {
                 isLoadingRankings = false
@@ -255,6 +276,10 @@ final class CommunityViewModel {
             else { return }
             rankings = response.items
             loadedRankingKey = key
+            rankingCache[key] = RankingCacheEntry(
+                items: response.items,
+                expiresAt: now().addingTimeInterval(Self.rankingCacheLifetime)
+            )
         } catch is CancellationError {
             return
         } catch {
@@ -278,7 +303,7 @@ final class CommunityViewModel {
         radius: Int? = nil,
         kind: CommunityPlaceKind? = nil
     ) -> String {
-        "\(latitude)-\(longitude)-\(radius ?? placeRadius)-\((kind ?? placeKind).rawValue)"
+        "\(latitude)-\(longitude)-\(radius ?? placeRadius)-\((kind ?? placeKind).rawValue)-\(AppLocale.languageCode)-\(AppLocale.regionCode)"
     }
 
     private func articleKey(
@@ -294,7 +319,7 @@ final class CommunityViewModel {
         kind: CommunityRankingKind? = nil,
         category: CommunityRankingCategory? = nil
     ) -> String {
-        "\((kind ?? rankingKind).rawValue)-\((category ?? rankingCategory).rawValue)"
+        "\(AppLocale.languageCode)-\((kind ?? rankingKind).rawValue)-\((category ?? rankingCategory).rawValue)"
     }
 
     @discardableResult

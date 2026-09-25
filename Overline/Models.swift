@@ -18,6 +18,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
     case blue
     case rose
     case mint
+    case purple
 
     var paper: Color {
         switch self {
@@ -25,6 +26,7 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
         case .blue: Color(red: 0.56, green: 0.79, blue: 0.92)
         case .rose: Color(red: 0.95, green: 0.58, blue: 0.67)
         case .mint: Color(red: 0.58, green: 0.82, blue: 0.68)
+        case .purple: Color(red: 0.74, green: 0.64, blue: 0.91)
         }
     }
 
@@ -34,15 +36,17 @@ nonisolated enum StickyTone: String, Codable, CaseIterable, Sendable {
         case .blue: Color(red: 0.08, green: 0.22, blue: 0.33)
         case .rose: Color(red: 0.34, green: 0.10, blue: 0.16)
         case .mint: Color(red: 0.08, green: 0.24, blue: 0.15)
+        case .purple: Color(red: 0.25, green: 0.14, blue: 0.38)
         }
     }
 
     var accessibilityName: String {
         switch self {
-        case .yellow: "노랑"
-        case .rose: "핑크"
-        case .blue: "파랑"
-        case .mint: "녹색"
+        case .yellow: String(localized: LocalizedStringResource("노랑", locale: AppLocale.uiLocale))
+        case .rose: String(localized: LocalizedStringResource("핑크", locale: AppLocale.uiLocale))
+        case .blue: String(localized: LocalizedStringResource("파랑", locale: AppLocale.uiLocale))
+        case .mint: String(localized: LocalizedStringResource("녹색", locale: AppLocale.uiLocale))
+        case .purple: String(localized: LocalizedStringResource("보라", locale: AppLocale.uiLocale))
         }
     }
 }
@@ -142,7 +146,10 @@ nonisolated enum BookMetadataSource: String, Codable, CaseIterable, Sendable {
     case manual
     case kakao
     case aladin
+    case yes24
+    case rakuten
     case google
+    case openLibrary
 }
 
 nonisolated struct Highlight: Identifiable, Hashable, Codable, Sendable {
@@ -220,10 +227,10 @@ nonisolated enum ReadingStatus: String, Codable, CaseIterable, Identifiable, Sen
 
     var title: String {
         switch self {
-        case .reading: "읽는 중"
-        case .completed: "완독"
-        case .paused: "잠시 멈춤"
-        case .abandoned: "중단"
+        case .reading: String(localized: LocalizedStringResource("읽는 중", locale: AppLocale.uiLocale))
+        case .completed: String(localized: LocalizedStringResource("완독", locale: AppLocale.uiLocale))
+        case .paused: String(localized: LocalizedStringResource("잠시 멈춤", locale: AppLocale.uiLocale))
+        case .abandoned: String(localized: LocalizedStringResource("중단", locale: AppLocale.uiLocale))
         }
     }
 
@@ -244,6 +251,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
     var status: ReadingStatus
     var rating: Double?
     var review: String
+    var bookmarkPage: Int?
     var createdAt: Date
     var updatedAt: Date
 
@@ -254,6 +262,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
         status: ReadingStatus,
         rating: Double? = nil,
         review: String = "",
+        bookmarkPage: Int? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -263,6 +272,7 @@ nonisolated struct ReadingRecord: Identifiable, Hashable, Codable, Sendable {
         self.status = status
         self.rating = rating
         self.review = review
+        self.bookmarkPage = bookmarkPage.flatMap { $0 > 0 ? $0 : nil }
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -1272,6 +1282,9 @@ struct AppIntentRequest: Equatable, Identifiable {
     let id = UUID()
     let tab: AppTab
     var insightSeed: InsightSeedRequest?
+    var bookID: UUID?
+    var highlightID: UUID?
+    var rankingKind: String?
 }
 
 struct InsightSeedRequest: Equatable {
@@ -1640,8 +1653,10 @@ final class AppIntentRouter {
 
     var request: AppIntentRequest?
 
-    func open(_ tab: AppTab, insightSeed: InsightSeedRequest? = nil) {
-        request = AppIntentRequest(tab: tab, insightSeed: insightSeed)
+    func open(_ tab: AppTab, insightSeed: InsightSeedRequest? = nil, bookID: UUID? = nil,
+              highlightID: UUID? = nil, rankingKind: String? = nil) {
+        request = AppIntentRequest(tab: tab, insightSeed: insightSeed, bookID: bookID,
+                                   highlightID: highlightID, rankingKind: rankingKind)
     }
 }
 
@@ -1839,9 +1854,9 @@ final class ReadingLibrary {
         metadataSource: BookMetadataSource = .manual
     ) -> ReadingBook {
         let book = ReadingBook(
-            title: title.trimmed.isEmpty ? "새 책" : title.trimmed,
-            author: author.trimmed.isEmpty ? "Unknown" : author.trimmed,
-            summary: summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed,
+            title: title.trimmed.isEmpty ? String(localized: LocalizedStringResource("새 책", locale: AppLocale.uiLocale)) : title.trimmed,
+            author: author.trimmed.isEmpty ? String(localized: LocalizedStringResource("저자 미상", locale: AppLocale.uiLocale)) : author.trimmed,
+            summary: summary.trimmed.isEmpty ? String(localized: LocalizedStringResource("직접 추가한 책입니다.", locale: AppLocale.uiLocale)) : summary.trimmed,
             tags: CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText)),
             publisher: publisher.trimmed.nilIfEmpty,
             publishedDate: publishedDate.trimmed.nilIfEmpty,
@@ -1873,8 +1888,8 @@ final class ReadingLibrary {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
 
         books[index].title = title.trimmed.isEmpty ? books[index].title : title.trimmed
-        books[index].author = author.trimmed.isEmpty ? "Unknown" : author.trimmed
-        books[index].summary = summary.trimmed.isEmpty ? "직접 추가한 책입니다." : summary.trimmed
+        books[index].author = author.trimmed.isEmpty ? String(localized: LocalizedStringResource("저자 미상", locale: AppLocale.uiLocale)) : author.trimmed
+        books[index].summary = summary.trimmed.isEmpty ? String(localized: LocalizedStringResource("직접 추가한 책입니다.", locale: AppLocale.uiLocale)) : summary.trimmed
         books[index].tags = CapturedHighlightMetadata.deduplicated(CapturedHighlightMetadata.normalizedTags(from: tagsText))
         books[index].publisher = publisher.trimmed.nilIfEmpty
         books[index].publishedDate = publishedDate.trimmed.nilIfEmpty
@@ -1903,7 +1918,8 @@ final class ReadingLibrary {
         endedAt: Date?,
         status: ReadingStatus,
         rating: Double?,
-        review: String
+        review: String,
+        bookmarkPage: Int? = nil
     ) -> ReadingRecord? {
         guard let bookIndex = books.firstIndex(where: { $0.id == bookID }) else { return nil }
 
@@ -1912,7 +1928,8 @@ final class ReadingLibrary {
             endedAt: Self.normalizedReadingEndDate(endedAt, startedAt: startedAt),
             status: status,
             rating: Self.normalizedReadingRating(rating),
-            review: String(review.normalizedQuotesForStorage.trimmed.prefix(3_000))
+            review: String(review.normalizedQuotesForStorage.trimmed.prefix(3_000)),
+            bookmarkPage: bookmarkPage
         )
         books[bookIndex].readingRecords.insert(record, at: 0)
         persist()
@@ -1926,7 +1943,8 @@ final class ReadingLibrary {
         endedAt: Date?,
         status: ReadingStatus,
         rating: Double?,
-        review: String
+        review: String,
+        bookmarkPage: Int? = nil
     ) {
         guard
             let bookIndex = books.firstIndex(where: { $0.id == bookID }),
@@ -1942,6 +1960,7 @@ final class ReadingLibrary {
         )
         books[bookIndex].readingRecords[recordIndex].status = status
         books[bookIndex].readingRecords[recordIndex].rating = Self.normalizedReadingRating(rating)
+        books[bookIndex].readingRecords[recordIndex].bookmarkPage = bookmarkPage.flatMap { $0 > 0 ? $0 : nil }
         books[bookIndex].readingRecords[recordIndex].review = String(
             review.normalizedQuotesForStorage.trimmed.prefix(3_000)
         )
@@ -2045,7 +2064,8 @@ final class ReadingLibrary {
         }
 
         let currentHighlight = books[location.bookIndex].highlights[location.highlightIndex]
-        guard currentHighlight == expectedHighlight else { return nil }
+        guard currentHighlight.id == expectedHighlight.id,
+              currentHighlight.text == expectedHighlight.text else { return nil }
 
         let currentText = currentHighlight.text.normalizedQuotesForStorage.trimmed
         let correctedText = correctedText.normalizedQuotesForStorage.trimmed
@@ -2320,6 +2340,9 @@ final class ReadingLibrary {
 
     private func persist() {
         refreshDerivedState()
+        #if os(iOS)
+        WidgetSnapshotPublisher.publish(books: books)
+        #endif
         let snapshot = currentSnapshot
         persistenceGeneration += 1
         let generation = persistenceGeneration
@@ -2616,16 +2639,13 @@ enum SampleData {
 }
 
 extension Date {
-    private static let overlineShortDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ko_KR")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "M월d일(E) HH:mm"
-        return formatter
-    }()
-
     var overlineShortDate: String {
-        Self.overlineShortDateFormatter.string(from: self)
+        let formatter = DateFormatter()
+        formatter.locale = AppLocale.uiLocale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: self)
     }
 }
 

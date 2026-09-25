@@ -45,8 +45,8 @@ final class PageReaderRemoteControls {
         let safePageCount = max(pageCount, 1)
         let safePageIndex = min(max(pageIndex, 0), safePageCount - 1)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: "책 읽어주기",
-            MPMediaItemPropertyArtist: "BZOGAK · \(safePageIndex + 1)/\(safePageCount)쪽",
+            MPMediaItemPropertyTitle: String(localized: LocalizedStringResource("책 읽어주기", locale: AppLocale.uiLocale)),
+            MPMediaItemPropertyArtist: String(format: String(localized: LocalizedStringResource("BZOGAK · %lld/%lld쪽", locale: AppLocale.uiLocale)), safePageIndex + 1, safePageCount),
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying && !isPaused ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0
         ]

@@ -18,6 +18,8 @@ struct ContentView: View {
     @State private var libraryRootResetToken = 0
     @State private var cameraScanner: CameraTextScanner?
     @State private var loadedTabs: Set<AppTab> = [.capture]
+    @State private var tutorial = CaptureTutorial()
+    @State private var didCheckTutorial = false
 
     var body: some View {
         persistentTabContent
@@ -40,9 +42,29 @@ struct ContentView: View {
             }
             .environment(\.setBottomMenuCompact, setBottomMenuCompact)
             .environment(\.selectAppTab, selectTab)
+            .environment(\.captureTutorial, tutorial)
             .onAppear {
+                WidgetSnapshotPublisher.publish(books: library.books)
+                if !didCheckTutorial {
+                    didCheckTutorial = true
+                    if !UserDefaults.standard.bool(forKey: CaptureTutorial.completedKey), intentRouter.request == nil {
+                        tutorial.start()
+                        selectTab(.library)
+                    }
+                }
                 recordAppOpen()
                 apply(intentRouter.request)
+            }
+            .onChange(of: tutorial.step) { _, step in
+                guard let step else { return }
+                let destination: AppTab = step == .addBook || step == .bookForm ? .library : .capture
+                if selectedTab != destination { selectTab(destination) }
+            }
+            .onChange(of: tutorial.replayRequested) { _, requested in
+                guard requested else { return }
+                tutorial.replayRequested = false
+                tutorial.start()
+                selectTab(.library)
             }
             .task {
                 Task {
@@ -78,6 +100,15 @@ struct ContentView: View {
             }
             .onChange(of: intentRouter.request) { _, request in
                 apply(request)
+            }
+            .onOpenURL { url in
+                guard let link = WidgetLink(url: url) else { return }
+                switch link {
+                case .capture: intentRouter.open(.capture)
+                case .book(let id): intentRouter.open(.library, bookID: id)
+                case .quote(let id): intentRouter.open(.library, highlightID: id)
+                case .rankings(let kind): intentRouter.open(.community, rankingKind: kind)
+                }
             }
     }
 
@@ -146,7 +177,10 @@ struct ContentView: View {
 
     private func apply(_ request: AppIntentRequest?) {
         guard let request else { return }
-        selectTab(request.tab)
+        tutorial.step = nil
+        if selectedTab != request.tab || (request.bookID == nil && request.highlightID == nil) {
+            selectTab(request.tab)
+        }
     }
 
     private func setBottomMenuCompact(_ isCompact: Bool) {
@@ -222,6 +256,7 @@ struct OverlineBottomMenuBar: View {
     let selectedTab: AppTab
     let isCompact: Bool
     let selectTab: (AppTab) -> Void
+    var selectCaptureMode: ((CaptureExperienceMode) -> Void)? = nil
 
     var body: some View {
         HStack {
@@ -229,7 +264,8 @@ struct OverlineBottomMenuBar: View {
             OverlineBottomMenu(
                 selectedTab: selectedTab,
                 isCompact: isCompact,
-                selectTab: selectTab
+                selectTab: selectTab,
+                selectCaptureMode: selectCaptureMode
             )
             Spacer(minLength: 0)
         }
@@ -239,9 +275,11 @@ struct OverlineBottomMenuBar: View {
 }
 
 private struct OverlineBottomMenu: View {
+    @Environment(\.captureTutorial) private var tutorial
     let selectedTab: AppTab
     let isCompact: Bool
     let selectTab: (AppTab) -> Void
+    var selectCaptureMode: ((CaptureExperienceMode) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -250,20 +288,19 @@ private struct OverlineBottomMenu: View {
                     menuItems
                         .menuShellPadding(isCompact: isCompact)
                         .glassEffect(
-                            .regular.tint(Color.white.opacity(0.18)),
+                            .regular,
                             in: Capsule(style: .continuous)
                         )
-                        .menuShellOverlay()
                 }
             } else {
                 menuItems
                     .menuShellPadding(isCompact: isCompact)
                     .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-                    .menuShellOverlay()
             }
         }
         .animation(OverlineMotion.menu, value: isCompact)
         .animation(OverlineMotion.tab, value: selectedTab)
+        .tutorialHighlight(tutorial?.step == .saved, cornerRadius: 40)
     }
 
     private var menuItems: some View {
@@ -273,7 +310,8 @@ private struct OverlineBottomMenu: View {
                     tab: tab,
                     selectedTab: selectedTab,
                     isCompact: isCompact,
-                    selectTab: selectTab
+                    selectTab: selectTab,
+                    selectCaptureMode: selectCaptureMode
                 )
             }
         }
@@ -281,16 +319,89 @@ private struct OverlineBottomMenu: View {
 }
 
 private struct OverlineBottomMenuItem: View {
+    @AppStorage("capture.lastExperienceMode") private var lastMode = CaptureExperienceMode.highlight.rawValue
+    @State private var showsModes = false
+    @State private var pendingMode: CaptureExperienceMode?
+    @State private var longPressFeedback = 0
     let tab: AppTab
     let selectedTab: AppTab
     let isCompact: Bool
     let selectTab: (AppTab) -> Void
+    var selectCaptureMode: ((CaptureExperienceMode) -> Void)? = nil
+
+    private var captureMode: CaptureExperienceMode {
+        CaptureExperienceMode(rawValue: lastMode) ?? .highlight
+    }
+
+    private var title: String { tab == .capture ? captureMode.title : tab.title }
 
     private var isSelected: Bool {
         selectedTab == tab
     }
 
+    @ViewBuilder
     var body: some View {
+        if tab == .capture {
+            tabButton
+                .highPriorityGesture(
+                    LongPressGesture(minimumDuration: 0.45)
+                        .exclusively(before: TapGesture(count: 2).exclusively(before: TapGesture()))
+                        .onEnded { gesture in
+                            switch gesture {
+                            case .first:
+                                longPressFeedback += 1
+                                showsModes = true
+                            case .second(.first): showsModes = true
+                            case .second(.second): selectTab(tab)
+                            }
+                        }
+                )
+                .accessibilityAction(named: "캡처 방식 선택") { showsModes = true }
+                .sensoryFeedback(.selection, trigger: longPressFeedback)
+                .popover(isPresented: $showsModes, attachmentAnchor: .point(UnitPoint(x: 0.5, y: -0.15)), arrowEdge: .bottom) {
+                    VStack(spacing: 4) {
+                        ForEach(CaptureExperienceMode.allCases) { mode in
+                            Button {
+                                pendingMode = mode
+                                showsModes = false
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: mode.systemImage).frame(width: 24)
+                                    Text(mode.title)
+                                    Spacer()
+                                    if mode == captureMode { Image(systemName: "checkmark") }
+                                }
+                                .font(.overline(.subheadline, weight: .semibold))
+                                .foregroundStyle(Color.overlineInk)
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(mode == captureMode ? [.isSelected] : [])
+                        }
+                    }
+                    .padding(8)
+                    .frame(width: 200)
+                    .presentationCompactAdaptation(.popover)
+                    .presentationBackground(.regularMaterial)
+                    .onDisappear {
+                        guard let mode = pendingMode else { return }
+                        pendingMode = nil
+                        if let selectCaptureMode {
+                            selectCaptureMode(mode)
+                        } else {
+                            lastMode = mode.rawValue
+                            selectTab(.capture)
+                        }
+                    }
+                }
+        } else {
+            tabButton
+        }
+    }
+
+    private var tabButton: some View {
         Button {
             selectTab(tab)
         } label: {
@@ -306,18 +417,18 @@ private struct OverlineBottomMenuItem: View {
                 }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(tab.title)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private var tabLabel: some View {
         VStack(spacing: isCompact ? 0 : 5) {
-            Image(systemName: tab.systemImage)
+            Image(systemName: tab == .capture ? captureMode.systemImage : tab.systemImage)
                 .font(.system(size: isCompact ? 21 : 24, weight: .semibold))
                 .frame(height: isCompact ? 24 : 26)
                 .scaleEffect(tab == .community ? 0.9 : 1)
 
-            Text(tab.title)
+            Text(title)
                 .font(.overline(.caption, weight: .bold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -333,21 +444,8 @@ private struct OverlineBottomMenuItem: View {
 
 private struct SelectedTabGlass: View {
     var body: some View {
-        if #available(iOS 26.0, *) {
-            Capsule(style: .continuous)
-                .fill(Color.overlineAccent.opacity(0.08))
-                .glassEffect(
-                    .regular.tint(Color.overlineAccent.opacity(0.16)),
-                    in: Capsule(style: .continuous)
-                )
-                .overlay {
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(0.34), lineWidth: 0.8)
-                }
-        } else {
-            Capsule(style: .continuous)
-                .fill(Color.overlineAccent.opacity(0.16))
-        }
+        Capsule(style: .continuous)
+            .fill(Color.overlineInk.opacity(0.08))
     }
 }
 
@@ -358,35 +456,7 @@ private extension View {
             .frame(maxWidth: isCompact ? nil : .infinity)
     }
 
-    func menuShellOverlay() -> some View {
-        self
-            .overlay {
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.62), lineWidth: 1)
-            }
-            .overlay(alignment: .top) {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.28))
-                    .frame(height: 1)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 1)
-            }
-    }
 
-    func metricCardChrome(color: Color, cornerRadius: CGFloat) -> some View {
-        self
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.48), lineWidth: 1)
-            }
-            .overlay(alignment: .topLeading) {
-                Capsule(style: .continuous)
-                    .fill(color.opacity(0.72))
-                    .frame(width: 28, height: 3)
-                    .padding(.leading, 14)
-                    .padding(.top, 10)
-            }
-    }
 }
 
 enum AppTab: String, CaseIterable, Identifiable, Hashable {
@@ -399,10 +469,10 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .capture: "캡처"
-        case .library: "책장"
-        case .insights: "인사이트"
-        case .community: "커뮤니티"
+        case .capture: String(localized: LocalizedStringResource("캡처", locale: AppLocale.uiLocale))
+        case .library: String(localized: LocalizedStringResource("책장", locale: AppLocale.uiLocale))
+        case .insights: String(localized: LocalizedStringResource("인사이트", locale: AppLocale.uiLocale))
+        case .community: String(localized: LocalizedStringResource("커뮤니티", locale: AppLocale.uiLocale))
         }
     }
 
@@ -426,42 +496,19 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
 }
 
 extension Color {
-    static let overlineCanvas = Color(red: 0.94, green: 0.92, blue: 0.84)
-    static let overlinePaper = Color(red: 0.98, green: 0.95, blue: 0.87)
-    static let overlineInk = Color(red: 0.12, green: 0.12, blue: 0.10)
-    static let overlineMutedInk = Color(red: 0.39, green: 0.37, blue: 0.31)
-    static let overlineAccent = Color(red: 0.16, green: 0.43, blue: 0.45)
+    static let overlineCanvas = Color(uiColor: .systemGroupedBackground)
+    static let overlinePaper = Color(uiColor: .secondarySystemGroupedBackground)
+    static let overlineInk = Color(uiColor: .label)
+    static let overlineMutedInk = Color(uiColor: .secondaryLabel)
+    static let overlineAccent = Color(uiColor: .label)
     static let overlineCoral = Color(red: 0.84, green: 0.31, blue: 0.25)
-    static let overlinePlum = Color(red: 0.34, green: 0.20, blue: 0.40)
+    static let overlinePlum = Color(white: 0.28)
     static let overlineHighlight = Color(red: 1.00, green: 0.83, blue: 0.22)
 }
 
 struct OverlineCanvasBackground: View {
     var body: some View {
         Color.overlineCanvas
-            .overlay {
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.10),
-                        Color.clear,
-                        Color.overlineMutedInk.opacity(0.035)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-            .overlay {
-                OverlineCanvasTexture()
-            }
-    }
-}
-
-private struct OverlineCanvasTexture: View {
-    var body: some View {
-        Image("CanvasTexture")
-            .resizable(resizingMode: .tile)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 
@@ -495,26 +542,7 @@ struct CapsuleMetric: View {
     let color: Color
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            content
-                .background {
-                    RoundedRectangle(cornerRadius: metricCornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
-                }
-                .glassEffect(
-                    .regular.tint(color.opacity(0.10)),
-                    in: .rect(cornerRadius: metricCornerRadius)
-                )
-                .metricCardChrome(color: color, cornerRadius: metricCornerRadius)
-        } else {
-            content
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: metricCornerRadius, style: .continuous))
-                .metricCardChrome(color: color, cornerRadius: metricCornerRadius)
-        }
-    }
-
-    private var metricCornerRadius: CGFloat {
-        18
+        content.overlineContentSurface()
     }
 
     private var content: some View {

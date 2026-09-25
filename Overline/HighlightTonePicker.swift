@@ -3,7 +3,7 @@ import SwiftUI
 struct HighlightTonePicker: View {
     @Binding var selectedTone: StickyTone
 
-    private let tones: [StickyTone] = [.yellow, .rose, .blue, .mint]
+    private let tones: [StickyTone] = [.yellow, .rose, .blue, .mint, .purple]
 
     var body: some View {
         HStack(spacing: 5) {
@@ -27,7 +27,7 @@ struct HighlightTonePicker: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(tone.accessibilityName) 형광펜")
+                .accessibilityLabel(String(format: String(localized: LocalizedStringResource("%@ 형광펜", locale: AppLocale.uiLocale)), tone.accessibilityName))
                 .accessibilityAddTraits(selectedTone == tone ? [.isSelected] : [])
             }
         }
