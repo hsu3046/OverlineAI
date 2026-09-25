@@ -40,6 +40,14 @@ nonisolated struct ReadingWidgetSnapshot: Codable, Equatable, Sendable {
 nonisolated enum QuoteSchedule {
     static let interval: TimeInterval = 5 * 60
     static let timelineDuration: TimeInterval = 6 * 60 * 60
+    static let maximumTimelineCovers = 3
+
+    static func coverBookIDs(in quotes: [WidgetQuote?]) -> [UUID] {
+        var seen = Set<UUID>()
+        return Array(quotes.compactMap { $0?.bookID }
+            .filter { seen.insert($0).inserted }
+            .prefix(maximumTimelineCovers))
+    }
 
     // Stable shuffle: a timeline reload must not change the quote in the same slot.
     static func quote(in quotes: [WidgetQuote], at date: Date) -> WidgetQuote? {
@@ -68,6 +76,23 @@ nonisolated struct WidgetRankingItem: Codable, Sendable, Identifiable {
     let rank: Int
     let title: String
     let author: String
+    var source: String? = nil
+}
+
+nonisolated enum WidgetLanguage {
+    static let preferenceKey = "overline.appLanguage"
+
+    static func resolve(selection: String?, preferred: String) -> String {
+        let requested = selection == "system" ? preferred : (selection ?? preferred)
+        let code = Locale(identifier: requested).language.languageCode?.identifier ?? "ko"
+        return ["ko", "ja", "en"].contains(code) ? code : "ko"
+    }
+
+    static var current: String {
+        let selection = UserDefaults(suiteName: WidgetStore.group)?.string(forKey: preferenceKey)
+        let preferred = Bundle.main.preferredLocalizations.first ?? Locale.preferredLanguages.first ?? "ko"
+        return resolve(selection: selection, preferred: preferred)
+    }
 }
 
 nonisolated struct WidgetRankings: Codable, Sendable {
@@ -143,15 +168,18 @@ nonisolated struct WidgetStore {
         return true
     }
 
-    func readRankings(kind: String) throws -> WidgetRankings {
-        try read(WidgetRankings.self, name: rankingFile(kind))
+    func readRankings(kind: String, language: String) throws -> WidgetRankings {
+        try read(WidgetRankings.self, name: rankingFile(kind, language: language))
     }
 
-    func writeRankings(_ rankings: WidgetRankings, kind: String) throws {
-        try write(rankings, name: rankingFile(kind))
+    func writeRankings(_ rankings: WidgetRankings, kind: String, language: String) throws {
+        try write(rankings, name: rankingFile(kind, language: language))
     }
 
-    private func rankingFile(_ kind: String) -> String { "rankings-\(kind == "loans" ? "loans" : "bestseller").json" }
+    private func rankingFile(_ kind: String, language: String) -> String {
+        let safeLanguage = ["ko", "ja", "en"].contains(language) ? language : "ko"
+        return "rankings-\(safeLanguage)-\(kind == "loans" ? "loans" : "bestseller").json"
+    }
 
     private func read<T: Decodable>(_ type: T.Type, name: String) throws -> T {
         let data = try Data(contentsOf: directory.appendingPathComponent(name))

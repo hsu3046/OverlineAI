@@ -17,6 +17,7 @@ struct OverlineApp: App {
 
     init() {
         AppLocale.migrateLegacyLanguageSelection()
+        AppLocale.syncWidgetLanguage()
     }
 
     var body: some Scene {

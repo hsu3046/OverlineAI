@@ -40,7 +40,7 @@ export function normalizeYes24Books(response: Yes24Response): BookMetadataCandid
   return (response.data?.items ?? []).flatMap((item): BookMetadataCandidate[] => {
     const title = cleanText(item.title);
     if (!title || item.adultYn === "Y") return [];
-    const isbn = [cleanText(item.isbn13), cleanText(item.isbn10)].filter(Boolean).join(" ");
+    const isbn = cleanText(item.isbn13) || cleanText(item.isbn10);
     const detailURL = safeHTTPURL(item.link);
     return [{
       id: `yes24-${item.itemId ?? (isbn || title)}`,

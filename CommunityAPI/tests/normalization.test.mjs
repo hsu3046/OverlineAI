@@ -96,14 +96,16 @@ test("Rakuten Books maps Japanese metadata from flat and wrapped responses", () 
 
 test("YES24 book search maps source, detail link, and ISBN without adult items", () => {
   const books = normalizeYes24Books({ data: { items: [
-    { itemId: 41, title: "책", author: "작가", isbn13: "9781234567890",
+    { itemId: 41, title: "책", author: "작가", isbn13: "9781234567890", isbn10: "1234567890",
       link: "https://www.yes24.com/product/goods/41", adultYn: "N" },
     { itemId: 42, title: "성인 도서", adultYn: "Y" },
+    { itemId: 43, title: "구판", isbn10: "123456789X" },
   ] } });
-  assert.equal(books.length, 1);
+  assert.equal(books.length, 2);
   assert.equal(books[0].source, "yes24");
   assert.equal(books[0].detailURL, "https://www.yes24.com/product/goods/41");
   assert.equal(books[0].isbn, "9781234567890");
+  assert.equal(books[1].isbn, "123456789X");
 });
 
 test("ranking snapshot serves page 2 from one 100-item cache without calling providers", async () => {

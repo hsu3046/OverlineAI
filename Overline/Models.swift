@@ -2639,17 +2639,13 @@ enum SampleData {
 }
 
 extension Date {
-    private static let overlineShortDateFormatter: DateFormatter = {
+    var overlineShortDate: String {
         let formatter = DateFormatter()
-        formatter.locale = .current
+        formatter.locale = AppLocale.uiLocale
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return formatter
-    }()
-
-    var overlineShortDate: String {
-        Self.overlineShortDateFormatter.string(from: self)
+        return formatter.string(from: self)
     }
 }
 

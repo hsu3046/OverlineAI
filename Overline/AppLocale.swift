@@ -14,6 +14,11 @@ nonisolated enum AppLocale {
         guard selection == systemLanguageSelection || supportedLanguageCodes.contains(selection) else { return }
         UserDefaults.standard.set(selection, forKey: selectionKey)
         UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        syncWidgetLanguage()
+    }
+
+    static func syncWidgetLanguage() {
+        UserDefaults(suiteName: WidgetStore.group)?.set(languageSelection, forKey: WidgetLanguage.preferenceKey)
     }
 
     static var languageCode: String {

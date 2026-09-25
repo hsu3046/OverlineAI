@@ -2,6 +2,7 @@ import Foundation
 import OSLog
 import SwiftUI
 import UniformTypeIdentifiers
+import WidgetKit
 
 private let insightMetricsLogger = Logger(subsystem: "vote.aib.bzogak", category: "InsightMetrics")
 
@@ -816,6 +817,7 @@ struct OverlineSettingsSheet: View {
             .navigationTitle("설정")
             .onChange(of: languageSelection) { _, selection in
                 AppLocale.setLanguageSelection(selection)
+                WidgetCenter.shared.reloadTimelines(ofKind: WidgetStore.rankingKind)
             }
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: OverlineSettingsDestination.self) { destination in

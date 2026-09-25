@@ -58,8 +58,11 @@ struct QuoteProvider: AppIntentTimelineProvider {
                 QuoteEntry(date: $0, quote: QuoteSchedule.quote(in: candidates, at: $0), books: Array(snapshot.readingBooks.prefix(2)))
             }
             if family == .systemLarge {
-                let ids = Set(entries.compactMap { $0.quote?.bookID })
-                let covers = await WidgetCoverLoader.images(for: snapshot.books.filter { ids.contains($0.id) })
+                // A timeline can reference 50 books; fetch at most three covers before WidgetKit's deadline.
+                let ids = QuoteSchedule.coverBookIDs(in: entries.map(\.quote))
+                let covers = await WidgetCoverLoader.images(for: ids.compactMap { id in
+                    snapshot.books.first { $0.id == id }
+                })
                 for index in entries.indices {
                     if let id = entries[index].quote?.bookID { entries[index].coverData = covers[id] }
                 }
@@ -283,20 +286,41 @@ enum RankingChoice: String, AppEnum {
     case bestseller, loans
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "순위"
     static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [.bestseller: "베스트셀러", .loans: "도서관 대출 순위"]
-    var title: String { self == .loans ? "도서관 대출 순위" : "베스트셀러" }
-    var source: String { self == .loans ? "도서관 정보나루" : "알라딘" }
+    var title: LocalizedStringResource { self == .loans ? "도서관 대출 순위" : "베스트셀러" }
+}
+
+struct RankingChoiceOptions: DynamicOptionsProvider {
+    func results() async throws -> [RankingChoice] {
+        WidgetLanguage.current == "ja" ? [.bestseller] : [.bestseller, .loans]
+    }
 }
 
 struct RankingConfiguration: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "인기 도서"
-    @Parameter(title: "순위", default: .bestseller) var kind: RankingChoice
+    @Parameter(title: "순위", default: .bestseller, optionsProvider: RankingChoiceOptions()) var kind: RankingChoice
 }
 
 struct RankingEntry: TimelineEntry {
     let date: Date
     let kind: RankingChoice
+    var languageCode = "ko"
     let data: WidgetRankings?
     var failed = false
+
+    var title: LocalizedStringResource {
+        languageCode == "ja" && kind == .bestseller ? "판매순" : kind.title
+    }
+
+    var sourceName: String? {
+        guard let source = data?.items.first?.source else { return nil }
+        return switch source {
+        case "rakuten": "Rakuten Books"
+        case "yes24": "YES24"
+        case "aladin": "알라딘"
+        case "data4library": "도서관 정보나루"
+        default: nil
+        }
+    }
 }
 
 actor RankingLoader {
@@ -306,38 +330,43 @@ actor RankingLoader {
 
     func load(kind: RankingChoice) async -> RankingEntry {
         let now = Date.now
+        let language = WidgetLanguage.current
+        // Japan has no loans feed; an old loans configuration resolves to the sales ranking.
+        let resolvedKind: RankingChoice = language == "ja" ? .bestseller : kind
+        let key = "\(language)-\(resolvedKind.rawValue)"
         let store = try? WidgetStore()
-        let cached = try? store?.readRankings(kind: kind.rawValue)
+        let cached = try? store?.readRankings(kind: resolvedKind.rawValue, language: language)
         if let cached, cached.isFresh(at: now) {
-            return RankingEntry(date: now, kind: kind, data: cached)
+            return RankingEntry(date: now, kind: resolvedKind, languageCode: language, data: cached)
         }
         do {
             let task: Task<WidgetRankings, Error>
-            if let existing = inFlight[kind.rawValue] {
+            if let existing = inFlight[key] {
                 task = existing
             } else {
-                task = Task { try await Self.fetch(kind: kind.rawValue) }
-                inFlight[kind.rawValue] = task
+                task = Task { try await Self.fetch(kind: resolvedKind.rawValue, language: language) }
+                inFlight[key] = task
             }
-            defer { inFlight[kind.rawValue] = nil }
+            defer { inFlight[key] = nil }
             let result = try await task.value
             if let store {
-                do { try store.writeRankings(result, kind: kind.rawValue) }
+                do { try store.writeRankings(result, kind: resolvedKind.rawValue, language: language) }
                 catch { logger.error("Unable to cache widget rankings") }
             }
-            return RankingEntry(date: now, kind: kind, data: result)
+            return RankingEntry(date: now, kind: resolvedKind, languageCode: language, data: result)
         } catch {
             logger.error("Widget ranking refresh failed")
-            return RankingEntry(date: now, kind: kind, data: cached, failed: true)
+            return RankingEntry(date: now, kind: resolvedKind, languageCode: language, data: cached, failed: true)
         }
     }
 
-    private static func fetch(kind: String) async throws -> WidgetRankings {
+    private static func fetch(kind: String, language: String) async throws -> WidgetRankings {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "OverlineAPIBaseURL") as? String,
               let base = URL(string: value), base.scheme == "https",
               var url = URLComponents(url: base.appendingPathComponent("api/v1/rankings"), resolvingAgainstBaseURL: false)
         else { throw URLError(.badURL) }
-        url.queryItems = [URLQueryItem(name: "kind", value: kind), URLQueryItem(name: "category", value: "all")]
+        url.queryItems = [URLQueryItem(name: "kind", value: kind), URLQueryItem(name: "category", value: "all"),
+                          URLQueryItem(name: "language", value: language)]
         guard let endpoint = url.url else { throw URLError(.badURL) }
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = 8
@@ -371,7 +400,7 @@ struct RankingWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(entry.kind.title).font(.subheadline.weight(.semibold))
+                Text(entry.title).font(.subheadline.weight(.semibold))
                 Spacer(minLength: 0)
                 Image(systemName: "chart.bar.xaxis").foregroundStyle(.secondary)
             }
@@ -393,7 +422,7 @@ struct RankingWidgetView: View {
             }
             Spacer(minLength: 0)
             HStack {
-                Text(entry.kind.source)
+                if let sourceName = entry.sourceName { Text(sourceName) }
                 Spacer(minLength: 0)
                 if let date = entry.data?.sourceDate {
                     Text(date, format: .dateTime.month().day())
@@ -403,6 +432,7 @@ struct RankingWidgetView: View {
         }
         .containerBackground(for: .widget) { WidgetPaperBackground() }
         .widgetURL(WidgetLink.rankings(entry.kind.rawValue).url)
+        .environment(\.locale, Locale(identifier: entry.languageCode))
     }
 }
 

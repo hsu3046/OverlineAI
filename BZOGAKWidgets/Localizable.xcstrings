@@ -68,6 +68,22 @@
         }
       }
     },
+    "판매순": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "売れ筋"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Top sellers"
+          }
+        }
+      }
+    },
     "베스트셀러": {
       "localizations": {
         "ja": {

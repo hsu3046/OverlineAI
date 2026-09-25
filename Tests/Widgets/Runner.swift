@@ -35,6 +35,15 @@ import Foundation
         for index in 2..<dates.count { precondition(dates[index].timeIntervalSince(dates[index - 1]) == QuoteSchedule.interval) }
         print("PASS 5-minute intervals with a 6-hour timeline")
 
+        let distinctBooks = (0..<50).map { index in
+            WidgetQuote(id: UUID(), bookID: UUID(), text: "Quote \(index)", bookTitle: "Book",
+                author: "", page: "", tone: "yellow", createdAt: now)
+        }
+        let coverIDs = QuoteSchedule.coverBookIDs(in: distinctBooks.map { Optional($0) })
+        precondition(coverIDs.count == QuoteSchedule.maximumTimelineCovers)
+        precondition(coverIDs == distinctBooks.prefix(3).map(\.bookID))
+        print("PASS timeline cover downloads capped at three books")
+
         for link in [WidgetLink.capture, .book(bookID), .quote(quotes[0].id), .rankings("loans"), .rankings("bestseller")] {
             precondition(WidgetLink(url: link.url) == link)
         }
@@ -54,14 +63,20 @@ import Foundation
         check(try store.readSnapshot().quotes.isEmpty)
         print("PASS atomic snapshot roundtrip and deletion")
 
-        let rankings = WidgetRankings(items: [], fetchedAt: "2026-09-09T00:00:00.123Z", cachedAt: now)
+        precondition(WidgetLanguage.resolve(selection: "ja", preferred: "ko") == "ja")
+        precondition(WidgetLanguage.resolve(selection: "system", preferred: "en-US") == "en")
+        let rankings = WidgetRankings(items: [WidgetRankingItem(id: "1", rank: 1, title: "本", author: "著者", source: "rakuten")],
+            fetchedAt: "2026-09-09T00:00:00.123Z", cachedAt: now)
         precondition(rankings.isFresh(at: now.addingTimeInterval(86399)))
         precondition(!rankings.isFresh(at: now.addingTimeInterval(86400)))
         precondition(!rankings.isFresh(at: now.addingTimeInterval(-1)))
         precondition(rankings.sourceDate != nil)
-        try store.writeRankings(rankings, kind: "loans")
-        check(try store.readRankings(kind: "loans").cachedAt == now)
-        print("PASS daily ranking cache and fractional timestamp")
+        try store.writeRankings(rankings, kind: "bestseller", language: "ja")
+        check(try store.readRankings(kind: "bestseller", language: "ja").cachedAt == now)
+        check(try store.readRankings(kind: "bestseller", language: "ja").items.first?.source == "rakuten")
+        do { _ = try store.readRankings(kind: "bestseller", language: "ko"); fatalError("Language cache leaked") }
+        catch is CocoaError { }
+        print("PASS language-isolated ranking cache, provider source, and fractional timestamp")
 
         try Data("broken".utf8).write(to: directory.appendingPathComponent("reading-v1.json"))
         do { _ = try store.readSnapshot(); fatalError("Corrupt snapshot accepted") }
